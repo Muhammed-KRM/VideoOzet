@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\VideoOzet.Business\VideoOzet.Business.csproj" />
     <ProjectReference Include="..\..\src\VideoOzet.Data\VideoOzet.Data.csproj" />
     <ProjectReference Include="..\..\src\VideoOzet.Worker\VideoOzet.Worker.csproj" />
+    <ProjectReference Include="..\..\src\VideoOzet.API\VideoOzet.API.csproj" />
   </ItemGroup>
 
 </Project>
