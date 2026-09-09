@@ -20,7 +20,11 @@ public class VideoUploadValidator : AbstractValidator<VideoUploadDto>
 
         RuleFor(x => x.FileStream)
             .NotNull().WithMessage("Dosya içeriği boş olamaz.")
-            .Must(fs => fs.Length > 0).WithMessage("Dosya boyutu 0'dan büyük olmalıdır.")
-            .Must(fs => fs.Length <= 1024L * 1024L * 1024L * 2L).WithMessage("Dosya boyutu maksimum 2GB olabilir."); // 2GB
+            .DependentRules(() =>
+            {
+                RuleFor(x => x.FileStream)
+                    .Must(fs => fs.Length > 0).WithMessage("Dosya boyutu 0'dan büyük olmalıdır.")
+                    .Must(fs => fs.Length <= 1024L * 1024L * 1024L * 2L).WithMessage("Dosya boyutu maksimum 2GB olabilir."); // 2GB
+            });
     }
 }

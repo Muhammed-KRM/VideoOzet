@@ -38,7 +38,7 @@ public static class TurkishTextNormalizer
         var sb = new StringBuilder(text.Length);
         foreach (var c in text)
             sb.Append(HomoglyphMap.TryGetValue(c, out var clean) ? clean : c);
-        var result = sb.ToString().ToLowerInvariant();
+        var result = sb.ToString().ToLower(new System.Globalization.CultureInfo("tr-TR"));
 
         // 2. Türkçe rakam kelimelerini sayıya çevir
         foreach (var (word, digit) in NumberWords)
