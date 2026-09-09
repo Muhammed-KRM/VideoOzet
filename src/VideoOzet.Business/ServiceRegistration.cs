@@ -31,6 +31,9 @@ public static class ServiceRegistration
         services.AddScoped<IVideoService, VideoManager>();
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
         services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>();
+        services.AddScoped<IGeminiProvider, VideoOzet.Business.Infrastructure.AI.GeminiSummarizer>();
+        services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
+        services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OpenAIEmbeddingProvider>();
 
         // Redis Registration
         var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6379";

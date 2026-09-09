@@ -11,10 +11,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
 
 // Register Data and Business layers
 builder.Services.AddDataLayer(builder.Configuration.GetConnectionString("DefaultConnection")!);
-builder.Services.AddBusinessLayer(builder.Configuration);
+builder.Services.AddBusinessLayer(builder.Configuration, x => 
+{
+    x.AddConsumer<VideoOzet.API.Consumers.PipelineProgressConsumer>();
+});
 
 var app = builder.Build();
 
@@ -34,5 +38,6 @@ app.UseMiddleware<ApiKeyMiddleware>();
 
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<VideoOzet.API.Hubs.PipelineHub>("/hubs/pipeline");
 
 app.Run();
