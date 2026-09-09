@@ -60,7 +60,7 @@ public class FcmService : IFcmService
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("Authorization", $"key={serverKey}");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"key={serverKey}");
 
             var response = await _httpClient.PostAsync("https://fcm.googleapis.com/fcm/send", content);
             var result = await response.Content.ReadAsStringAsync();
@@ -116,7 +116,7 @@ public class FcmService : IFcmService
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("Authorization", $"key={serverKey}");
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"key={serverKey}");
 
             var response = await _httpClient.PostAsync("https://fcm.googleapis.com/fcm/send", content);
             var result = await response.Content.ReadAsStringAsync();
