@@ -1,3 +1,5 @@
+using System;
+
 namespace VideoOzet.Data.Entities;
 
 public class FunctionLog

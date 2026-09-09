@@ -11,12 +11,11 @@ public static class ServiceRegistration
     {
         // Add DbContext
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(connectionString, o => o.UseVector()));
 
         // Add Repositories
         services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
         services.AddScoped<IUserRepository, UserRepository>();
-        services.AddScoped<IListingRepository, ListingRepository>();
         
         // Diğer repositoryler eklenecek
         // services.AddScoped<IMessageRepository, MessageRepository>();

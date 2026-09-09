@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using VideoOzet.Data.Entities;
 
@@ -9,28 +10,28 @@ public class AppDbContext : DbContext
     {
     }
 
-    public DbSet<User> Users => Set<User>();
-    public DbSet<Listing> Listings => Set<Listing>();
-    public DbSet<ListingImage> ListingImages => Set<ListingImage>();
-    public DbSet<Message> Messages => Set<Message>();
-    public DbSet<Review> Reviews => Set<Review>();
-    public DbSet<TokenTransaction> TokenTransactions => Set<TokenTransaction>();
-    public DbSet<Branch> Branches => Set<Branch>();
-    public DbSet<City> Cities => Set<City>();
-    public DbSet<District> Districts => Set<District>();
-    public DbSet<TokenPackage> TokenPackages => Set<TokenPackage>();
-    public DbSet<VitrinPackage> VitrinPackages => Set<VitrinPackage>();
-    public DbSet<GlobalSetting> GlobalSettings => Set<GlobalSetting>();
-    public DbSet<EndpointLog> EndpointLogs => Set<EndpointLog>();
-    public DbSet<FunctionLog> FunctionLogs => Set<FunctionLog>();
-    public DbSet<ViolationLog> ViolationLogs => Set<ViolationLog>();
-    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<User> Users { get; set; } = null!;
+    public DbSet<Egitim> Egitimler { get; set; } = null!;
+    public DbSet<Video> Videolar { get; set; } = null!;
+    public DbSet<VideoTranscript> VideoTranscripts { get; set; } = null!;
+    public DbSet<VideoSummary> VideoSummaries { get; set; } = null!;
+    public DbSet<ContentRequest> ContentRequests { get; set; } = null!;
+    public DbSet<GeneratedContent> GeneratedContents { get; set; } = null!;
+    public DbSet<QcResult> QcResults { get; set; } = null!;
+    public DbSet<PipelineLog> PipelineLogs { get; set; } = null!;
+    public DbSet<VideoChunkDocument> VideoChunkDocuments { get; set; } = null!;
+    
+    public DbSet<EndpointLog> EndpointLogs { get; set; } = null!;
+    public DbSet<FunctionLog> FunctionLogs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         
-        // Entity framework konfigürasyon dosyalarını (IEntityTypeConfiguration) otomatik tarayıp ekle
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        // Add pgvector extension
+        modelBuilder.HasPostgresExtension("vector");
+
+        // Apply all configurations in this assembly
+        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
     }
 }

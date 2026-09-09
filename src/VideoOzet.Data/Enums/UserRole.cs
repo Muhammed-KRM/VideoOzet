@@ -1,5 +1,4 @@
 namespace VideoOzet.Data.Enums;
-
 public enum UserRole
 {
     User = 0,
