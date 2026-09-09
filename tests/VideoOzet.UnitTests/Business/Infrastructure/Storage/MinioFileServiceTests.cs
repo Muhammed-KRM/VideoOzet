@@ -101,4 +101,61 @@ public class MinioFileServiceTests
         // Assert
         result.Should().Be(expectedUrl);
     }
+
+    [Fact]
+    public async Task UploadFileAsync_ShouldThrowException_WhenMinioFails()
+    {
+        // Arrange
+        var stream = new MemoryStream(new byte[10]);
+        _mockMinioClient.Setup(m => m.BucketExistsAsync(It.IsAny<BucketExistsArgs>(), It.IsAny<CancellationToken>()))
+                        .ThrowsAsync(new Exception("MinIO failure"));
+
+        // Act
+        var act = () => _service.UploadFileAsync(stream, "test.mp4", "video/mp4");
+
+        // Assert
+        await act.Should().ThrowAsync<Exception>().WithMessage("File upload failed");
+    }
+
+    [Fact]
+    public async Task DeleteFileAsync_ShouldThrowException_WhenMinioFails()
+    {
+        // Arrange
+        _mockMinioClient.Setup(m => m.RemoveObjectAsync(It.IsAny<RemoveObjectArgs>(), It.IsAny<CancellationToken>()))
+                        .ThrowsAsync(new Exception("MinIO failure"));
+
+        // Act
+        var act = () => _service.DeleteFileAsync("test.mp4");
+
+        // Assert
+        await act.Should().ThrowAsync<Exception>().WithMessage("File deletion failed");
+    }
+
+    [Fact]
+    public async Task GetFileUrlAsync_ShouldThrowException_WhenMinioFails()
+    {
+        // Arrange
+        _mockMinioClient.Setup(m => m.PresignedGetObjectAsync(It.IsAny<PresignedGetObjectArgs>()))
+                        .ThrowsAsync(new Exception("MinIO failure"));
+
+        // Act
+        var act = () => _service.GetFileUrlAsync("test.mp4");
+
+        // Assert
+        await act.Should().ThrowAsync<Exception>().WithMessage("URL generation failed");
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_ShouldThrowException_WhenMinioFails()
+    {
+        // Arrange
+        _mockMinioClient.Setup(m => m.GetObjectAsync(It.IsAny<GetObjectArgs>(), It.IsAny<CancellationToken>()))
+                        .ThrowsAsync(new Exception("MinIO failure"));
+
+        // Act
+        var act = () => _service.DownloadFileAsync("test.mp4");
+
+        // Assert
+        await act.Should().ThrowAsync<Exception>().WithMessage("File download failed");
+    }
 }

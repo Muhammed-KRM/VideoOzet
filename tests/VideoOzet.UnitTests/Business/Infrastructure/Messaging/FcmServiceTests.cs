@@ -89,4 +89,159 @@ public class FcmServiceTests
                 It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
             Times.Once);
     }
+
+    [Fact]
+    public async Task SendNotificationAsync_ShouldLogWarning_WhenServerKeyIsMissing()
+    {
+        // Arrange
+        var inMemorySettings = new Dictionary<string, string> {
+            {"Firebase:Enabled", "true"},
+            {"Firebase:ServerKey", ""}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        var httpClient = new HttpClient();
+        var service = new FcmService(httpClient, config, _mockLogger.Object);
+
+        // Act
+        await service.SendNotificationAsync("token", "title", "body");
+
+        // Assert
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("ServerKey eksik")),
+                It.IsAny<System.Exception>(),
+                It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SendNotificationAsync_ShouldLogWarning_WhenHttpFails()
+    {
+        // Arrange
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>()
+            )
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.InternalServerError,
+                Content = new StringContent("error")
+            });
+
+        var inMemorySettings = new Dictionary<string, string> {
+            {"Firebase:Enabled", "true"},
+            {"Firebase:ServerKey", "test-key"}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        var httpClient = new HttpClient(mockHandler.Object);
+        var service = new FcmService(httpClient, config, _mockLogger.Object);
+
+        // Act
+        await service.SendNotificationAsync("token", "title", "body");
+
+        // Assert
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("başarısız")),
+                It.IsAny<System.Exception>(),
+                It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SendToTopicAsync_ShouldNotSend_WhenDisabled()
+    {
+        // Arrange
+        var inMemorySettings = new Dictionary<string, string> {
+            {"Firebase:Enabled", "false"}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        var httpClient = new HttpClient();
+        var service = new FcmService(httpClient, config, _mockLogger.Object);
+
+        // Act
+        await service.SendToTopicAsync("news", "title", "body");
+
+        // Assert
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("FCM devre dışı")),
+                It.IsAny<System.Exception>(),
+                It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SendToTopicAsync_ShouldLogWarning_WhenServerKeyIsMissing()
+    {
+        // Arrange
+        var inMemorySettings = new Dictionary<string, string> {
+            {"Firebase:Enabled", "true"},
+            {"Firebase:ServerKey", ""}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        var httpClient = new HttpClient();
+        var service = new FcmService(httpClient, config, _mockLogger.Object);
+
+        // Act
+        await service.SendToTopicAsync("news", "title", "body");
+
+        // Assert
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("ServerKey eksik")),
+                It.IsAny<System.Exception>(),
+                It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SendToTopicAsync_ShouldSend_WhenEnabledAndKeyExists()
+    {
+        // Arrange
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>()
+            )
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("success")
+            });
+
+        var inMemorySettings = new Dictionary<string, string> {
+            {"Firebase:Enabled", "true"},
+            {"Firebase:ServerKey", "test-key"}
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings!).Build();
+        var httpClient = new HttpClient(mockHandler.Object);
+        var service = new FcmService(httpClient, config, _mockLogger.Object);
+
+        // Act
+        await service.SendToTopicAsync("news", "title", "body");
+
+        // Assert
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("topic bildirimi başarıyla gönderildi")),
+                It.IsAny<System.Exception>(),
+                It.IsAny<System.Func<It.IsAnyType, System.Exception?, string>>()),
+            Times.Once);
+    }
 }

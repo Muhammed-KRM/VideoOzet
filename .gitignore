@@ -48,3 +48,6 @@ msbuild.binlog
 # .NET build artifacts (zaten var ama emin olalým)
 [Bb]in/
 [Oo]bj/
+
+TestResults/
+**/TestResults/

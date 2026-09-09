@@ -59,6 +59,18 @@ public class DummyPublishEndpointTests
     }
 
     [Fact]
+    public async Task Publish_WithPipes_ShouldCompleteSuccessfully()
+    {
+        // Act & Assert
+        await _endpoint.Publish("msg", (IPipe<PublishContext<string>>)null!, CancellationToken.None);
+        await _endpoint.Publish("msg", (IPipe<PublishContext>)null!, CancellationToken.None);
+        await _endpoint.Publish((object)"msg", (IPipe<PublishContext>)null!, CancellationToken.None);
+        await _endpoint.Publish((object)"msg", typeof(string), (IPipe<PublishContext>)null!, CancellationToken.None);
+        await _endpoint.Publish<object>((object)new { }, (IPipe<PublishContext<object>>)null!, CancellationToken.None);
+        await _endpoint.Publish<object>((object)new { }, (IPipe<PublishContext>)null!, CancellationToken.None);
+    }
+
+    [Fact]
     public void ConnectPublishObserver_ShouldReturnConnectHandle()
     {
         // Arrange
