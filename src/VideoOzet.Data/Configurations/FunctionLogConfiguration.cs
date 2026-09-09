@@ -21,7 +21,7 @@ public class FunctionLogConfiguration : IEntityTypeConfiguration<FunctionLog>
         builder.Property(f => f.StackTrace).HasColumnName("stack_trace").HasColumnType("text");
         builder.Property(f => f.InputType).HasColumnName("input_type").HasMaxLength(200);
         builder.Property(f => f.InputValue).HasColumnName("input_value").HasColumnType("text");
-        builder.Property(f => f.UserId).HasColumnName("user_id");
+
         builder.Property(f => f.TraceId).HasColumnName("trace_id").HasMaxLength(50);
         builder.Property(f => f.Severity).HasColumnName("severity").HasMaxLength(20).HasDefaultValue("Error").IsRequired();
         builder.Property(f => f.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").HasColumnType("timestamptz").IsRequired();

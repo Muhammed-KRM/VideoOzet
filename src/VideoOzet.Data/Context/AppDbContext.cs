@@ -10,7 +10,7 @@ public class AppDbContext : DbContext
     {
     }
 
-    public DbSet<User> Users { get; set; } = null!;
+
     public DbSet<Egitim> Egitimler { get; set; } = null!;
     public DbSet<Video> Videolar { get; set; } = null!;
     public DbSet<VideoTranscript> VideoTranscripts { get; set; } = null!;

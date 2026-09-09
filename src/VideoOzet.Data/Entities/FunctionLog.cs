@@ -14,7 +14,7 @@ public class FunctionLog
     public string? StackTrace { get; set; }
     public string? InputType { get; set; }
     public string? InputValue { get; set; }
-    public Guid? UserId { get; set; }
+
     public string? TraceId { get; set; }
     public string Severity { get; set; } = "Error";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

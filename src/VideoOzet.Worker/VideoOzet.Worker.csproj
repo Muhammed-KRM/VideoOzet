@@ -9,12 +9,13 @@
 
   <ItemGroup>
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.3.4" />
+    <PackageReference Include="FFMpegCore" Version="5.4.0" />
     <PackageReference Include="FirebaseAdmin" Version="3.5.0" />
     <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.6" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
     <PackageReference Include="OllamaSharp" Version="5.4.25" />
     <PackageReference Include="Quartz" Version="3.17.1" />
-    <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
+    <PackageReference Include="StackExchange.Redis" Version="3.1.31" />
   </ItemGroup>
 
   <ItemGroup>

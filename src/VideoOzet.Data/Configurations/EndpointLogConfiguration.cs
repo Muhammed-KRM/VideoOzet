@@ -19,8 +19,7 @@ public class EndpointLogConfiguration : IEntityTypeConfiguration<EndpointLog>
         builder.Property(e => e.RequestBody).HasColumnName("request_body").HasColumnType("text");
         builder.Property(e => e.ResponseBody).HasColumnName("response_body").HasColumnType("text");
         builder.Property(e => e.StatusCode).HasColumnName("status_code").IsRequired();
-        builder.Property(e => e.UserId).HasColumnName("user_id");
-        builder.Property(e => e.UserEmail).HasColumnName("user_email").HasMaxLength(200);
+
         builder.Property(e => e.IpAddress).HasColumnName("ip_address").HasMaxLength(45);
         builder.Property(e => e.UserAgent).HasColumnName("user_agent").HasMaxLength(500);
         builder.Property(e => e.DurationMs).HasColumnName("duration_ms").IsRequired();
