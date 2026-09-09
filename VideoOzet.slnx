@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VideoOzet.API/VideoOzet.API.csproj" />
+    <Project Path="src/VideoOzet.Business/VideoOzet.Business.csproj" />
+    <Project Path="src/VideoOzet.Data/VideoOzet.Data.csproj" />
+    <Project Path="src/VideoOzet.Worker/VideoOzet.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VideoOzet.IntegrationTests/VideoOzet.IntegrationTests.csproj" />
+    <Project Path="tests/VideoOzet.UnitTests/VideoOzet.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,6 @@
+@OzelDers.API_HostAddress = http://localhost:5074
+
+GET {{OzelDers.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

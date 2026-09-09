@@ -1,0 +1,643 @@
+﻿OzelDers - UI Performans ve Sorun Analizi Dokumani
+Tarih: Nisan 2026
+==================================================
+
+MIMARI OZET (Bu dokumani okumadan once bilinmesi gerekenler)
+------------------------------------------------------------
+Projede 3 UI projesi var:
+
+1. OzelDers.Web  (Blazor Web App - .NET 10)
+   - Render modu: InteractiveServerRenderMode(prerender: false)
+   - Her UI etkilesimi SignalR uzerinden sunucuya gidip geliyor
+   - Auth: ProtectedLocalStorage (sifrelenmis, tarayici)
+   - Token handler: AuthTokenHandler -> ProtectedLocalStorage okur -> Bearer header ekler
+   - API iletisimi: HttpClient -> OzelDers.API (REST)
+
+2. OzelDers.App  (MAUI Blazor Hybrid - .NET 10)
+   - Render modu: BlazorWebView (cihazda local, SignalR YOK)
+   - Hedef platformlar: Android (min API 24), iOS (min 15.0), Windows, macOS
+   - Auth: Preferences.Default (platform native storage)
+   - Token handler: MauiAuthTokenHandler -> Preferences okur -> Bearer header ekler
+   - API iletisimi: HttpClient -> OzelDers.API (REST)
+   - index.html'de body { background-attachment: scroll !important; } duzeltmesi var
+
+3. OzelDers.SharedUI  (Razor Class Library - RCL)
+   - Tum sayfalar ve bilesenlerin bulundugu merkezi proje
+   - Her iki host (Web ve App) bu projeyi referans alir
+   - ApiServices klasoru: IListingService, IAuthService vb. -> HttpClient ile API cagrisi
+   - CSS: variables.css, reset.css, animations.css, utilities.css, app.css
+   - JS: interop.js (SweetAlert2 wrapper, scrollToTop)
+   - Dis bagimliliklar: SweetAlert2 (CDN), Google Fonts (CDN)
+
+Veri akisi her iki platformda ayni:
+  Razor sayfasi -> IXxxService (inject) -> XxxApiService (HttpClient) -> OzelDers.API -> PostgreSQL/ES/Redis
+
+
+==================================================
+BOLUM 1: MEVCUT SORUNLAR LISTESI
+==================================================
+
+Bu bolumde projede tespit edilen sorunlar platforma gore ayri ayri listelenmistir.
+Her sorun icin: sorunun ne oldugu, neden kaynaklandigi ve hangi dosyada oldugu yazilmistir.
+
+--------------------------------------------------
+WEB (OzelDers.Web) SORUNLARI
+--------------------------------------------------
+
+SORUN W-1: background-attachment: fixed - Performans Sorunu
+  Nerede: src/OzelDers.SharedUI/wwwroot/css/app.css - body blogu
+  Mevcut kod: background-attachment: fixed;
+  Ne oluyor: Tarayici her scroll hareketinde tum arka plani yeniden boyuyor (repaint).
+             Bu ozellik GPU katmanlamasi ile uyumsuz, her karede CPU hesaplamasi gerektirir.
+             Mobil tarayicilarda (Chrome Android, Safari iOS) bu ozellik ya hic desteklenmez
+             ya da ciddi performans dusumune yol acar. Scroll sirasinda sayfa titrer veya takilir.
+  Arastirma: CSS backdrop-filter ve background-attachment:fixed mobil performans sorunlari
+             genis capli olarak raporlanmistir. Chrome DevTools'ta "Scrolling performance issues"
+             uyarisi verir. App projesinde index.html'de scroll !important ile duzeltilmis
+             ama Web projesinde hala fixed duruyor.
+  Etki: Web - Orta/Yuksek | App - Dusuk (zaten duzeltilmis)
+
+SORUN W-2: SignalR Baglanti Kopuklugu - Kullanici Deneyimi
+  Nerede: OzelDers.Web - InteractiveServerRenderMode mimarisi
+  Ne oluyor: Blazor InteractiveServer modunda tum UI etkilesimleri WebSocket (SignalR) uzerinden
+             sunucuya gidip geliyor. Baglanti koptuğunda (ag degisimi, uyku modu, zayif sinyal)
+             kullanici "Reconnecting..." ekrani goruyor ve sayfa donuyor.
+             GitHub dotnet/aspnetcore issue #46950'de belgelenmis: "Blazor Server has higher
+             requirements for network bandwidth and lower latency than MVC or Razor Pages."
+             Hacker News'te de yaygin sikayet: "not very good at re-establishing the WebSocket
+             connection if it fails, giving a poor impression to the user."
+  Etki: Web - Yuksek | App - Yok (SignalR kullanmiyor)
+
+SORUN W-3: Ilk Sayfa Yuklemesi Bos Ekran
+  Nerede: OzelDers.Web - App.razor
+  Mevcut kod: @rendermode="new InteractiveServerRenderMode(prerender: false)"
+  Ne oluyor: prerender: false oldugu icin sunucu onceden HTML render etmiyor.
+             Blazor.web.js yuklenmeden sayfa tamamen bos gorunuyor.
+             Yavaş baglantilar veya sunucu mesgul oldugunda kullanici bos beyaz ekran goruyor.
+             Bu SEO icin de kotu: Google bot sayfayi bos gorebilir.
+  Etki: Web - Orta | App - Yok
+
+SORUN W-4: Liste Render'larinda @key Direktifi Eksik
+  Nerede: src/OzelDers.SharedUI/Pages/Search.razor, Home.razor, MyListings.razor
+  Mevcut kod: @foreach (var listing in result.Items) { <ListingCard Listing="listing" /> }
+  Ne oluyor: Blazor liste render ederken hangi elemanlarin degistigini anlamak icin diff algoritması
+             kullanir. @key olmadan Blazor her eleman icin pozisyon bazli karsilastirma yapar.
+             Liste siralama degistiginde veya eleman eklenip cikarildiginda gereksiz DOM guncelleme
+             yapilir. InteractiveServer modunda bu her seferinde SignalR uzerinden gider.
+             Microsoft resmi dokumantasyonu: "Use @key to control element and component preservation."
+  Etki: Web - Orta | App - Dusuk
+
+SORUN W-5: StateHasChanged Gereksiz Cagrilari
+  Nerede: Bircok sayfada isLoading flag'i degistirilirken
+  Ne oluyor: isLoading = true; -> StateHasChanged tetiklenir -> SignalR -> DOM update
+             isLoading = false; -> StateHasChanged tetiklenir -> SignalR -> DOM update
+             Bazi sayfalarda bu zincir gereksiz yere birden fazla kez tetikleniyor.
+             Her tetiklenme InteractiveServer modunda bir SignalR round-trip demek.
+  Etki: Web - Orta | App - Dusuk
+
+SORUN W-6: SweetAlert2 CDN Bagimliligi
+  Nerede: src/OzelDers.Web/Components/App.razor
+  Mevcut kod: <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  Ne oluyor: CDN erisimi olmadigi durumlarda (kurumsal ag, CDN kesintisi) SweetAlert2 yuklenmez.
+             interop.js'de typeof Swal === 'undefined' kontrolu var, fallback alert() kullaniliyor.
+             Ama bu kullanici deneyimini bozuyor. Ayrica CDN'den yukleme ilk sayfa acilisini
+             yavaslatir (DNS lookup + TCP + TLS + download).
+  Etki: Web - Dusuk/Orta | App - Yuksek (offline/zayif ag)
+
+SORUN W-7: Google Fonts CDN Bagimliligi
+  Nerede: src/OzelDers.Web/Components/App.razor ve App/wwwroot/index.html
+  Mevcut kod: <link href="https://fonts.googleapis.com/css2?family=Inter...">
+  Ne oluyor: Fonts CDN'den geliyor. Yavaş baglantilar veya CDN kesintisinde fontlar yuklenmez,
+             tarayici fallback font kullanir (sans-serif). Gorsel tutarsizlik olusur.
+             Ayrica her sayfa acilisinda fonts.googleapis.com'a DNS sorgusu gidiyor.
+             App projesi icin daha kritik: offline veya zayif ag durumunda uygulama
+             yanlis fontlarla acilir.
+  Etki: Web - Dusuk | App - Orta/Yuksek
+
+SORUN W-8: Glassmorphism backdrop-filter Performansi
+  Nerede: src/OzelDers.SharedUI/wwwroot/css/app.css - .glass ve .glass-dark siniflari
+  Mevcut kod: backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  Ne oluyor: backdrop-filter: blur() GPU yogun bir islem. Her piksel icin Gaussian blur
+             hesaplamasi yapilir. Dusuk GPU'lu cihazlarda (eski Android telefonlar, dusuk
+             segmentli Windows laptoplar) bu ciddi FPS dusumune yol acar.
+             Arastirma: "CSS blur filter performance - 10-20 FPS drop" (Stack Overflow, 2024).
+             Navbar'da, login kartinda, CTA bolumunde kullaniliyor.
+             Mobil cihazlarda scroll sirasinda titreme/takilma yasanabilir.
+  Etki: Web - Orta | App - Yuksek (dusuk GPU'lu Android cihazlar)
+
+SORUN W-9: touch-action: manipulation Eksik
+  Nerede: src/OzelDers.SharedUI/wwwroot/css/reset.css veya utilities.css
+  Ne oluyor: Mobil tarayicilarda cift-tiklamayi zoom olarak yorumlayan 300ms gecikme var.
+             touch-action: manipulation bu gecikmeyi kaldiriyor.
+             Olmadigi durumda her buton tiklamasi 300ms gecikmeli hissettiriyor.
+             Bu "native uygulama gibi hissettirmiyor" sikayetinin en buyuk nedenlerinden biri.
+  Etki: Web - Orta | App - Yuksek
+
+SORUN W-10: Animasyonlarda will-change Eksik
+  Nerede: src/OzelDers.SharedUI/wwwroot/css/utilities.css - .card:hover
+  Mevcut kod: .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); }
+  Ne oluyor: Hover animasyonu baslamadan once tarayici GPU katmani olusturmuyor.
+             will-change: transform eklenirse tarayici onceden GPU katmani hazirlar,
+             hover gecisi aninda ve akici olur. Olmadigi durumda ilk hover'da kisa bir
+             "jank" (titreme) yasanabilir, ozellikle dusuk GPU'lu cihazlarda.
+  Etki: Web - Dusuk/Orta | App - Orta
+
+SORUN W-11: Uzun Listelerde Virtualization Eksik
+  Nerede: src/OzelDers.SharedUI/Pages/Search.razor, MyListings.razor
+  Mevcut kod: @foreach (var listing in result.Items) { <ListingCard .../> }
+  Ne oluyor: Tum ilanlar ayni anda DOM'a render ediliyor. 50-100 ilan oldugunda
+             hem ilk render hem de scroll performansi duser.
+             Blazor'un built-in <Virtualize> bileseni sadece gorunen elemanlari render eder.
+             InteractiveServer modunda bu ozellikle onemli: daha az DOM = daha az SignalR diff.
+  Etki: Web - Yuksek (cok ilan oldugunda) | App - Orta
+
+SORUN W-12: Gorsel Lazy Loading Eksik
+  Nerede: src/OzelDers.SharedUI/Components/ListingCard.razor
+  Mevcut kod: <img src="@Listing.OwnerImageUrl" alt="@Listing.OwnerName" />
+  Ne oluyor: Tum ilan fotograflari sayfa acildiginda ayni anda yukleniyor.
+             loading="lazy" attribute'u eklenirse tarayici sadece gorunen fotograflari yukler.
+             Bu hem ilk sayfa yuklemesini hizlandirir hem de gereksiz bant genisligi tuketimini onler.
+  Etki: Web - Orta | App - Orta
+
+
+--------------------------------------------------
+APP (OzelDers.App - MAUI Blazor Hybrid) SORUNLARI
+--------------------------------------------------
+
+SORUN A-1: API Adresi Hardcoded - localhost:5001
+  Nerede: src/OzelDers.App/MauiProgram.cs
+  Mevcut kod: return new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5001/") };
+  Ne oluyor: Android emulatorunde host makineye erisim localhost ile degil 10.0.2.2 ile yapilir.
+             Gercek Android cihazda ise makinenin yerel IP adresi (192.168.x.x) olmali.
+             iOS simulatorde localhost calisir ama gercek iPhone'da cihazin IP'si gerekir.
+             Simdi Windows'ta calistiginiz icin sorun yok, ama Android'e gecince uygulama
+             API'ye baglanamayacak.
+  Etki: App - Kritik (Android/iOS deploy icin) | Web - Yok
+
+SORUN A-2: SweetAlert2 CDN - Offline/Zayif Ag
+  Nerede: src/OzelDers.App/wwwroot/index.html
+  Mevcut kod: <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  Ne oluyor: MAUI uygulamasi bir "uygulama" gibi davranmali, internet olmadan da temel
+             islevleri calisabilmeli. SweetAlert2 CDN'den geldiginde:
+             - Ucak modu veya zayif ag: SweetAlert2 yuklenmez, tum showSwal cagrisi fallback alert() kullanir
+             - Ilk acilista CDN'e istek gider, bu gecikme yaratir
+             - interop.js'de typeof Swal === 'undefined' kontrolu var ama alert() kotu UX
+  Etki: App - Yuksek | Web - Orta
+
+SORUN A-3: Google Fonts CDN - Offline/Zayif Ag
+  Nerede: src/OzelDers.App/wwwroot/index.html
+  Mevcut kod: <link href="https://fonts.googleapis.com/css2?family=Inter...">
+  Ne oluyor: Uygulama her acildiginda Google Fonts CDN'e istek atiyor.
+             Zayif ag veya offline durumda fontlar yuklenmez, sistem fontu kullanilir.
+             Gorsel tutarsizlik olusur. Uygulama "bitmemis" gorunur.
+             Cozum: Fontlari Resources/Fonts/ klasorune koyup @font-face ile tanimlamak.
+             MAUI zaten font dosyalarini bundle'a dahil ediyor (MauiFont Include="Resources/Fonts/*")
+  Etki: App - Orta/Yuksek | Web - Dusuk
+
+SORUN A-4: BlazorWebView Android Donma Sorunu (Bilinen Bug)
+  Nerede: MAUI mimarisinin kendisi
+  Ne oluyor: GitHub dotnet/maui issue #10002 ve #9882'de belgelenmis:
+             "Blazor Hybrid app started freezing/being unresponsive with latest Android WebView"
+             Android WebView surumu guncellendiginde BlazorWebView donabiliyor.
+             Bu .NET MAUI'nin bilinen bir sorunu, .NET surumleriyle iyilestirilmeye devam ediyor.
+             .NET 10 ile buyuk olcude duzeltilmis ama tamamen cozmemis.
+             Cozum: .NET ve MAUI surumlerini guncel tutmak, release modda derlemek.
+  Etki: App - Orta (Android) | Web - Yok
+
+SORUN A-5: Touch Event Overload - UI Yanit Vermeme
+  Nerede: MAUI BlazorWebView mimarisi
+  Ne oluyor: GitHub dotnet/maui issue #25612:
+             "Blazor Maui touch events overload make UI unresponsive during many touch events"
+             Hizli scroll veya cok dokunma hareketi sirasinda UI yanit vermeyebiliyor.
+             Bu ozellikle ilan listesi sayfasinda (Search.razor, MyListings.razor) yasanabilir.
+             Cozum: Virtualization kullanmak (daha az DOM = daha az touch event isleme)
+             ve touch-action: manipulation CSS kurali.
+  Etki: App - Orta | Web - Dusuk
+
+SORUN A-6: Debug Modda Cok Yavas
+  Nerede: MAUI Android debug build
+  Ne oluyor: GitHub dotnet/maui issue #20739:
+             "In debug the app is way way slower than in release"
+             Android debug modda uygulama cok yavas calisir, bu normal.
+             Release modda derlendiginde performans dramatik sekilde artar.
+             Gelistirme sirasinda "uygulama yavas" diye yanlis sonuca varilabilir.
+  Etki: App - Yuksek (gelistirme algisi) | Web - Yok
+
+SORUN A-7: Glassmorphism Dusuk Cihazlarda
+  Nerede: src/OzelDers.SharedUI/wwwroot/css/app.css - .glass sinifi
+  Ne oluyor: backdrop-filter: blur(12px) dusuk GPU'lu Android cihazlarda (orta/dusuk segment)
+             ciddi FPS dusumune yol acar. Navbar, login karti, CTA bolumu bu sinifi kullaniyor.
+             Scroll sirasinda titreme yasanabilir.
+             Cozum: Mobil icin blur degerini dusur veya tamamen kapat.
+  Etki: App - Yuksek (dusuk cihazlar) | Web - Orta
+
+SORUN A-8: MauiUserSession Sinifi Ayri Dosyada Tanimli
+  Nerede: src/OzelDers.App/States/MauiAuthenticationStateProvider.cs
+  Ne oluyor: MauiUserSession sinifi MauiAuthenticationStateProvider.cs dosyasinin sonunda tanimli.
+             MauiAuthTokenHandler.cs bu sinifi kullanmak icin ayni namespace'e bagimli.
+             Eger ileride bu sinif degistirilirse iki yerde guncelleme gerekebilir.
+             Kucuk bir mimari sorun, kritik degil ama duzeltilmeli.
+  Etki: App - Dusuk (kod kalitesi) | Web - Yok
+
+==================================================
+BOLUM 2: COZUM PLANI - HER SORUN ICIN ADIM ADIM
+==================================================
+
+COZUM C-1: background-attachment: fixed Duzeltme
+  Sorun: W-1
+  Etki: Web scroll performansi iyilesir, mobil tarayicilarda titreme kalkar
+  Dosya: src/OzelDers.SharedUI/wwwroot/css/app.css
+  Yapilacak degisiklik:
+    ONCEKI:
+      body {
+          background-attachment: fixed;
+      }
+    SONRAKI:
+      body {
+          background-attachment: scroll;
+      }
+      /* Sadece guclu masaustu tarayicilarda fixed kullan */
+      @media (min-width: 1024px) and (hover: hover) {
+          body {
+              background-attachment: fixed;
+          }
+      }
+  Not: App projesinde index.html'de zaten scroll !important var, bu degisiklik
+       Web icin gecerli. SharedUI'da yapildiginda her iki platform etkilenir.
+  Sure: 5 dakika
+
+COZUM C-2: touch-action: manipulation Ekleme
+  Sorun: W-9
+  Etki: Mobil 300ms tiklama gecikmesi kalkar, native hissi artar
+  Dosya: src/OzelDers.SharedUI/wwwroot/css/reset.css
+  Yapilacak degisiklik:
+    html {
+        scroll-behavior: smooth;
+        -webkit-text-size-adjust: 100%;
+        touch-action: manipulation;  /* BU SATIRI EKLE */
+    }
+  Sure: 2 dakika
+
+COZUM C-3: will-change Ekleme - Kart Hover Animasyonlari
+  Sorun: W-10
+  Etki: Hover animasyonlari daha akici, GPU onceden hazirlanir
+  Dosya: src/OzelDers.SharedUI/wwwroot/css/utilities.css
+  Yapilacak degisiklik:
+    .card {
+        will-change: transform;  /* BU SATIRI EKLE */
+        transition: all var(--transition-normal);
+        ...
+    }
+  Not: will-change cok fazla elemana eklenmemeli, sadece animasyonlu kartlara.
+  Sure: 5 dakika
+
+C-3 DUZELTME - will-change DIKKATLI KULLANILMALI:
+  Dokumanda ".card" sinifina ekle deniyor ama bu YANLIS.
+  Projede .card sinifi cok fazla yerde kullaniliyor (her kart, her panel, her form).
+  will-change cok fazla elemana eklenirse GPU bellek tuketimi artar, ters etki yaratir.
+  DOGRU KULLANIM: Sadece hover animasyonu olan ve kullanicinin sik etkilestigi
+  spesifik kartlara ekle. Ornegin:
+    .listing-card { will-change: transform; }
+  Genel .card sinifina EKLEME.
+
+
+COZUM C-4: Gorsel Lazy Loading
+  Sorun: W-12
+  Etki: Ilk sayfa yuklemesi hizlanir, gereksiz bant genisligi azalir
+  Dosya: src/OzelDers.SharedUI/Components/ListingCard.razor
+  Yapilacak degisiklik:
+    ONCEKI:
+      <img src="@Listing.OwnerImageUrl" alt="@Listing.OwnerName" />
+    SONRAKI:
+      <img src="@Listing.OwnerImageUrl" alt="@Listing.OwnerName" loading="lazy" />
+  Sure: 5 dakika
+
+COZUM C-5: @key Direktifi - Liste Render Optimizasyonu
+  Sorun: W-4
+  Etki: Blazor diff algoritmasi daha az is yapar, SignalR trafigi azalir
+  Dosya: src/OzelDers.SharedUI/Pages/Search.razor, Home.razor, MyListings.razor
+  Yapilacak degisiklik:
+    ONCEKI:
+      @foreach (var listing in result.Items)
+      {
+          <ListingCard Listing="listing" />
+      }
+    SONRAKI:
+      @foreach (var listing in result.Items)
+      {
+          <ListingCard @key="listing.Id" Listing="listing" />
+      }
+  Sure: 15 dakika (tum sayfalarda)
+
+COZUM C-6: Virtualization - Uzun Listeler
+  Sorun: W-11
+  Etki: 50+ ilan oldugunda sayfa performansi dramatik artar
+  Dosya: src/OzelDers.SharedUI/Pages/Search.razor
+  Yapilacak degisiklik:
+    ONCEKI:
+      <div class="grid grid-3">
+          @foreach (var listing in result.Items)
+          {
+              <ListingCard Listing="listing" />
+          }
+      </div>
+    SONRAKI:
+      <div class="grid grid-3">
+          <Virtualize Items="result.Items" Context="listing">
+              <ListingCard @key="listing.Id" Listing="listing" />
+          </Virtualize>
+      </div>
+  Not: Virtualize grid layout ile tam uyumlu olmayabilir, test gerektirir.
+       Alternatif: Sayfalama (pagination) zaten var, sayfa basina 12 ilan yeterli.
+  Sure: 30 dakika
+
+C-6 DUZELTME - Virtualize YAPMA:
+  Dokumanda Virtualize onerilmis ama projede UYGULANMAMALI.
+  Neden: Search.razor'da "grid grid-3" CSS sinifi 3 kolonlu grid kullaniyor.
+  <Virtualize> her elemani ayri bir container'a sariyor, bu grid layout'u bozuyor.
+  Ayrica Search.razor'da zaten PageSize=12 ile sayfalama var, bu yeterli.
+  Virtualize yerine mevcut pagination sistemi kullanilmaya devam edilmeli.
+
+
+COZUM C-7: Glassmorphism Mobil Optimizasyonu
+  Sorun: W-8, A-7
+  Etki: Dusuk GPU'lu mobil cihazlarda scroll akiciligi artar
+  Dosya: src/OzelDers.SharedUI/wwwroot/css/app.css
+  Yapilacak degisiklik:
+    .glass {
+        background: var(--color-glass-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        box-shadow: var(--shadow-glass);
+    }
+    /* Mobilde blur'u azalt veya kapat */
+    @media (max-width: 768px) {
+        .glass {
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .glass-dark {
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+    }
+  Sure: 10 dakika
+
+COZUM C-8: SweetAlert2 Local'e Alma
+  Sorun: W-6, A-2
+  Etki: CDN bagimliligi kalkar, offline/zayif ag durumunda calisir
+  Adimlar:
+    1. https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js indir
+    2. src/OzelDers.SharedUI/wwwroot/lib/sweetalert2/ klasorune koy
+    3. App.razor'da CDN linkini kaldir, local linki ekle:
+       <script src="_content/OzelDers.SharedUI/lib/sweetalert2/sweetalert2.all.min.js"></script>
+    4. App/wwwroot/index.html'de ayni degisikligi yap
+    5. CSS icin de ayni islem: sweetalert2.min.css
+  Sure: 20 dakika
+
+COZUM C-9: Google Fonts Local'e Alma (App icin)
+  Sorun: A-3
+  Etki: App offline/zayif ag durumunda dogru fontlarla acilir
+  Adimlar:
+    1. Inter ve Outfit fontlarini Google Fonts'tan indir (woff2 formati)
+    2. src/OzelDers.App/Resources/Fonts/ klasorune koy
+    3. MauiProgram.cs'de font kaydi:
+       fonts.AddFont("Inter-Regular.ttf", "Inter");
+       fonts.AddFont("Outfit-Bold.ttf", "Outfit");
+    4. App/wwwroot/index.html'den Google Fonts CDN linkini kaldir
+    5. App/wwwroot/app.css'e @font-face ekle
+  Not: Web projesi icin CDN kullanmaya devam edilebilir (SEO ve cache avantaji var)
+  Sure: 30 dakika
+
+COZUM C-10: API Adresi Konfigurasyonu (App icin)
+  Sorun: A-1
+  Etki: Android emulator ve gercek cihazda API baglantisi calisir
+  Dosya: src/OzelDers.App/MauiProgram.cs
+  Yapilacak degisiklik:
+    ONCEKI:
+      return new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5001/") };
+    SONRAKI:
+      #if ANDROID
+          var apiBase = "http://10.0.2.2:5001/";  // Android emulator -> host makine
+      #elif IOS
+          var apiBase = "http://localhost:5001/";   // iOS simulator
+      #else
+          var apiBase = "http://localhost:5001/";   // Windows
+      #endif
+      return new HttpClient(handler) { BaseAddress = new Uri(apiBase) };
+  Not: Gercek cihaz testi icin appsettings.json veya environment variable kullanilmali.
+  Sure: 15 dakika
+
+COZUM C-11: SignalR Baglanti Kopuklugu - Kullanici Bildirimi
+  Sorun: W-2
+  Etki: Baglanti koptuğunda kullanici ne yapacagini bilir, paniklemez
+  Dosya: src/OzelDers.Web/Components/App.razor
+  Yapilacak degisiklik:
+    blazor-error-ui div'ini daha kullanici dostu hale getir:
+    <div id="blazor-error-ui" data-nosnippet>
+        Baglanti kesildi. Lutfen sayfayi yenileyin.
+        <a href="." class="reload">Yenile</a>
+        <span class="dismiss">x</span>
+    </div>
+    Ve CSS ile daha belirgin goster.
+  Not: Uzun vadeli cozum: kritik sayfalar icin SSR moduna gecmek (prerender: true)
+  Sure: 15 dakika
+
+COZUM C-12: Release Modda Derleme (App icin)
+  Sorun: A-6
+  Etki: Android performansi dramatik artar, gercek performansi gorursunuz
+  Komut:
+    dotnet publish src/OzelDers.App -f net10.0-android -c Release
+  Not: Debug modda test etmeyin, her zaman release modda test edin.
+  Sure: Build suresi (5-10 dakika)
+
+==================================================
+BOLUM 3: ONCELIK SIRASI VE TAHMINI SURE
+==================================================
+
+HEMEN YAPILABILIR (Toplam ~45 dakika):
+  1. C-2: touch-action: manipulation (2 dk) - En buyuk mobil etki
+  2. C-1: background-attachment scroll (5 dk) - Web scroll duzeltme
+  3. C-3: will-change kart hover (5 dk) - Animasyon akiciligi
+  4. C-4: loading="lazy" gorseller (5 dk) - Sayfa yuklemesi
+  5. C-5: @key direktifi listeler (15 dk) - SignalR optimizasyon
+  6. C-11: Baglanti kopuklugu bildirimi (15 dk) - UX iyilestirme
+
+KISA VADELI (Toplam ~1.5 saat):
+  7. C-7: Glassmorphism mobil optimizasyon (10 dk)
+  8. C-8: SweetAlert2 local (20 dk)
+  9. C-10: API adresi konfigurasyonu (15 dk) - Android deploy icin kritik
+  10. C-6: Virtualization (30 dk)
+
+ORTA VADELI (Toplam ~1 saat):
+  11. C-9: Google Fonts local - App (30 dk)
+  12. C-12: Release mod test aliskanligi (5 dk)
+
+==================================================
+BOLUM 4: YAPILMAMASI GEREKENLER
+==================================================
+
+1. MudBlazor veya Radzen gibi UI kutuphanesi EKLEME
+   Neden: Projenin kendi design system'i var (variables.css, utilities.css).
+   Bu kutuphaneler kendi CSS'lerini getiriyor, cakisma ve siskinlik yaratir.
+   Ayrica bazi Blazor UI kutuphaneleri BlazorWebView ile uyumsuz (FluentUI issue #2779).
+
+2. MassTransit v9'a GECME
+   Neden: Ucretli lisans. v8.3.6 kullanilmaya devam edilmeli.
+
+3. Blazor WASM'a GECME
+   Neden: Mevcut mimari InteractiveServer + MAUI Hybrid. WASM'a gecmek
+   tum mimaride buyuk degisiklik gerektirir ve SEO avantaji saglamaz.
+   Ayrica WASM mobil tarayicilarda cok yavas (GitHub issue #43090).
+
+4. prerender: true YAPMA (dikkatli olunmali)
+   Neden: prerender: true yapilirsa ProtectedLocalStorage prerendering sirasinda
+   erisilemedigi icin auth state bos gelir. Mevcut kod prerender: false ile
+   bu sorunu cozmus. Degistirmeden once dikkatli test gerekir.
+
+==================================================
+BOLUM 5: IZLEME VE TEST
+==================================================
+
+Web performansini olcmek icin:
+  - Chrome DevTools -> Performance tab -> Record scroll/interaction
+  - Lighthouse audit (Performance skoru)
+  - Network tab -> CDN isteklerini izle
+
+App performansini olcmek icin:
+  - Her zaman Release modda test et (Debug cok yavas)
+  - Gercek Android cihazda test et (emulator yaniltici olabilir)
+  - MauiErrorLogs.txt dosyasini izle (D:\OZELDERS\MauiErrorLogs.txt)
+  - App.xaml.cs'de FirstChanceException handler zaten var, loglar oraya yaziliyor
+
+SignalR durumunu izlemek icin:
+  - Tarayici Console -> "Blazor" mesajlarini izle
+  - Network tab -> WS (WebSocket) baglantisini izle
+  - Baglanti kopuklugunda otomatik yeniden baglanti suresi
+
+
+==================================================
+DOGRULAMA NOTU (Sonradan Eklendi)
+==================================================
+
+C-3 DUZELTME - will-change DIKKATLI KULLANILMALI:
+  Dokumanda ".card" sinifina ekle deniyor ama bu YANLIS.
+  Projede .card sinifi cok fazla yerde kullaniliyor (her kart, her panel, her form).
+  will-change cok fazla elemana eklenirse GPU bellek tuketimi artar, ters etki yaratir.
+  DOGRU KULLANIM: Sadece hover animasyonu olan ve kullanicinin sik etkilestigi
+  spesifik kartlara ekle. Ornegin:
+    .listing-card { will-change: transform; }
+  Genel .card sinifina EKLEME.
+
+C-6 DUZELTME - Virtualize YAPMA:
+  Dokumanda Virtualize onerilmis ama projede UYGULANMAMALI.
+  Neden: Search.razor'da "grid grid-3" CSS sinifi 3 kolonlu grid kullaniyor.
+  <Virtualize> her elemani ayri bir container'a sariyor, bu grid layout'u bozuyor.
+  Ayrica Search.razor'da zaten PageSize=12 ile sayfalama var, bu yeterli.
+  Virtualize yerine mevcut pagination sistemi kullanilmaya devam edilmeli.
+
+
+==================================================
+BOLUM 6: PAGEHEADER ENTEGRASYONU (Eksik Kalan Kisim)
+==================================================
+
+PageHeader.razor bileseni olusturuldu (src/OzelDers.SharedUI/Components/PageHeader.razor)
+ama hicbir sayfada kullanilmiyor. Bu bolum hangi sayfalara nasil eklenecegini aciklar.
+
+KURAL: Her iki platformda (Web ve App) UI ayni. PageHeader hem webde hem appte
+gozukecek. Fark yok. SharedUI'da yapildiginda otomatik her iki platforma yansir.
+
+PageHeader kullanim ornegi:
+  <PageHeader Title="Baslik" Subtitle="Alt baslik" ShowBack="true" BackUrl="/panel/dashboard" />
+  veya
+  <PageHeader Title="Baslik" ShowBack="true" />  (geri -> history.back())
+  veya
+  <PageHeader Title="Baslik" ShowBack="false" />  (geri butonu gizli - ana sayfalar)
+
+--------------------------------------------------
+HANGI SAYFALARA EKLENECEK
+--------------------------------------------------
+
+ANA SAYFALAR (ShowBack="false" - geri butonu yok, sadece baslik):
+  - Home.razor          -> PageHeader YOK (hero section var, baslik zaten orada)
+  - Search.razor        -> PageHeader YOK (SearchBar var, baslik orada)
+  - UserPanel/Dashboard.razor -> ShowBack="false", Title="Kontrol Paneli"
+
+ALT SAYFALAR (ShowBack="true" - geri butonu var):
+  - UserPanel/MyListings.razor     -> Title="Ilanlarim", BackUrl="/panel/dashboard"
+  - UserPanel/Messages.razor       -> Title="Mesajlarim", BackUrl="/panel/dashboard"
+  - UserPanel/Wallet.razor         -> Title="Jetonlarim", BackUrl="/panel/dashboard"
+  - UserPanel/ProfileSettings.razor -> Title="Profil Ayarlari", BackUrl="/panel/dashboard"
+  - UserPanel/CreateListing.razor  -> Title="Yeni Ilan Olustur", BackUrl="/panel/ilanlarim"
+  - UserPanel/EditListing.razor    -> Title="Ilani Duzenle", BackUrl="/panel/ilanlarim"
+  - ListingDetail.razor            -> Title="Ilan Detayi", ShowBack="true" (history.back)
+  - Admin/AdminDashboard.razor     -> ShowBack="false", Title="Yonetim Paneli"
+  - Admin/UserManagement.razor     -> Title="Kullanici Yonetimi", BackUrl="/admin"
+  - Admin/ListingManagement.razor  -> Title="Ilan Yonetimi", BackUrl="/admin"
+  - Admin/Reports.razor            -> Title="Raporlar", BackUrl="/admin"
+  - Admin/SystemSettings.razor     -> Title="Sistem Ayarlari", BackUrl="/admin"
+  - Static sayfalar (KVKK, SSS vb.) -> Title=sayfa adi, ShowBack="true" (history.back)
+
+--------------------------------------------------
+NASIL EKLENECEK - ORNEK
+--------------------------------------------------
+
+ONCEKI (MyListings.razor):
+  <section class="section my-listings-page">
+      <div class="container">
+          <div class="page-header d-flex justify-content-between align-items-center">
+              <div>
+                  <h1>Ilanlarim</h1>
+                  <p class="text-muted">Tum ilanlarinizi buradan yonetebilirsiniz</p>
+              </div>
+              <a href="/panel/ilan-olustur" class="btn btn-primary">Yeni Ilan</a>
+          </div>
+
+SONRAKI (MyListings.razor):
+  <section class="section my-listings-page">
+      <div class="container">
+          <PageHeader Title="Ilanlarim"
+                      Subtitle="Tum ilanlarinizi buradan yonetebilirsiniz"
+                      BackUrl="/panel/dashboard">
+              <Actions>
+                  <a href="/panel/ilan-olustur" class="btn btn-primary">Yeni Ilan</a>
+              </Actions>
+          </PageHeader>
+
+Not: Eski "page-header" div'i kaldirilacak, yerine PageHeader bileseni gelecek.
+     PageHeader'in Actions parametresi sag tarafa buton koymak icin kullanilir.
+
+--------------------------------------------------
+PAGEHEADER BILESENI MEVCUT DURUMU
+--------------------------------------------------
+
+Dosya: src/OzelDers.SharedUI/Components/PageHeader.razor
+Durum: Olusturuldu, sayfalar henuz kullanmiyor
+Parametreler:
+  - Title (string): Sayfa basligi
+  - Subtitle (string, opsiyonel): Alt baslik
+  - ShowBack (bool, default: true): Geri butonu gosterilsin mi
+  - BackUrl (string, opsiyonel): Geri butonunun gidecegi URL. Bos birakilirsa history.back() calisir
+  - Actions (RenderFragment, opsiyonel): Sag tarafa eklenecek butonlar
+
+CSS: src/OzelDers.SharedUI/Components/PageHeader.razor.css
+  - Geri butonu: 48x48px, Glassmorphism efekti
+  - Hover: translateX(-2px) animasyonu
+  - Responsive: mobilde baslik font-size kuculuyor
+
+--------------------------------------------------
+ONCELIK SIRASI (PageHeader entegrasyonu)
+--------------------------------------------------
+
+1. UserPanel/MyListings.razor (en cok kullanilan sayfa)
+2. UserPanel/Dashboard.razor (ShowBack=false, sadece baslik)
+3. UserPanel/CreateListing.razor
+4. UserPanel/EditListing.razor
+5. UserPanel/Messages.razor
+6. UserPanel/Wallet.razor
+7. UserPanel/ProfileSettings.razor
+8. ListingDetail.razor
+9. Admin sayfalar
+10. Static sayfalar (KVKK, SSS vb.)
+

@@ -1,0 +1,50 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+
+## IDE
+.vs/
+.vscode/
+*.swp
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Logs
+logs/
+*.log
+
+## Docker
+docker-compose.override.yml
+
+## Secrets — Bu dosyalar GIT'E GÖNDERİLMEZ
+appsettings.Production.json
+appsettings.Development.json
+appsettings.Staging.json
+# appsettings.json kaynak kodda sadece CHANGE_ME placeholder'ları içermeli
+# Gerçek değerler sadece local Development.json veya environment variable'larda olmalı
+
+## Environment dosyaları
+.env
+# .env.example git'e gönderilir (şablon olarak)
+
+/net-commander
+
+# Temp ve log dosyalar�
+*.log
+*.txt.log
+MauiErrorLogs.txt
+docker-daemon-dns.json
+msbuild.binlog
+*.binlog
+
+# .NET build artifacts (zaten var ama emin olal�m)
+[Bb]in/
+[Oo]bj/
