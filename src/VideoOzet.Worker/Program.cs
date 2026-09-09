@@ -29,6 +29,8 @@ var host = Host.CreateDefaultBuilder(args)
             mt.AddConsumer<ExtractTranscriptConsumer>();
             mt.AddConsumer<SummarizeVideoConsumer>();
             mt.AddConsumer<IndexSummaryConsumer>();
+            mt.AddConsumer<GenerateContentConsumer>();
+            mt.AddConsumer<QualityCheckConsumer>();
         });
 
     })

@@ -7,7 +7,9 @@ using Microsoft.Extensions.Logging;
 
 namespace VideoOzet.API.Consumers;
 
-public class PipelineProgressConsumer : IConsumer<PipelineProgressEvent>
+public class PipelineProgressConsumer : 
+    IConsumer<PipelineProgressEvent>,
+    IConsumer<ContentReadyEvent>
 {
     private readonly IHubContext<PipelineHub> _hubContext;
     private readonly ILogger<PipelineProgressConsumer> _logger;
@@ -25,5 +27,17 @@ public class PipelineProgressConsumer : IConsumer<PipelineProgressEvent>
 
         // Önyüze SignalR üzerinden olayı gönder
         await _hubContext.Clients.All.SendAsync("ReceiveProgress", evt);
+    }
+
+    public async Task Consume(ConsumeContext<ContentReadyEvent> context)
+    {
+        var evt = context.Message;
+        _logger.LogInformation("İçerik hazır: EgitimId={EgitimId}, ContentRequestId={RequestId}", evt.EgitimId, evt.ContentRequestId);
+
+        await _hubContext.Clients.All.SendAsync("ContentReady", new 
+        {
+            contentRequestId = evt.ContentRequestId,
+            egitimId = evt.EgitimId
+        });
     }
 }
