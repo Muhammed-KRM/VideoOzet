@@ -1,0 +1,109 @@
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" *ngIf="!isLoading && egitim">
+  
+  <!-- Üst Başlık ve Geri Dön -->
+  <div class="flex items-center gap-4 mb-8">
+    <button (click)="goBack()" class="p-2 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div>
+      <h1 class="text-3xl font-bold text-white">{{ egitim.ad }}</h1>
+      <p class="text-slate-400 mt-1">{{ egitim.aciklama || 'Açıklama yok' }}</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    
+    <!-- Sol Kolon: Video Listesi ve Yükleme Alanı -->
+    <div class="lg:col-span-2 space-y-6">
+      <div class="bg-slate-800 rounded-xl p-6 border border-slate-700/50">
+        <h2 class="text-xl font-semibold text-white mb-4">Videolar ({{ egitim.videos?.length || 0 }})</h2>
+        
+        <!-- Yükleme Komponenti -->
+        <app-video-upload [egitimId]="egitimId"></app-video-upload>
+        
+        <!-- Video Listesi -->
+        <div class="mt-6 space-y-3">
+          <div *ngFor="let v of egitim.videos" class="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
+                </svg>
+              </div>
+              <div>
+                <h4 class="text-white font-medium text-sm">{{ v.baslik }}</h4>
+                <p class="text-xs text-slate-500">{{ v.islemDurumu === 'Tamamlandi' ? '✅ İndekslendi' : 'İşleniyor...' }}</p>
+              </div>
+            </div>
+            <!-- Progress Durumu Gelecek -->
+          </div>
+          <div *ngIf="!egitim.videos || egitim.videos.length === 0" class="text-center py-6 text-slate-500 text-sm">
+            Bu eğitime henüz video yüklenmemiş.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sağ Kolon: İçerik Üretimi (RAG) -->
+    <div class="space-y-6">
+      <div class="bg-slate-800 rounded-xl p-6 border border-slate-700/50">
+        <h2 class="text-xl font-semibold text-white mb-4">Yeni İçerik Üret</h2>
+        
+        <form (ngSubmit)="requestContent()" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Konu</label>
+            <input 
+              [(ngModel)]="contentTopic" 
+              name="topic"
+              type="text" 
+              placeholder="Örn: Tevekkülün sınırları"
+              class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+            >
+          </div>
+          
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Hedef Uzunluk</label>
+              <select [(ngModel)]="contentLength" name="length" class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white">
+                <option value="kisa">Kısa</option>
+                <option value="orta">Orta</option>
+                <option value="uzun">Uzun</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Hedef Kitle</label>
+              <select [(ngModel)]="contentAudience" name="audience" class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white">
+                <option value="genel">Genel</option>
+                <option value="akademik">Akademik</option>
+                <option value="ogrenci">Öğrenci</option>
+              </select>
+            </div>
+          </div>
+
+          <button 
+            type="submit"
+            [disabled]="isRequestingContent || !contentTopic || (egitim.islenmiVideoSayisi === 0)"
+            class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-lg shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <span *ngIf="isRequestingContent" class="animate-spin h-4 w-4 border-2 border-white/20 border-t-white rounded-full"></span>
+            {{ isRequestingContent ? 'Yapay Zeka Arıyor...' : 'İçerik Üret' }}
+          </button>
+          <p *ngIf="egitim.islenmiVideoSayisi === 0" class="text-xs text-amber-500 mt-2 text-center">İçerik üretebilmek için en az 1 videonun işleminin (STT, Özetleme, İndeksleme) tamamlanmış olması gerekir.</p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Üretilen İçerik Sonucu Component'i (Alt Kısımda) -->
+  <div class="mt-8" *ngIf="contentResult || isRequestingContent">
+     <app-content-result [result]="contentResult" [isLoading]="isRequestingContent"></app-content-result>
+  </div>
+
+</div>
+
+<!-- Loading State -->
+<div *ngIf="isLoading" class="flex justify-center items-center py-20 min-h-screen">
+  <div class="animate-spin rounded-full h-12 w-12 border-4 border-slate-700 border-t-blue-500"></div>
+</div>

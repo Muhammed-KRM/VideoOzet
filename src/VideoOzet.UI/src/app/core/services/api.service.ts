@@ -1,0 +1,36 @@
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class ApiService {
+  private http = inject(HttpClient);
+  // Default development URL; in production this should be set via environments
+  private baseUrl = 'http://localhost:5001/api';
+
+  validateApiKey(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/egitimler`);
+  }
+
+  getEgitimler(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/egitimler`);
+  }
+
+  createEgitim(egitim: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler`, egitim);
+  }
+
+  getEgitim(id: string): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/egitimler/${id}`);
+  }
+
+  uploadVideo(egitimId: string, formData: FormData): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar`, formData);
+  }
+
+  createContentRequest(egitimId: string, payload: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/content-requests`, payload);
+  }
+}
