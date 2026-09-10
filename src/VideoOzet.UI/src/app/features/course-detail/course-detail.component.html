@@ -37,7 +37,16 @@
                 <p class="text-xs text-slate-500">{{ v.islemDurumu === 'Tamamlandi' ? '✅ İndekslendi' : 'İşleniyor...' }}</p>
               </div>
             </div>
-            <!-- Progress Durumu Gelecek -->
+            <div class="text-right">
+              <span [ngClass]="{
+                'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi',
+                'bg-rose-500/20 text-rose-400 border-rose-500/30': v.islemDurumu === 'Hata' || v.durum === 'Hata',
+                'bg-blue-500/20 text-blue-400 border-blue-500/30': v.islemDurumu === 'Isleniyor' && v.durum !== 'Hata' && v.durum !== 'Tamamlandi'
+              }" class="px-3 py-1 text-xs font-medium rounded-full border">
+                {{ v.durum === 'Hata' ? 'Hata' : (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' ? 'Tamamlandı' : (v.sonAsama || 'Bekliyor')) }}
+              </span>
+              <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
+            </div>
           </div>
           <div *ngIf="!egitim.videos || egitim.videos.length === 0" class="text-center py-6 text-slate-500 text-sm">
             Bu eğitime henüz video yüklenmemiş.

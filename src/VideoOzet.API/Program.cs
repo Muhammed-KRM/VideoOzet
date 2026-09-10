@@ -41,3 +41,5 @@ app.MapControllers();
 app.MapHub<VideoOzet.API.Hubs.PipelineHub>("/hubs/pipeline");
 
 app.Run();
+
+public partial class Program { }

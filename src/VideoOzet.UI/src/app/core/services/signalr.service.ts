@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { Subject } from 'rxjs';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
@@ -18,26 +19,26 @@ export class SignalRService {
     }
 
     this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl('http://localhost:5001/pipeline-hub')
+      .withUrl(environment.hubUrl)
       .withAutomaticReconnect()
       .build();
+
+    this.addListeners();
 
     this.hubConnection
       .start()
       .then(() => console.log('SignalR connection started'))
       .catch(err => console.log('Error while starting connection: ' + err));
-
-    this.addListeners();
   }
 
   private addListeners() {
     if (!this.hubConnection) return;
 
-    this.hubConnection.on('StageChanged', (data) => {
+    this.hubConnection.on('ReceiveProgress', (data) => {
       this.pipelineStageChanged$.next(data);
     });
 
-    this.hubConnection.on('ContentGenerated', (data) => {
+    this.hubConnection.on('ContentReady', (data) => {
       this.contentGenerated$.next(data);
     });
   }

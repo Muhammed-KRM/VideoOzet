@@ -22,7 +22,8 @@ public static class ServiceRegistration
         services.AddMinio(configureClient => configureClient
             .WithEndpoint(configuration["Minio:Endpoint"])
             .WithCredentials(configuration["Minio:AccessKey"], configuration["Minio:SecretKey"])
-            .WithSSL(configuration.GetValue<bool>("Minio:UseSSL")));
+            .WithSSL(configuration.GetValue<bool>("Minio:UseSSL"))
+            .Build());
 
         services.AddScoped<IFileStorageService, MinioFileService>();
 
@@ -49,7 +50,11 @@ public static class ServiceRegistration
             
             x.UsingRabbitMq((context, cfg) =>
             {
-                cfg.Host(configuration["RabbitMQ:Host"], "/", h =>
+                var host = configuration["RabbitMQ:Host"] ?? "localhost";
+                var portStr = configuration["RabbitMQ:Port"];
+                ushort port = ushort.TryParse(portStr, out var p) ? p : (ushort)5672;
+
+                cfg.Host(host, port, "/", h =>
                 {
                     h.Username(configuration["RabbitMQ:Username"] ?? "guest");
                     h.Password(configuration["RabbitMQ:Password"] ?? "guest");

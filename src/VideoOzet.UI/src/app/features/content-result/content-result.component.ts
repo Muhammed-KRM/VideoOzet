@@ -16,11 +16,22 @@ export class ContentResultComponent implements OnChanges {
   
   parsedOzet = '';
   parsedPlan = '';
+  parsedQcReport: any[] = [];
+
 
   ngOnChanges() {
     if (this.result) {
       this.parsedOzet = marked.parse(this.result.arastirmaOzeti || '') as string;
       this.parsedPlan = marked.parse(this.result.videoPlani || '') as string;
+      
+      try {
+        this.parsedQcReport = typeof this.result.qcResult?.detayliRapor === 'string'
+          ? JSON.parse(this.result.qcResult.detayliRapor)
+          : this.result.qcResult?.detayliRapor || [];
+      } catch (e) {
+        this.parsedQcReport = [];
+      }
+      
       this.activeTab = 'ozet';
     }
   }

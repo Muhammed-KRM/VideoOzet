@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { forkJoin } from 'rxjs';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { SignalRService } from '../../core/services/signalr.service';
@@ -41,24 +42,38 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       
       this.subs.push(
         this.signalRService.pipelineStageChanged$.subscribe(data => {
-          // Gerçekte gelen mesaja göre update yapılır, MVP için listeyi refresh yapıyoruz.
-          this.loadEgitim();
+          if (this.egitim && this.egitim.videos) {
+            const video = this.egitim.videos.find((v: any) => v.id === data.videoId);
+            if (video) {
+              video.sonAsama = data.asama;
+              video.durum = data.durum;
+              video.hataMesaji = data.mesaj;
+            }
+          }
         })
       );
       
       this.subs.push(
         this.signalRService.contentGenerated$.subscribe(data => {
-          this.isRequestingContent = false;
-          this.contentResult = data;
+          if (data && data.contentRequestId) {
+            this.apiService.getContentRequest(data.contentRequestId).subscribe(result => {
+              this.isRequestingContent = false;
+              this.contentResult = result;
+            });
+          }
         })
       );
     }
   }
 
   loadEgitim() {
-    this.apiService.getEgitim(this.egitimId).subscribe({
+    forkJoin({
+      egitim: this.apiService.getEgitim(this.egitimId),
+      videos: this.apiService.getEgitimVideos(this.egitimId)
+    }).subscribe({
       next: (data) => {
-        this.egitim = data;
+        this.egitim = data.egitim;
+        this.egitim.videos = data.videos;
         this.isLoading = false;
       },
       error: () => {
