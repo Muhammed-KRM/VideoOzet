@@ -50,7 +50,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 throw new Exception("ContentRequest veya GeneratedContent bulunamadı.");
             }
 
-            request.Durum = ContentRequestDurumu.QcAsamasinda;
+            request.Durum = ContentRequestDurumu.QcYapiliyor;
             await _dbContext.SaveChangesAsync();
 
             // 1. İddiaları (Claims) çıkar
@@ -66,13 +66,13 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
 
             if (!string.IsNullOrEmpty(chunkIdsStr))
             {
-                var chunkIds = chunkIdsStr.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(long.Parse).ToList();
+                var chunkIds = chunkIdsStr.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
                 var chunks = await _dbContext.VideoChunkDocuments.Where(c => chunkIds.Contains(c.Id)).ToListAsync();
                 
                 var contextBuilder = new StringBuilder();
                 foreach (var chunk in chunks)
                 {
-                    contextBuilder.AppendLine($"[VideoId={chunk.VideoId}, Zaman={chunk.ZamanBaslangic}-{chunk.ZamanBitis}s]");
+                    contextBuilder.AppendLine($"[VideoId={chunk.VideoId}, Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
                     contextBuilder.AppendLine(chunk.Text);
                 }
                 contextData = contextBuilder.ToString();
@@ -104,7 +104,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                     detayliRaporBuilder.AppendLine($"Açıklama: {aciklama}");
                     detayliRaporBuilder.AppendLine("---");
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     _logger.LogWarning("QC Parse Error. Yanıt JSON değildi. İddia: {Claim}, Yanıt: {Response}", claim, verificationResultJson);
                     belirsiz++;
@@ -142,7 +142,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 EgitimId = message.EgitimId
             });
 
-            await _logService.LogPipelineEndAsync(logId, "{ \"status\": \"Success\", \"guvenSkor\": " + guvenYuzde + "}");
+            await _logService.LogPipelineEndAsync(logId, $"{{ \"status\": \"Success\", \"guvenSkor\": {guvenYuzde.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} }}");
         }
         catch (Exception ex)
         {
@@ -153,7 +153,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
             if (request != null)
             {
-                request.Durum = ContentRequestDurumu.Hatali;
+                request.Durum = ContentRequestDurumu.Hata;
                 await _dbContext.SaveChangesAsync();
             }
         }

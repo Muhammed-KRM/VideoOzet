@@ -35,6 +35,7 @@ public static class ServiceRegistration
         services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
         services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OpenAIEmbeddingProvider>();
         services.AddScoped<ISynthesisProvider, VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider>();
+        services.AddScoped<ILogService, LogManager>();
 
         // Redis Registration
         var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6379";

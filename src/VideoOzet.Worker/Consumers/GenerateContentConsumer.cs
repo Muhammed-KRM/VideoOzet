@@ -39,7 +39,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
     public async Task Consume(ConsumeContext<ContentRequestedEvent> context)
     {
         var message = context.Message;
-        var logId = await _logService.LogPipelineStartAsync(null, message.EgitimId, PipelineAsamasi.IcerikUretimi, context.CorrelationId?.ToString());
+        var logId = await _logService.LogPipelineStartAsync(null, message.EgitimId, PipelineAsamasi.Sentez, context.CorrelationId?.ToString());
 
         try
         {
@@ -51,19 +51,15 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
                 return;
             }
 
-            request.Durum = ContentRequestDurumu.IslemeAlindi;
+            request.Durum = ContentRequestDurumu.IcerikUretiliyor;
             await _dbContext.SaveChangesAsync();
 
             // 1. Kullanıcının konusunu Vektöre Çevir
-            var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(message.Konu, context.CancellationToken);
+            var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(message.Konu);
             var queryVector = new Pgvector.Vector(queryEmbedding);
 
             // 2. RAG Arama: pgvector Kosinüs Benzerliği ile en yakın chunk'ları bul (Sadece ilgili Eğitime ait olanlar)
-            var topChunks = await _dbContext.VideoChunkDocuments
-                .Where(c => c.EgitimId == message.EgitimId)
-                .OrderBy(c => c.Embedding!.CosineDistance(queryVector))
-                .Take(15) // En ilgili 15 chunk
-                .ToListAsync(context.CancellationToken);
+            var topChunks = await GetRelevantChunksAsync(message.EgitimId, queryVector, context.CancellationToken);
 
             if (!topChunks.Any())
             {
@@ -74,7 +70,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             var contextBuilder = new StringBuilder();
             foreach (var chunk in topChunks)
             {
-                contextBuilder.AppendLine($"[Kaynak: VideoId={chunk.VideoId}, Zaman={chunk.ZamanBaslangic}-{chunk.ZamanBitis}s]");
+                contextBuilder.AppendLine($"[Kaynak: VideoId={chunk.VideoId}, Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
                 contextBuilder.AppendLine(chunk.Text);
                 contextBuilder.AppendLine("---");
             }
@@ -109,7 +105,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             _dbContext.GeneratedContents.Add(generatedContent);
             
             // QC öncesi durumu güncelle
-            request.Durum = ContentRequestDurumu.QcAktarildi;
+            request.Durum = ContentRequestDurumu.QcYapiliyor;
             await _dbContext.SaveChangesAsync();
 
             // 6. Kalite Kontrol (QC) aşamasını tetikle
@@ -131,9 +127,21 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
             if (request != null)
             {
-                request.Durum = ContentRequestDurumu.Hatali;
+                request.Durum = ContentRequestDurumu.Hata;
                 await _dbContext.SaveChangesAsync();
             }
         }
+    }
+
+    protected virtual async Task<List<VideoChunkDocument>> GetRelevantChunksAsync(
+        Guid egitimId, 
+        Pgvector.Vector queryVector, 
+        CancellationToken cancellationToken)
+    {
+        return await _dbContext.VideoChunkDocuments
+            .Where(c => c.EgitimId == egitimId)
+            .OrderBy(c => c.Embedding!.CosineDistance(queryVector))
+            .Take(15)
+            .ToListAsync(cancellationToken);
     }
 }
