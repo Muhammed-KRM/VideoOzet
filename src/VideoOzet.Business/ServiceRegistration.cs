@@ -31,7 +31,8 @@ public static class ServiceRegistration
         services.AddScoped<IEgitimService, EgitimManager>();
         services.AddScoped<IVideoService, VideoManager>();
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
-        services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>();
+        services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>()
+            .AddStandardResilienceHandler();
         services.AddScoped<IGeminiProvider, VideoOzet.Business.Infrastructure.AI.GeminiSummarizer>();
         services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
         services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OpenAIEmbeddingProvider>();
@@ -59,6 +60,9 @@ public static class ServiceRegistration
                     h.Username(configuration["RabbitMQ:Username"] ?? "guest");
                     h.Password(configuration["RabbitMQ:Password"] ?? "guest");
                 });
+
+                // Resilience: Automatic exponential retry for transient errors
+                cfg.UseMessageRetry(r => r.Exponential(3, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(2)));
                 
                 cfg.ConfigureEndpoints(context); // Auto-configures consumers
             });
