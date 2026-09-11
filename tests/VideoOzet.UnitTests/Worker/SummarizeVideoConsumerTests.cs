@@ -81,7 +81,7 @@ public class SummarizeVideoConsumerTests
         await consumer.Consume(contextMock.Object);
 
         // Assert
-        geminiProviderMock.Verify(g => g.SummarizeAsync("Test metni", "gemini-2.0-flash"), Times.Once);
+        geminiProviderMock.Verify(g => g.SummarizeAsync("Test metni", "gemini-flash-latest"), Times.Once);
         
         savedSummaries.Should().HaveCount(1);
         savedSummaries[0].VideoId.Should().Be(videoId);

@@ -107,7 +107,22 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 // Parse the JSON. We expect { "durum": "desteklendi", "aciklama": "..." }
                 try
                 {
-                    using var doc = JsonDocument.Parse(verificationResultJson);
+                    var cleanJson = verificationResultJson.Trim();
+                    if (cleanJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cleanJson = cleanJson.Substring(7);
+                    }
+                    else if (cleanJson.StartsWith("```"))
+                    {
+                        cleanJson = cleanJson.Substring(3);
+                    }
+                    if (cleanJson.EndsWith("```"))
+                    {
+                        cleanJson = cleanJson.Substring(0, cleanJson.Length - 3);
+                    }
+                    cleanJson = cleanJson.Trim();
+
+                    using var doc = JsonDocument.Parse(cleanJson);
                     var durum = doc.RootElement.GetProperty("durum").GetString()?.ToLowerInvariant() ?? "belirsiz";
                     var aciklama = doc.RootElement.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
 
@@ -179,8 +194,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "QC (Kalite Kontrol) sırasında hata oluştu: {Message}", ex.Message);
-            
-            _dbContext.ChangeTracker.Clear();
+            try { _dbContext?.ChangeTracker?.Clear(); } catch { }
 
             try
             {

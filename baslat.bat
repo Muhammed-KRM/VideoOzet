@@ -11,6 +11,14 @@ taskkill /F /IM "node.exe" /T > nul 2>&1
 taskkill /F /IM "VideoOzet.API.exe" /T > nul 2>&1
 taskkill /F /IM "VideoOzet.Worker.exe" /T > nul 2>&1
 taskkill /FI "WINDOWTITLE eq VideoOzet-*" /F /T > nul 2>&1
+
+REM Eger .env dosyasi varsa ortama aktar
+if exist "%~dp0.env" (
+    echo [.env] Ortam degiskenleri yukleniyor...
+    for /f "usebackq tokens=1* delims==" %%a in (`findstr /v "^#" "%~dp0.env"`) do (
+        if not "%%a"=="" set "%%a=%%b"
+    )
+)
 echo.
 
 echo [2/4] Docker servisleri baslatiliyor...

@@ -21,13 +21,17 @@ export class ContentResultComponent implements OnChanges {
 
   ngOnChanges() {
     if (this.result) {
-      this.parsedOzet = marked.parse(this.result.arastirmaOzeti || '') as string;
-      this.parsedPlan = marked.parse(this.result.videoPlani || '') as string;
+      const ozet = this.result.generatedContent?.arastirmaOzeti ?? this.result.arastirmaOzeti ?? '';
+      const plan = this.result.generatedContent?.videoPlani ?? this.result.videoPlani ?? '';
       
+      this.parsedOzet = ozet ? (marked.parse(ozet) as string) : '';
+      this.parsedPlan = plan ? (marked.parse(plan) as string) : '';
+      
+      const rawQc = this.result.qcResult?.detayliRapor ?? this.result.detayliRapor;
       try {
-        this.parsedQcReport = typeof this.result.qcResult?.detayliRapor === 'string'
-          ? JSON.parse(this.result.qcResult.detayliRapor)
-          : this.result.qcResult?.detayliRapor || [];
+        this.parsedQcReport = typeof rawQc === 'string'
+          ? JSON.parse(rawQc)
+          : (rawQc || []);
       } catch (e) {
         this.parsedQcReport = [];
       }

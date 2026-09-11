@@ -59,7 +59,7 @@ public class CreateContentRequestDtoValidatorTests
         // Arrange
         var dto = new CreateContentRequestDto
         {
-            Konu = new string('A', 501)
+            Konu = new string('A', 10001)
         };
 
         // Act

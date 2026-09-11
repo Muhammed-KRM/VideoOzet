@@ -1,3 +1,70 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Markdown / Prose Styling */
+.prose {
+  color: #e2e8f0;
+  line-height: 1.8;
+  font-size: 0.975rem;
+}
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: #f8fafc;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.prose h1 { font-size: 1.6rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+.prose h2 { font-size: 1.35rem; color: #93c5fd; }
+.prose h3 { font-size: 1.15rem; color: #60a5fa; }
+.prose p {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+.prose ul {
+  list-style-type: disc;
+  margin-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+.prose ol {
+  list-style-type: decimal;
+  margin-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+.prose li {
+  margin-bottom: 0.35rem;
+}
+.prose strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+.prose blockquote {
+  border-left: 4px solid #3b82f6;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #94a3b8;
+  font-style: italic;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 0 0.375rem 0.375rem 0;
+}
+.prose code {
+  background-color: #1e293b;
+  color: #38bdf8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+.prose pre {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+.prose pre code {
+  background-color: transparent;
+  padding: 0;
+  color: #e2e8f0;
+}

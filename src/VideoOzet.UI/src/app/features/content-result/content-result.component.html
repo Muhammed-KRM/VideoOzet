@@ -42,12 +42,12 @@
         QC Raporu
         <span class="px-2 py-0.5 rounded-full bg-slate-800 text-xs font-bold"
           [ngClass]="{
-            'text-emerald-400': result.qcResult?.guvenSkorYuzde >= 80,
-            'text-amber-400': result.qcResult?.guvenSkorYuzde >= 50 && result.qcResult?.guvenSkorYuzde < 80,
-            'text-red-400': result.qcResult?.guvenSkorYuzde < 50
+            'text-emerald-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) >= 80,
+            'text-amber-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) >= 50 && (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) < 80,
+            'text-red-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) < 50
           }"
         >
-          %{{ result.qcResult?.guvenSkorYuzde || 0 }}
+          %{{ result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0 }}
         </span>
       </button>
     </div>
@@ -56,10 +56,20 @@
     <div class="p-8">
       
       <!-- Özet Tab -->
-      <div *ngIf="activeTab === 'ozet'" class="prose prose-invert prose-blue max-w-none" [innerHTML]="parsedOzet"></div>
+      <div *ngIf="activeTab === 'ozet'">
+        <div *ngIf="parsedOzet" class="prose max-w-none" [innerHTML]="parsedOzet"></div>
+        <div *ngIf="!parsedOzet" class="py-8 text-center text-slate-400 text-sm">
+          <p class="text-slate-500">Bu eğitim için henüz bir araştırma özeti üretilmedi.</p>
+        </div>
+      </div>
       
       <!-- Plan Tab -->
-      <div *ngIf="activeTab === 'plan'" class="prose prose-invert prose-blue max-w-none" [innerHTML]="parsedPlan"></div>
+      <div *ngIf="activeTab === 'plan'">
+        <div *ngIf="parsedPlan" class="prose max-w-none" [innerHTML]="parsedPlan"></div>
+        <div *ngIf="!parsedPlan" class="py-8 text-center text-slate-400 text-sm">
+          <p class="text-slate-500">Bu eğitim için henüz bir video planı üretilmedi.</p>
+        </div>
+      </div>
       
       <!-- QC Tab -->
       <div *ngIf="activeTab === 'qc'">

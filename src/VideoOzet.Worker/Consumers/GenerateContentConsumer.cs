@@ -148,8 +148,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "İçerik üretilirken hata oluştu: {Message}", ex.Message);
-            
-            _dbContext.ChangeTracker.Clear();
+            try { _dbContext?.ChangeTracker?.Clear(); } catch { }
 
             try
             {
