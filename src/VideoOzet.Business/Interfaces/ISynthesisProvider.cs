@@ -24,4 +24,9 @@ public interface ISynthesisProvider
     /// Metinden ana iddiaları çıkarır (QC işlemi için).
     /// </summary>
     Task<string> ExtractClaimsAsync(string text, CancellationToken ct = default);
+
+    /// <summary>
+    /// Metindeki ana iddiaları çıkarıp kaynaklarla tek seferde toplu olarak doğrular (Batch QC).
+    /// </summary>
+    Task<string> BatchQualityCheckAsync(string summaryText, string contextData, int claimCount = 8, CancellationToken ct = default);
 }

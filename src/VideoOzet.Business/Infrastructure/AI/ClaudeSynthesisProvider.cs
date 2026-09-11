@@ -51,11 +51,21 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var geminiKey = _configuration["GEMINI_API_KEY"];
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
-            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-flash-latest";
+            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-3.5-flash";
             var googleAI = new GoogleAI(geminiKey);
-            var genModel = googleAI.GenerativeModel(model: geminiModel);
-            var response = await genModel.GenerateContent(prompt);
-            return response.Text ?? string.Empty;
+            try
+            {
+                var genModel = googleAI.GenerativeModel(model: geminiModel);
+                var response = await genModel.GenerateContent(prompt);
+                return response.Text ?? string.Empty;
+            }
+            catch (Exception ex) when (geminiModel != "gemini-3.6-flash")
+            {
+                _logger.LogWarning(ex, "Gemini modeli {Model} başarısız oldu, yedek model (gemini-3.6-flash) deneniyor...", geminiModel);
+                var fallbackModel = googleAI.GenerativeModel(model: "gemini-3.6-flash");
+                var response = await fallbackModel.GenerateContent(prompt);
+                return response.Text ?? string.Empty;
+            }
         }
 
         var openAiKey = _configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"];
@@ -93,6 +103,12 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     public async Task<string> VerifyClaimAsync(string claim, string contextData, CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.QcVerificationPrompt, claim, contextData);
+        return await CallLlmAsync(prompt, ct);
+    }
+
+    public async Task<string> BatchQualityCheckAsync(string summaryText, string contextData, int claimCount = 8, CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.BatchQcPrompt, claimCount, summaryText, contextData);
         return await CallLlmAsync(prompt, ct);
     }
 }

@@ -45,4 +45,27 @@ public static class PromptTemplates
         {{ "durum": "belirsiz", "aciklama": "..." }}
         {{ "durum": "desteklenmedi", "aciklama": "..." }}
         """;
+
+    public const string BatchQcPrompt = """
+        Aşağıdaki ARAŞTIRMA ÖZETİ metnini dikkatle analiz et. Bu metindeki en önemli ve belirleyici {0} adet olgusal iddiayı tespit et.
+        Ardından tespit ettiğin her bir iddianın, verilen KAYNAKLAR tarafından desteklenip desteklenmediğini kaynak metinle karşılaştırarak değerlendir.
+        
+        ARAŞTIRMA ÖZETİ:
+        {1}
+        
+        KAYNAKLAR:
+        {2}
+        
+        Lütfen değerlendirme sonucunu SADECE geçerli bir JSON dizisi (array) formatında ver. Markdown kod bloğu tırnakları (```json gibi) veya fazladan açıklama yazmadan doğrudan saf JSON döndür.
+        Format:
+        [
+          {{
+            "iddia": "Metinden çıkarılan olgusal iddia cümlesi",
+            "durum": "desteklendi",
+            "aciklama": "İddianın kaynak tarafından nasıl ve nerede desteklendiğini veya desteklenmediğini belirten kısa ve net açıklama"
+          }}
+        ]
+        
+        Not: "durum" değeri SADECE "desteklendi", "desteklenmedi" veya "belirsiz" olabilir.
+        """;
 }

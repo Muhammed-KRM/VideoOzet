@@ -4,5 +4,5 @@ namespace VideoOzet.Business.Interfaces;
 
 public interface IGeminiProvider
 {
-    Task<string> SummarizeAsync(string transcript, string modelName = "gemini-flash-latest");
+    Task<string> SummarizeAsync(string transcript, string modelName = "gemini-3.5-flash");
 }

@@ -17,7 +17,7 @@ public class GeminiSummarizer : IGeminiProvider
         _logger = logger;
     }
 
-    public async Task<string> SummarizeAsync(string transcript, string modelName = "gemini-flash-latest")
+    public async Task<string> SummarizeAsync(string transcript, string modelName = "gemini-3.5-flash")
     {
         var apiKey = _configuration["GEMINI_API_KEY"];
         if (string.IsNullOrEmpty(apiKey))

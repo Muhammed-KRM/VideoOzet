@@ -78,6 +78,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
           if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
             this.contentStatus = data.asama;
             this.contentProgress = data.yuzde;
+            this.resetContentTimeout();
           }
         })
       );
@@ -92,6 +93,16 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
         })
       );
     }
+  }
+
+  private resetContentTimeout() {
+    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+    this.contentTimeoutId = setTimeout(() => {
+      if (this.isRequestingContent) {
+        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde (RabbitMQ veya Worker) bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
+        this.isRequestingContent = false;
+      }
+    }, 4 * 60 * 1000);
   }
 
   loadEgitim() {
