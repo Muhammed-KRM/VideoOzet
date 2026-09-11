@@ -72,6 +72,14 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             video.IslemDurumu = VideoIslemDurumu.SttBasladi;
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
+            await _publishEndpoint.Publish(new PipelineProgressEvent
+            {
+                VideoId = message.VideoId,
+                Asama = "Video İşleme (STT)",
+                Durum = VideoIslemDurumu.SttBasladi.ToString(),
+                Mesaj = "Videodan ses çıkarılıyor ve metne dökülüyor..."
+            }, context.CancellationToken);
+
             // Create temp paths
             var tempDir = Path.Combine(Path.GetTempPath(), "VideoOzet");
             Directory.CreateDirectory(tempDir);
@@ -130,6 +138,14 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             video.IslemDurumu = VideoIslemDurumu.SttTamamlandi; // STT bitti
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
+            await _publishEndpoint.Publish(new PipelineProgressEvent
+            {
+                VideoId = message.VideoId,
+                Asama = "Video İşleme (STT)",
+                Durum = VideoIslemDurumu.SttTamamlandi.ToString(),
+                Mesaj = "Videodan metin çıkarma tamamlandı."
+            }, context.CancellationToken);
+
             _logger.LogInformation("Transcript saved successfully for VideoId: {VideoId}", message.VideoId);
 
             // 5. Publish TranscriptReadyEvent
@@ -152,6 +168,14 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 video.IslemDurumu = VideoIslemDurumu.Hata;
                 await _dbContext.SaveChangesAsync(context.CancellationToken);
             }
+
+            await _publishEndpoint.Publish(new PipelineProgressEvent
+            {
+                VideoId = message.VideoId,
+                Asama = "Video İşleme (STT)",
+                Durum = VideoIslemDurumu.Hata.ToString(),
+                Mesaj = $"STT işlemi sırasında hata oluştu: {ex.Message}"
+            }, context.CancellationToken);
 
             // Remove lock so it can be retried later if desired
             await _cacheService.RemoveAsync(lockKey);

@@ -73,7 +73,7 @@ public class ExceptionHandlingMiddleware
                     Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1",
                     Title = "Internal Server Error",
                     Status = (int)statusCode,
-                    Detail = "An unexpected error occurred."
+                    Detail = exception.Message + (exception.InnerException != null ? " -> " + exception.InnerException.Message : "")
                 });
                 break;
         }

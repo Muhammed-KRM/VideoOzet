@@ -13,6 +13,7 @@
     #fileInput 
     (change)="onFileSelected($event)" 
     accept="video/*,.pdf,.docx,.pptx,.txt" 
+    multiple
     class="hidden"
   >
   
@@ -22,19 +23,27 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
       </svg>
     </div>
-    <h3 class="text-lg font-medium text-white mb-1">Video veya Döküman (PDF, DOCX) Sürükleyip Bırakın</h3>
-    <p class="text-slate-400 text-sm mb-4">veya bilgisayarınızdan seçin</p>
+    <h3 class="text-lg font-medium text-white mb-1">Video veya Dökümanları Sürükleyip Bırakın</h3>
+    <p class="text-slate-400 text-sm mb-4">Birden fazla video, PDF, Word veya PowerPoint (.pptx) seçebilirsiniz</p>
     <button 
       (click)="fileInput.click()"
-      class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors"
+      class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20"
     >
-      Dosya Seç
+      Toplu Dosya Seç
     </button>
   </div>
 
   <div *ngIf="isUploading" class="py-4">
     <div class="animate-spin mx-auto h-10 w-10 border-4 border-slate-600 border-t-blue-500 rounded-full mb-4"></div>
-    <h3 class="text-white font-medium">Dosya Yükleniyor...</h3>
-    <p class="text-sm text-slate-400">Lütfen tarayıcıyı kapatmayın</p>
+    <h3 class="text-white font-medium text-base">Dosyalar Yükleniyor... ({{ currentFileIndex }} / {{ totalFiles }})</h3>
+    <p class="text-sm text-blue-400 mt-1 max-w-md mx-auto truncate font-mono bg-slate-900/80 px-3 py-1 rounded-lg border border-slate-700">
+      {{ currentFileName }}
+    </p>
+    
+    <!-- Progress bar -->
+    <div class="w-full max-w-xs mx-auto bg-slate-700 h-2 rounded-full mt-4 overflow-hidden">
+      <div class="bg-blue-500 h-full transition-all duration-300" [style.width.%]="progressPercent"></div>
+    </div>
+    <p class="text-xs text-slate-400 mt-2">%{{ progressPercent }} tamamlandı. Lütfen tarayıcıyı kapatmayın.</p>
   </div>
 </div>

@@ -9,7 +9,7 @@ public class CreateContentRequestDtoValidator : AbstractValidator<CreateContentR
     {
         RuleFor(x => x.Konu)
             .NotEmpty().WithMessage("Konu boş olamaz.")
-            .MaximumLength(500).WithMessage("Konu en fazla 500 karakter olabilir.");
+            .MaximumLength(10000).WithMessage("Konu en fazla 10.000 karakter olabilir.");
 
         RuleFor(x => x.HedefUzunluk)
             .MaximumLength(100).WithMessage("Hedef uzunluk en fazla 100 karakter olabilir.");

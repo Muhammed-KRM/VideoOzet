@@ -44,6 +44,14 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
         dokuman.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
         await _context.SaveChangesAsync(context.CancellationToken);
 
+        await context.Publish(new PipelineProgressEvent
+        {
+            VideoId = evt.DokumanId,
+            Asama = "Doküman İndeksleme",
+            Durum = VideoIslemDurumu.IndekslemeBasladi.ToString(),
+            Mesaj = "Doküman vektör veritabanına indeksleniyor..."
+        }, context.CancellationToken);
+
         try
         {
             var dokumanMetin = await _context.DokumanMetinleri.FindAsync(new object[] { evt.DokumanMetinId }, context.CancellationToken);
@@ -78,6 +86,14 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
             dokuman.IslemDurumu = VideoIslemDurumu.Tamamlandi;
             await _context.SaveChangesAsync(context.CancellationToken);
 
+            await context.Publish(new PipelineProgressEvent
+            {
+                VideoId = evt.DokumanId,
+                Asama = "Doküman İndeksleme",
+                Durum = VideoIslemDurumu.Tamamlandi.ToString(),
+                Mesaj = "Doküman indeksleme tamamlandı. Hazır."
+            }, context.CancellationToken);
+
             _logger.LogInformation("Successfully indexed {Count} chunks for DokumanId: {DokumanId}", chunkDocuments.Count, evt.DokumanId);
         }
         catch (Exception ex)
@@ -85,6 +101,15 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
             _logger.LogError(ex, "Error indexing dokuman {DokumanId}", evt.DokumanId);
             dokuman.IslemDurumu = VideoIslemDurumu.Hata;
             await _context.SaveChangesAsync(context.CancellationToken);
+
+            await context.Publish(new PipelineProgressEvent
+            {
+                VideoId = evt.DokumanId,
+                Asama = "Doküman İndeksleme",
+                Durum = VideoIslemDurumu.Hata.ToString(),
+                Mesaj = $"İndeksleme sırasında hata oluştu: {ex.Message}"
+            }, context.CancellationToken);
+
             throw;
         }
     }

@@ -48,6 +48,14 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
         dokuman.IslemDurumu = VideoIslemDurumu.SttBasladi; // Ortak durumu kullanıyoruz
         await _dbContext.SaveChangesAsync(context.CancellationToken);
 
+        await _publishEndpoint.Publish(new PipelineProgressEvent
+        {
+            VideoId = evt.DokumanId, // UI aynı event modelini kullanıyor
+            Asama = "Doküman Çıkarımı",
+            Durum = VideoIslemDurumu.SttBasladi.ToString(),
+            Mesaj = "Dokümandan metin çıkarılıyor..."
+        }, context.CancellationToken);
+
         var tempFilePath = Path.Combine(Path.GetTempPath(), $"{evt.DokumanId}{evt.Uzanti}");
 
         try
@@ -73,6 +81,10 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
             else if (evt.Uzanti == ".txt")
             {
                 extractedText = await File.ReadAllTextAsync(tempFilePath, context.CancellationToken);
+            }
+            else if (evt.Uzanti == ".pptx")
+            {
+                extractedText = ExtractTextFromPptx(tempFilePath);
             }
             else
             {
@@ -101,6 +113,14 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
             dokuman.IslemDurumu = VideoIslemDurumu.SttTamamlandi; 
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
+            await _publishEndpoint.Publish(new PipelineProgressEvent
+            {
+                VideoId = evt.DokumanId,
+                Asama = "Doküman Çıkarımı",
+                Durum = VideoIslemDurumu.SttTamamlandi.ToString(),
+                Mesaj = "Dokümandan metin çıkarıldı."
+            }, context.CancellationToken);
+
             _logger.LogInformation("Text extracted and saved successfully for DokumanId: {DokumanId}", evt.DokumanId);
 
             // İndeksleme için event fırlat
@@ -120,6 +140,15 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
                 dokuman.IslemDurumu = VideoIslemDurumu.Hata;
                 await _dbContext.SaveChangesAsync(context.CancellationToken);
             }
+
+            await _publishEndpoint.Publish(new PipelineProgressEvent
+            {
+                VideoId = evt.DokumanId,
+                Asama = "Doküman Çıkarımı",
+                Durum = VideoIslemDurumu.Hata.ToString(),
+                Mesaj = $"Doküman işlenirken hata oluştu: {ex.Message}"
+            }, context.CancellationToken);
+
             throw;
         }
         finally
@@ -151,6 +180,56 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
             if (body != null)
             {
                 sb.AppendLine(body.InnerText);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private string ExtractTextFromPptx(string filePath)
+    {
+        var sb = new StringBuilder();
+        using (var presentationDoc = PresentationDocument.Open(filePath, false))
+        {
+            var presentationPart = presentationDoc.PresentationPart;
+            if (presentationPart?.Presentation?.SlideIdList != null)
+            {
+                foreach (var slideIdEntry in presentationPart.Presentation.SlideIdList.Elements<DocumentFormat.OpenXml.Presentation.SlideId>())
+                {
+                    if (slideIdEntry.RelationshipId != null)
+                    {
+                        var slidePart = presentationPart.GetPartById(slideIdEntry.RelationshipId!) as SlidePart;
+                        if (slidePart?.Slide != null)
+                        {
+                            var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>();
+                            foreach (var text in texts)
+                            {
+                                if (!string.IsNullOrWhiteSpace(text.Text))
+                                {
+                                    sb.AppendLine(text.Text);
+                                }
+                            }
+                            sb.AppendLine();
+                        }
+                    }
+                }
+            }
+            else if (presentationPart?.SlideParts != null)
+            {
+                foreach (var slidePart in presentationPart.SlideParts)
+                {
+                    if (slidePart.Slide != null)
+                    {
+                        var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>();
+                        foreach (var text in texts)
+                        {
+                            if (!string.IsNullOrWhiteSpace(text.Text))
+                            {
+                                sb.AppendLine(text.Text);
+                            }
+                        }
+                        sb.AppendLine();
+                    }
+                }
             }
         }
         return sb.ToString();

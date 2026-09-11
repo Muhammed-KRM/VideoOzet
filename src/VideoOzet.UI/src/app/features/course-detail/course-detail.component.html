@@ -18,38 +18,54 @@
     <!-- Sol Kolon: Video Listesi ve Yükleme Alanı -->
     <div class="lg:col-span-2 space-y-6">
       <div class="bg-slate-800 rounded-xl p-6 border border-slate-700/50">
-        <h2 class="text-xl font-semibold text-white mb-4">Videolar ({{ egitim.videos?.length || 0 }})</h2>
+        <h2 class="text-xl font-semibold text-white mb-4">Dosyalar ({{ egitim.videos?.length || 0 }})</h2>
         
         <!-- Yükleme Komponenti -->
-        <app-video-upload [egitimId]="egitimId"></app-video-upload>
+        <app-video-upload [egitimId]="egitimId" (uploadComplete)="onUploadComplete()"></app-video-upload>
         
-        <!-- Video Listesi -->
+        <!-- Video / Doküman Listesi -->
         <div class="mt-6 space-y-3">
-          <div *ngFor="let v of egitim.videos" class="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
+          <div *ngFor="let v of egitim.videos" class="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
+              <div *ngIf="v.tip === 'video'" class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
                 </svg>
               </div>
-              <div>
-                <h4 class="text-white font-medium text-sm">{{ v.baslik }}</h4>
+              <div *ngIf="v.tip === 'dokuman'" class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-white font-medium text-sm truncate max-w-sm" [title]="v.baslik">{{ v.baslik }}</h4>
                 <p class="text-xs text-slate-500">{{ v.islemDurumu === 'Tamamlandi' ? '✅ İndekslendi' : 'İşleniyor...' }}</p>
               </div>
             </div>
-            <div class="text-right">
-              <span [ngClass]="{
-                'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi',
-                'bg-rose-500/20 text-rose-400 border-rose-500/30': v.islemDurumu === 'Hata' || v.durum === 'Hata',
-                'bg-blue-500/20 text-blue-400 border-blue-500/30': v.islemDurumu === 'Isleniyor' && v.durum !== 'Hata' && v.durum !== 'Tamamlandi'
-              }" class="px-3 py-1 text-xs font-medium rounded-full border">
-                {{ v.durum === 'Hata' ? 'Hata' : (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' ? 'Tamamlandı' : (v.sonAsama || 'Bekliyor')) }}
-              </span>
-              <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
+            <div class="flex items-center gap-3">
+              <div class="text-right">
+                <span [ngClass]="{
+                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi',
+                  'bg-rose-500/20 text-rose-400 border-rose-500/30': v.islemDurumu === 'Hata' || v.durum === 'Hata',
+                  'bg-blue-500/20 text-blue-400 border-blue-500/30': v.islemDurumu === 'Isleniyor' && v.durum !== 'Hata' && v.durum !== 'Tamamlandi'
+                }" class="px-3 py-1 text-xs font-medium rounded-full border">
+                  {{ v.durum === 'Hata' ? 'Hata' : (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' ? 'Tamamlandı' : (v.sonAsama || 'Bekliyor')) }}
+                </span>
+                <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
+              </div>
+              <button 
+                (click)="deleteItem(v)" 
+                title="Dosyayı Sil / İptal Et" 
+                class="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
             </div>
           </div>
           <div *ngIf="!egitim.videos || egitim.videos.length === 0" class="text-center py-6 text-slate-500 text-sm">
-            Bu eğitime henüz video yüklenmemiş.
+            Bu eğitime henüz video veya döküman yüklenmemiş.
           </div>
         </div>
       </div>
@@ -62,14 +78,14 @@
         
         <form (ngSubmit)="requestContent()" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Konu</label>
-            <input 
+            <label class="block text-sm font-medium text-slate-300 mb-1">Konu veya Detaylı İçerik Planı</label>
+            <textarea 
               [(ngModel)]="contentTopic" 
               name="topic"
-              type="text" 
-              placeholder="Örn: Tevekkülün sınırları"
-              class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
-            >
+              rows="6"
+              placeholder="Bölüm planınızı, odaklanılmasını istediğiniz maddeleri veya konuyu buraya doğrudan yapıştırabilirsiniz..."
+              class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 text-sm leading-relaxed"
+            ></textarea>
           </div>
           
           <div class="grid grid-cols-2 gap-4">

@@ -13,7 +13,7 @@ public class ContentRequestConfiguration : IEntityTypeConfiguration<ContentReque
         
         builder.Property(cr => cr.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
         builder.Property(cr => cr.EgitimId).HasColumnName("egitim_id").IsRequired();
-        builder.Property(cr => cr.Konu).HasColumnName("konu").HasMaxLength(500).IsRequired();
+        builder.Property(cr => cr.Konu).HasColumnName("konu").HasColumnType("text").IsRequired();
         builder.Property(cr => cr.HedefUzunluk).HasColumnName("hedef_uzunluk").HasMaxLength(50);
         builder.Property(cr => cr.HedefKitle).HasColumnName("hedef_kitle").HasMaxLength(50);
         builder.Property(cr => cr.Durum).HasColumnName("durum").HasDefaultValue(VideoOzet.Data.Enums.ContentRequestDurumu.Bekliyor).IsRequired();

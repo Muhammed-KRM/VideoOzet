@@ -16,8 +16,23 @@ public class FfmpegAudioExtractor : IAudioExtractor
     public FfmpegAudioExtractor(ILogger<FfmpegAudioExtractor> logger)
     {
         _logger = logger;
-        // Optionally, configure FFMpegCore here if ffmpeg is in a specific custom path.
-        // GlobalFFOptions.Configure(new FFOptions { BinaryFolder = "/usr/bin" });
+        
+        var possiblePaths = new[]
+        {
+            @"D:\Hoca\ffmpeg\bin",
+            @"D:\Hoca\VideoOzet\ffmpeg\bin",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WinGet\Links")
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            if (File.Exists(Path.Combine(path, "ffmpeg.exe")))
+            {
+                GlobalFFOptions.Configure(new FFOptions { BinaryFolder = path });
+                _logger.LogInformation("Configured FFmpeg BinaryFolder to {Path}", path);
+                break;
+            }
+        }
     }
 
     public async Task<bool> ExtractAudioAsync(string videoFilePath, string outputAudioPath, CancellationToken cancellationToken = default)

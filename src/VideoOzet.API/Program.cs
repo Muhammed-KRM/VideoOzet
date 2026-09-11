@@ -8,7 +8,11 @@ using VideoOzet.API.Middleware;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
@@ -16,14 +20,14 @@ builder.Services.AddSignalR();
 // Configure Kestrel limits
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
-    serverOptions.Limits.MaxRequestBodySize = 1024L * 1024L * 1024L * 2L; // 2 GB
+    serverOptions.Limits.MaxRequestBodySize = null; // Unlimited for large files
 });
 
 // Configure FormOptions for multipart body limit
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
 {
     options.ValueLengthLimit = int.MaxValue;
-    options.MultipartBodyLengthLimit = 1024L * 1024L * 1024L * 2L; // 2 GB
+    options.MultipartBodyLengthLimit = long.MaxValue;
     options.MultipartHeadersLengthLimit = int.MaxValue;
 });
 

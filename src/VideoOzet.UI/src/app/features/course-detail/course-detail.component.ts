@@ -69,17 +69,33 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   loadEgitim() {
     forkJoin({
       egitim: this.apiService.getEgitim(this.egitimId),
-      videos: this.apiService.getEgitimVideos(this.egitimId)
+      videos: this.apiService.getEgitimVideos(this.egitimId),
+      dokumanlar: this.apiService.getEgitimDokumanlar(this.egitimId)
     }).subscribe({
       next: (data) => {
         this.egitim = data.egitim;
-        this.egitim.videos = data.videos;
+        // Merge videos and dokumans for display
+        const vids = (data.videos || []).map((v: any) => ({ ...v, tip: 'video' }));
+        const docs = (data.dokumanlar || []).map((d: any) => ({ 
+          ...d, 
+          tip: 'dokuman',
+          baslik: d.dosyaAdi // dokumanlarda baslik yerine dosyaAdi var
+        }));
+        
+        this.egitim.videos = [...vids, ...docs].sort((a, b) => {
+          return new Date(b.olusturmaTarihi).getTime() - new Date(a.olusturmaTarihi).getTime();
+        });
+        
         this.isLoading = false;
       },
       error: () => {
         this.router.navigate(['/dashboard']);
       }
     });
+  }
+
+  onUploadComplete() {
+    this.loadEgitim();
   }
 
   requestContent() {
@@ -99,6 +115,27 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.isRequestingContent = false;
+      }
+    });
+  }
+
+  deleteItem(item: any) {
+    const itemName = item.baslik || item.dosyaAdi || 'bu dosyayı';
+    if (!confirm(`"${itemName}" dosyasını silmek / iptal etmek istediğinize emin misiniz?`)) {
+      return;
+    }
+
+    const obs = item.tip === 'dokuman'
+      ? this.apiService.deleteDokuman(this.egitimId, item.id)
+      : this.apiService.deleteVideo(this.egitimId, item.id);
+
+    obs.subscribe({
+      next: () => {
+        this.loadEgitim();
+      },
+      error: (err) => {
+        console.error('Silme hatası:', err);
+        alert('Dosya silinirken bir hata oluştu.');
       }
     });
   }
