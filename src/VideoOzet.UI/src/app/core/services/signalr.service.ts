@@ -11,6 +11,8 @@ export class SignalRService {
   
   public pipelineStageChanged$ = new Subject<any>();
   public contentGenerated$ = new Subject<any>();
+  public contentProgress$ = new Subject<any>();
+  public contentError$ = new Subject<any>();
 
   public startConnection() {
     // Aynı anda birden fazla bağlantı olmasını engellemek için
@@ -40,6 +42,14 @@ export class SignalRService {
 
     this.hubConnection.on('ContentReady', (data) => {
       this.contentGenerated$.next(data);
+    });
+
+    this.hubConnection.on('ContentProgress', (data) => {
+      this.contentProgress$.next(data);
+    });
+
+    this.hubConnection.on('ContentError', (data) => {
+      this.contentError$.next(data);
     });
   }
 }

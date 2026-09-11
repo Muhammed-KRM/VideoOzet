@@ -26,6 +26,12 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   isRequestingContent = false;
   
   contentResult: any = null;
+  
+  // İlerleme Durumu
+  contentStatus: string = '';
+  contentProgress: number = 0;
+  contentError: string = '';
+  private contentTimeoutId: any;
 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -55,11 +61,33 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       
       this.subs.push(
         this.signalRService.contentGenerated$.subscribe(data => {
-          if (data && data.contentRequestId) {
+          if (data && data.contentRequestId && this.isRequestingContent) {
+            this.contentProgress = 100;
+            this.contentStatus = 'Tamamlandı! Sonuçlar yükleniyor...';
             this.apiService.getContentRequest(data.contentRequestId).subscribe(result => {
               this.isRequestingContent = false;
               this.contentResult = result;
+              if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
             });
+          }
+        })
+      );
+
+      this.subs.push(
+        this.signalRService.contentProgress$.subscribe(data => {
+          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
+            this.contentStatus = data.asama;
+            this.contentProgress = data.yuzde;
+          }
+        })
+      );
+
+      this.subs.push(
+        this.signalRService.contentError$.subscribe(data => {
+          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
+            this.contentError = 'İçerik üretilirken hata oluştu: ' + data.hataMesaji;
+            this.isRequestingContent = false;
+            if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
           }
         })
       );
@@ -102,6 +130,19 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     if (!this.contentTopic) return;
     this.isRequestingContent = true;
     this.contentResult = null;
+    this.contentStatus = 'Sıraya Alındı, Bekleniyor...';
+    this.contentProgress = 5;
+    this.contentError = '';
+    
+    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+
+    // 5 dakikalık zaman aşımı
+    this.contentTimeoutId = setTimeout(() => {
+      if (this.isRequestingContent) {
+        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde (RabbitMQ veya Worker) bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
+        this.isRequestingContent = false;
+      }
+    }, 5 * 60 * 1000);
     
     const payload = {
       konu: this.contentTopic,
@@ -115,6 +156,8 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.isRequestingContent = false;
+        this.contentError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
+        if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
       }
     });
   }
@@ -146,5 +189,6 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.subs.forEach(s => s.unsubscribe());
+    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
   }
 }

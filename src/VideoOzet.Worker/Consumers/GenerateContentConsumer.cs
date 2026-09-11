@@ -54,6 +54,15 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             request.Durum = ContentRequestDurumu.IcerikUretiliyor;
             await _dbContext.SaveChangesAsync();
 
+            await context.Publish(new ContentProgressEvent
+            {
+                ContentRequestId = request.Id,
+                EgitimId = message.EgitimId,
+                Asama = "Kaynaklar Araştırılıyor",
+                Durum = "İşleniyor",
+                Yuzde = 10
+            });
+
             // 1. Kullanıcının konusunu Vektöre Çevir
             var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(message.Konu);
             var queryVector = new Pgvector.Vector(queryEmbedding);
@@ -76,6 +85,15 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             }
             var contextData = contextBuilder.ToString();
 
+            await context.Publish(new ContentProgressEvent
+            {
+                ContentRequestId = request.Id,
+                EgitimId = message.EgitimId,
+                Asama = "İçerik Üretiliyor",
+                Durum = "İşleniyor",
+                Yuzde = 40
+            });
+
             // 4. LLM Üretimi: Araştırma Özeti ve Video Planı
             var arastirmaOzeti = await _synthesisProvider.GenerateResearchSummaryAsync(
                 message.Konu, 
@@ -96,7 +114,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
                 ContentRequestId = request.Id,
                 ArastirmaOzeti = arastirmaOzeti,
                 VideoPlani = videoPlani,
-                KullanilanKaynaklar = string.Join(",", topChunks.Select(c => c.Id)), // Basit loglama, UI'da QC ile detaylanacak
+                KullanilanKaynaklar = System.Text.Json.JsonSerializer.Serialize(topChunks.Select(c => c.Id)),
                 LlmModel = "Claude-3.5-Sonnet", // Varsayılan/Config'den alınabilir
                 UretimSuresiMs = 0, // Ölçülebilir
                 OlusturmaTarihi = DateTime.UtcNow
@@ -107,6 +125,15 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
             // QC öncesi durumu güncelle
             request.Durum = ContentRequestDurumu.QcYapiliyor;
             await _dbContext.SaveChangesAsync();
+
+            await context.Publish(new ContentProgressEvent
+            {
+                ContentRequestId = request.Id,
+                EgitimId = message.EgitimId,
+                Asama = "Kalite Kontrol (QC) Yapılıyor",
+                Durum = "İşleniyor",
+                Yuzde = 80
+            });
 
             // 6. Kalite Kontrol (QC) aşamasını tetikle
             await context.Publish(new ContentGeneratedEvent
@@ -121,14 +148,45 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "İçerik üretilirken hata oluştu: {Message}", ex.Message);
-            await _logService.LogFunctionErrorAsync(nameof(GenerateContentConsumer), ex, message);
-            await _logService.LogPipelineErrorAsync(logId, ex);
+            
+            _dbContext.ChangeTracker.Clear();
 
-            var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
-            if (request != null)
+            try
             {
-                request.Durum = ContentRequestDurumu.Hata;
-                await _dbContext.SaveChangesAsync();
+                await _logService.LogFunctionErrorAsync(nameof(GenerateContentConsumer), ex, message);
+                await _logService.LogPipelineErrorAsync(logId, ex);
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogError(logEx, "Loglama servisi hatası: {Message}", logEx.Message);
+            }
+
+            try
+            {
+                var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
+                if (request != null)
+                {
+                    request.Durum = ContentRequestDurumu.Hata;
+                    await _dbContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception dbEx)
+            {
+                _logger.LogError(dbEx, "ContentRequest durum güncelleme hatası: {Message}", dbEx.Message);
+            }
+
+            try
+            {
+                await context.Publish(new ContentErrorEvent
+                {
+                    ContentRequestId = message.ContentRequestId,
+                    EgitimId = message.EgitimId,
+                    HataMesaji = ex.Message
+                });
+            }
+            catch (Exception pubEx)
+            {
+                _logger.LogError(pubEx, "ContentErrorEvent publish hatası: {Message}", pubEx.Message);
             }
         }
     }

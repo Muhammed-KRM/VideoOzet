@@ -66,7 +66,23 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
 
             if (!string.IsNullOrEmpty(chunkIdsStr))
             {
-                var chunkIds = chunkIdsStr.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
+                List<Guid> chunkIds = new();
+                try
+                {
+                    if (chunkIdsStr.TrimStart().StartsWith("["))
+                    {
+                        chunkIds = JsonSerializer.Deserialize<List<Guid>>(chunkIdsStr) ?? new();
+                    }
+                    else
+                    {
+                        chunkIds = chunkIdsStr.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "Kullanılan kaynaklar parse edilemedi: {ChunkIdsStr}", chunkIdsStr);
+                }
+
                 var chunks = await _dbContext.VideoChunkDocuments.Where(c => chunkIds.Contains(c.Id)).ToListAsync();
                 
                 var contextBuilder = new StringBuilder();
@@ -82,7 +98,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             var desteklenen = 0;
             var belirsiz = 0;
             var desteklenmeyen = 0;
-            var detayliRaporBuilder = new StringBuilder();
+            var raporList = new List<object>();
 
             foreach (var claim in claims)
             {
@@ -92,28 +108,35 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 try
                 {
                     using var doc = JsonDocument.Parse(verificationResultJson);
-                    var durum = doc.RootElement.GetProperty("durum").GetString()?.ToLowerInvariant();
-                    var aciklama = doc.RootElement.GetProperty("aciklama").GetString();
+                    var durum = doc.RootElement.GetProperty("durum").GetString()?.ToLowerInvariant() ?? "belirsiz";
+                    var aciklama = doc.RootElement.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
 
                     if (durum == "desteklendi") desteklenen++;
                     else if (durum == "desteklenmedi") desteklenmeyen++;
-                    else belirsiz++;
+                    else { durum = "belirsiz"; belirsiz++; }
 
-                    detayliRaporBuilder.AppendLine($"İddia: {claim}");
-                    detayliRaporBuilder.AppendLine($"Durum: {durum}");
-                    detayliRaporBuilder.AppendLine($"Açıklama: {aciklama}");
-                    detayliRaporBuilder.AppendLine("---");
+                    raporList.Add(new
+                    {
+                        iddia = claim,
+                        durum = durum,
+                        aciklama = aciklama ?? ""
+                    });
                 }
                 catch (Exception)
                 {
                     _logger.LogWarning("QC Parse Error. Yanıt JSON değildi. İddia: {Claim}, Yanıt: {Response}", claim, verificationResultJson);
                     belirsiz++;
-                    detayliRaporBuilder.AppendLine($"İddia: {claim} \nDurum: belirsiz \nAçıklama: Model düzgün JSON dönmedi.\n---");
+                    raporList.Add(new
+                    {
+                        iddia = claim,
+                        durum = "belirsiz",
+                        aciklama = "Model geçerli bir doğrulama çıktısı üretmedi."
+                    });
                 }
             }
 
             var toplamIddia = claims.Count;
-            decimal guvenYuzde = toplamIddia == 0 ? 100 : (decimal)desteklenen / toplamIddia * 100;
+            decimal guvenYuzde = toplamIddia == 0 ? 100 : Math.Round((decimal)desteklenen / toplamIddia * 100, 2);
 
             // 4. QcResult Kaydı
             var qcResult = new QcResult
@@ -123,7 +146,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 DesteklenenSayisi = desteklenen,
                 BelirsizSayisi = belirsiz,
                 DesteklenmeyenSayisi = desteklenmeyen,
-                DetayliRapor = detayliRaporBuilder.ToString(),
+                DetayliRapor = JsonSerializer.Serialize(raporList),
                 GuvenSkorYuzde = guvenYuzde,
                 OlusturmaTarihi = DateTime.UtcNow
             };
@@ -135,7 +158,16 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             request.TamamlanmaTarihi = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
 
-            // 6. SignalR Bildirimi için ContentReadyEvent fırlat
+            // 6. SignalR Bildirimi için ContentProgress ve ContentReadyEvent fırlat
+            await context.Publish(new ContentProgressEvent
+            {
+                ContentRequestId = request.Id,
+                EgitimId = message.EgitimId,
+                Asama = "Tamamlandı",
+                Durum = "Tamamlandı",
+                Yuzde = 100
+            });
+
             await context.Publish(new ContentReadyEvent
             {
                 ContentRequestId = request.Id,
@@ -147,14 +179,45 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "QC (Kalite Kontrol) sırasında hata oluştu: {Message}", ex.Message);
-            await _logService.LogFunctionErrorAsync(nameof(QualityCheckConsumer), ex, message);
-            await _logService.LogPipelineErrorAsync(logId, ex);
+            
+            _dbContext.ChangeTracker.Clear();
 
-            var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
-            if (request != null)
+            try
             {
-                request.Durum = ContentRequestDurumu.Hata;
-                await _dbContext.SaveChangesAsync();
+                await _logService.LogFunctionErrorAsync(nameof(QualityCheckConsumer), ex, message);
+                await _logService.LogPipelineErrorAsync(logId, ex);
+            }
+            catch (Exception logEx)
+            {
+                _logger.LogError(logEx, "Loglama servisi hatası: {Message}", logEx.Message);
+            }
+
+            try
+            {
+                var request = await _dbContext.ContentRequests.FindAsync(message.ContentRequestId);
+                if (request != null)
+                {
+                    request.Durum = ContentRequestDurumu.Hata;
+                    await _dbContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception dbEx)
+            {
+                _logger.LogError(dbEx, "ContentRequest durum güncelleme hatası: {Message}", dbEx.Message);
+            }
+
+            try
+            {
+                await context.Publish(new ContentErrorEvent
+                {
+                    ContentRequestId = message.ContentRequestId,
+                    EgitimId = message.EgitimId,
+                    HataMesaji = ex.Message
+                });
+            }
+            catch (Exception pubEx)
+            {
+                _logger.LogError(pubEx, "ContentErrorEvent publish hatası: {Message}", pubEx.Message);
             }
         }
     }
