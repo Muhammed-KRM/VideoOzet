@@ -30,12 +30,16 @@ public class GeminiSummarizer : IGeminiProvider
         var model = googleAI.GenerativeModel(model: modelName);
 
         var prompt = $@"
-        Aşağıdaki video transkriptini inceleyip yapılandırılmış bir özet üret. 
+        Sen bir bilgi çıkarma ve rafinasyon uzmanısın. Görevin aşağıdaki metni klasik anlamda 'özetlemek' değil, 'damıtmak'tır. Aşağıdaki kurallara kesinlikle uy: 
+        1) Konuyla ilgili verilen TÜM bilgileri, iddiaları, kuralları ve teknik detayları %100 oranında koru. Hiçbir bilgi kırıntısını atlama. 
+        2) Konuşmacının kendini tekrar ettiği yerleri, konudan tamamen bağımsız anılarını/sohbetlerini ve 'ııı, eee, yani' gibi boş laflarını tamamen temizle. 
+        3) Çıktın, asıl metnin bilgi yoğunluğunu kaybetmeden sadece gereksiz tekrarlardan ve konu dışı gürültüden arındırılmış, saf ve akıcı bir bilgi dökümü olmalıdır.
+
         Lütfen cevabı sadece geçerli bir JSON formatında döndür.
         
         İstenen JSON formatı:
         {{
-            ""ozetMetni"": ""Eğitmen tarzında detaylı özet"",
+            ""ozetMetni"": ""Damıtılmış, eksiksiz ancak gereksiz tekrarlardan arındırılmış tam metin"",
             ""konuBasliklari"": [""Başlık 1"", ""Başlık 2""],
             ""konuEtiketleri"": [""etiket1"", ""etiket2""]
         }}

@@ -81,6 +81,32 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
         }
 
         _context.VideoChunkDocuments.AddRange(documents);
+        
+        // Video durumunu Tamamlandi olarak güncelle
+        if (_context.Videolar != null)
+        {
+            var video = await _context.Videolar.FindAsync(evt.VideoId);
+            if (video != null)
+            {
+                video.IslemDurumu = VideoOzet.Data.Enums.VideoIslemDurumu.Tamamlandi;
+                video.IslemTamamlanmaTarihi = DateTime.UtcNow;
+            }
+        }
+
+        // Eğitimdeki işlenmiş video sayısını artır
+        if (_context.Egitimler != null)
+        {
+            var egitim = await _context.Egitimler.FindAsync(evt.EgitimId);
+            if (egitim != null)
+            {
+                egitim.IslenmiVideoSayisi++;
+                if (egitim.ToplamVideoSayisi > 0 && egitim.IslenmiVideoSayisi >= egitim.ToplamVideoSayisi)
+                {
+                    egitim.Durum = VideoOzet.Data.Enums.EgitimDurumu.Tamamlandi;
+                }
+            }
+        }
+
         await _context.SaveChangesAsync();
 
         _logger.LogInformation("Indexed {ChunkCount} chunks for Video: {VideoId}", documents.Count, evt.VideoId);

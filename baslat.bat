@@ -1,25 +1,38 @@
 @echo off
+cls
 echo ========================================================
-echo       OzelDers.com Platformu Baslatiliyor...
+echo       Video Ozet Sistemi Baslatiliyor...
 echo ========================================================
 echo.
-echo Docker imajlari derleniyor ve servisler (Nginx, API, Web, Postgres vb.) ayaklandiriliyor...
-echo Bu islem internet hizina gore biraz srebilir, lutfen pencereyi kapatmayin.
-echo.
 
-docker-compose up --build -d
+echo [1/3] Docker servisleri baslatiliyor...
+docker-compose -f docker-compose.dev.yml up -d
+
+echo.
+echo [2/3] Servislerin hazir olmasi bekleniyor...
+ping 127.0.0.1 -n 5 > nul
+
+echo.
+echo [3/3] API, Worker ve Frontend pencereleri aciliyor...
+
+start "VideoOzet-API" cmd /k "cd /d "%~dp0src\VideoOzet.API" && dotnet run"
+start "VideoOzet-Worker" cmd /k "cd /d "%~dp0src\VideoOzet.Worker" && dotnet run"
+start "VideoOzet-UI" cmd /k "cd /d "%~dp0src\VideoOzet.UI" && npm start"
+
+echo.
+echo Tarayici aciliyor...
+ping 127.0.0.1 -n 7 > nul
+start http://localhost:4200
+start http://localhost:5001/swagger
 
 echo.
 echo ========================================================
-echo Sistemin tam olarak hazir olmasi (Veritabaninin acilmasi) icin 10 saniye bekleniyor...
-ping -n 11 127.0.0.1 > nul
-
-echo Tarayicilarda Web Sitesi ve Swagger API Ekrani aciliyor...
-start http://localhost
-start http://localhost:5001/swagger/index.html
-
-echo.
-echo Basariyla tamamlandi! Tarayicilarinizi kontrol edebilirsiniz.
-echo Bu pencereyi kapatabilirsiniz (Arka planda server calismaya devam edecektir).
+echo Sistem Basariyla Baslatildi!
+echo Arayuz:    http://localhost:4200
+echo Swagger:   http://localhost:5001/swagger
+echo MinIO:     http://localhost:9001 (minioadmin / minioadmin)
+echo RabbitMQ:  http://localhost:15672 (guest / guest)
+echo API Key:   SUPER_SECRET_API_KEY_123!
 echo ========================================================
+echo Bu pencereyi kapatabilirsiniz.
 pause

@@ -27,7 +27,7 @@ public class OpenAIEmbeddingProvider : IEmbeddingProvider
 
     public async Task<List<float[]>> GenerateEmbeddingsAsync(List<string> texts, string modelName = "text-embedding-3-small")
     {
-        var apiKey = _configuration["OPENAI_API_KEY"];
+        var apiKey = _configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"];
         if (string.IsNullOrEmpty(apiKey))
         {
             _logger.LogWarning("OPENAI_API_KEY is not set. Generating mock embeddings of size 1536.");

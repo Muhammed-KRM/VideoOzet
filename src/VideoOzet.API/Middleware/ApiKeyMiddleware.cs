@@ -12,22 +12,43 @@ public class ApiKeyMiddleware
 
     public async Task InvokeAsync(HttpContext context, IConfiguration configuration)
     {
-        // Swagger UI ve development ortamında kolaylık olması için bazı endpointleri atlayabiliriz
-        if (context.Request.Path.StartsWithSegments("/swagger") || 
-            context.Request.Path.StartsWithSegments("/health"))
+        // CORS preflight requests must pass without auth
+        if (context.Request.Method == "OPTIONS")
         {
             await _next(context);
             return;
         }
 
-        if (!context.Request.Headers.TryGetValue(APIKEYNAME, out var extractedApiKey))
+        // Swagger UI, health checks, and SignalR hubs
+        if (context.Request.Path.StartsWithSegments("/swagger") || 
+            context.Request.Path.StartsWithSegments("/health") ||
+            context.Request.Path.StartsWithSegments("/hubs"))
+        {
+            await _next(context);
+            return;
+        }
+
+        // Check header first, then query parameter
+        string? extractedApiKey = null;
+        if (context.Request.Headers.TryGetValue(APIKEYNAME, out var headerValue))
+        {
+            extractedApiKey = headerValue.ToString();
+        }
+        else if (context.Request.Query.TryGetValue("apiKey", out var queryValue) ||
+                 context.Request.Query.TryGetValue("access_token", out queryValue))
+        {
+            extractedApiKey = queryValue.ToString();
+        }
+
+        if (string.IsNullOrEmpty(extractedApiKey))
         {
             context.Response.StatusCode = 401;
             await context.Response.WriteAsync("API Key was not provided.");
             return;
         }
 
-        var appSettingsApiKey = configuration.GetValue<string>("ApiKey");
+        var appSettingsApiKey = configuration.GetValue<string>("ApiKey") 
+                                ?? configuration.GetValue<string>("ADMIN_API_KEY");
 
         if (appSettingsApiKey == null || !appSettingsApiKey.Equals(extractedApiKey))
         {

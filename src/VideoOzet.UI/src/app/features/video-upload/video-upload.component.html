@@ -12,7 +12,7 @@
     type="file" 
     #fileInput 
     (change)="onFileSelected($event)" 
-    accept="video/*" 
+    accept="video/*,.pdf,.docx,.pptx,.txt" 
     class="hidden"
   >
   
@@ -22,7 +22,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
       </svg>
     </div>
-    <h3 class="text-lg font-medium text-white mb-1">Videoları Sürükleyip Bırakın</h3>
+    <h3 class="text-lg font-medium text-white mb-1">Video veya Döküman (PDF, DOCX) Sürükleyip Bırakın</h3>
     <p class="text-slate-400 text-sm mb-4">veya bilgisayarınızdan seçin</p>
     <button 
       (click)="fileInput.click()"
@@ -34,7 +34,7 @@
 
   <div *ngIf="isUploading" class="py-4">
     <div class="animate-spin mx-auto h-10 w-10 border-4 border-slate-600 border-t-blue-500 rounded-full mb-4"></div>
-    <h3 class="text-white font-medium">Video Yükleniyor...</h3>
+    <h3 class="text-white font-medium">Dosya Yükleniyor...</h3>
     <p class="text-sm text-slate-400">Lütfen tarayıcıyı kapatmayın</p>
   </div>
 </div>

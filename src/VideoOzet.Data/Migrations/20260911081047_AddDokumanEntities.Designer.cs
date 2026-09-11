@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pgvector;
@@ -12,9 +13,11 @@ using VideoOzet.Data.Context;
 namespace VideoOzet.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911081047_AddDokumanEntities")]
+    partial class AddDokumanEntities
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -720,10 +723,6 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("now()");
 
-                    b.Property<Guid?>("DokumanId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("dokuman_id");
-
                     b.Property<Guid>("EgitimId")
                         .HasColumnType("uuid")
                         .HasColumnName("egitim_id");
@@ -745,7 +744,7 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("text");
 
-                    b.Property<Guid?>("VideoId")
+                    b.Property<Guid>("VideoId")
                         .HasColumnType("uuid")
                         .HasColumnName("video_id");
 

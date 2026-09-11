@@ -16,5 +16,6 @@ public class Egitim
     public EgitimDurumu Durum { get; set; }
 
     public ICollection<Video> Videolar { get; set; } = new List<Video>();
+    public ICollection<Dokuman> Dokumanlar { get; set; } = new List<Dokuman>();
     public ICollection<ContentRequest> ContentRequests { get; set; } = new List<ContentRequest>();
 }

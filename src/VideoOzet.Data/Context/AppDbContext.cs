@@ -13,6 +13,8 @@ public class AppDbContext : DbContext
 
     public virtual DbSet<Egitim> Egitimler { get; set; } = null!;
     public virtual DbSet<Video> Videolar { get; set; } = null!;
+    public virtual DbSet<Dokuman> Dokumanlar { get; set; } = null!;
+    public virtual DbSet<DokumanMetin> DokumanMetinleri { get; set; } = null!;
     public virtual DbSet<VideoTranscript> VideoTranscripts { get; set; } = null!;
     public virtual DbSet<VideoSummary> VideoSummaries { get; set; } = null!;
     public virtual DbSet<ContentRequest> ContentRequests { get; set; } = null!;

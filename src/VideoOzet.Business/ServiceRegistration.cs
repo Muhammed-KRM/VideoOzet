@@ -30,6 +30,7 @@ public static class ServiceRegistration
         // Services Registration
         services.AddScoped<IEgitimService, EgitimManager>();
         services.AddScoped<IVideoService, VideoManager>();
+        services.AddScoped<IDokumanService, DokumanService>();
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
         services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>()
             .AddStandardResilienceHandler();
@@ -41,7 +42,9 @@ public static class ServiceRegistration
 
         // Redis Registration
         var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6379";
-        services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(StackExchange.Redis.ConnectionMultiplexer.Connect(redisConn));
+        var redisOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConn);
+        redisOptions.AbortOnConnectFail = false;
+        services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(StackExchange.Redis.ConnectionMultiplexer.Connect(redisOptions));
         services.AddSingleton<ICacheService, VideoOzet.Business.Infrastructure.Cache.RedisCacheService>();
 
         // MassTransit (RabbitMQ) Registration

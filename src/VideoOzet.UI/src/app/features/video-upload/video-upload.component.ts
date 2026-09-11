@@ -44,8 +44,12 @@ export class VideoUploadComponent {
     
     const file = files[0];
     
-    if (!file.type.startsWith('video/')) {
-      alert('Lütfen sadece video dosyası seçin.');
+    if (!file.type.startsWith('video/') && 
+        !file.name.toLowerCase().endsWith('.pdf') && 
+        !file.name.toLowerCase().endsWith('.docx') && 
+        !file.name.toLowerCase().endsWith('.pptx') &&
+        !file.name.toLowerCase().endsWith('.txt')) {
+      alert('Lütfen video, PDF, Word veya PowerPoint dosyası seçin.');
       return;
     }
 
@@ -54,7 +58,7 @@ export class VideoUploadComponent {
     formData.append('baslik', file.name);
 
     this.isUploading = true;
-    this.apiService.uploadVideo(this.egitimId, formData).subscribe({
+    this.apiService.uploadFile(this.egitimId, formData).subscribe({
       next: () => {
         this.isUploading = false;
         // SignalR will handle the progress UI from here

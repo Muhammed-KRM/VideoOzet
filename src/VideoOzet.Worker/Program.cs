@@ -31,6 +31,8 @@ var host = Host.CreateDefaultBuilder(args)
             mt.AddConsumer<IndexSummaryConsumer>();
             mt.AddConsumer<GenerateContentConsumer>();
             mt.AddConsumer<QualityCheckConsumer>();
+            mt.AddConsumer<ExtractDokumanTextConsumer>();
+            mt.AddConsumer<IndexDokumanConsumer>();
         });
 
     })

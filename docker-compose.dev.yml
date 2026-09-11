@@ -1,12 +1,12 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     environment:
-      POSTGRES_DB: ozelders
-      POSTGRES_USER: ozelders_user
-      POSTGRES_PASSWORD: OzelDers_Dev_2024!
+      POSTGRES_DB: videoozet
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
 
   redis:
     image: redis:7-alpine
@@ -16,5 +16,26 @@ services:
     image: rabbitmq:3-management
     ports: ["5672:5672", "15672:15672"]
 
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: [ollama_data:/root/.ollama]
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+
 volumes:
   pgdata:
+  minio_data:
+  ollama_data:

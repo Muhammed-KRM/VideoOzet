@@ -27,8 +27,8 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/egitimler/${id}`);
   }
 
-  uploadVideo(egitimId: string, formData: FormData): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/upload`, formData);
+  uploadFile(egitimId: string, formData: FormData): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/upload`, formData);
   }
 
   getEgitimVideos(egitimId: string): Observable<any[]> {

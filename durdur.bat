@@ -1,11 +1,22 @@
 @echo off
+cls
 echo ========================================================
-echo       OzelDers.com Sistemi Durduruluyor...
+echo       Video Ozet Sistemi Durduruluyor...
 echo ========================================================
 echo.
-docker-compose down
+
+echo Docker servisleri durduruluyor...
+cd /d "%~dp0"
+docker-compose -f docker-compose.dev.yml stop
+
 echo.
-echo Sistem basariyla durduruldu. 
-echo Yeni tasarimi gormek icin 'baslat.bat' dosyasini kullanabilirsiniz.
+echo Calisan konsol pencereleri kapatiliyor...
+taskkill /FI "WINDOWTITLE eq VideoOzet-API*" /F /T > nul 2>&1
+taskkill /FI "WINDOWTITLE eq VideoOzet-Worker*" /F /T > nul 2>&1
+taskkill /FI "WINDOWTITLE eq VideoOzet-UI*" /F /T > nul 2>&1
+
 echo.
+echo ========================================================
+echo Sistem basariyla durduruldu.
+echo ========================================================
 pause

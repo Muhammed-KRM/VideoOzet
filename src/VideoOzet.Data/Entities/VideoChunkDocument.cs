@@ -6,7 +6,8 @@ namespace VideoOzet.Data.Entities;
 public class VideoChunkDocument
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid VideoId { get; set; }
+    public Guid? VideoId { get; set; }
+    public Guid? DokumanId { get; set; }
     public Guid EgitimId { get; set; }
     public int StartTimeMs { get; set; }
     public int EndTimeMs { get; set; }
