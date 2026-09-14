@@ -17,4 +17,5 @@ public class ContentRequest
     public Egitim Egitim { get; set; } = null!;
     public GeneratedContent? GeneratedContent { get; set; }
     public QcResult? QcResult { get; set; }
+    public ICollection<ContentVersion> Versions { get; set; } = new List<ContentVersion>();
 }

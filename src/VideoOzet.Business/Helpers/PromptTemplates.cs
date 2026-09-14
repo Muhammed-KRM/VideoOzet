@@ -68,4 +68,56 @@ public static class PromptTemplates
         
         Not: "durum" değeri SADECE "desteklendi", "desteklenmedi" veya "belirsiz" olabilir.
         """;
+
+    public const string RevisionPrompt = """
+        Sen uzman bir eğitim ve video içerik mimarısın.
+        Aşağıda mevcut bir "{0}" dokümanı ve kullanıcının bu doküman üzerinde yapılmasını istediği özel revizyon talimatı verilmiştir.
+        
+        DOKÜMAN KONUSU:
+        {3}
+        
+        MEVCUT DOKÜMAN:
+        {1}
+        
+        KULLANICININ REVİZE TALİMATI:
+        {2}
+        
+        KAYNAK BAĞLAMI (Referans gerekirse):
+        {4}
+        
+        ÇOK KRİTİK VE KESİN KURALLAR:
+        1. HEDEF ODAKLI DÜZENLEME: Yalnızca ve sadece kullanıcının revize talimatında açıkça belirttiği kısımları (ekleme, çıkarma, ayrıntılandırma, kısaltma, örnek verme vb.) güncelle.
+        2. DEĞİNİLMEYEN KISIMLARA KESİNLİKLE DOKUNMA: Kullanıcının değiştirilmesini istemediği hiçbir bölümün başlıklarını, maddelerini, tonunu veya metnini BOZMA, SİLME veya KEYFİ OLARAK DEĞİŞTİRME. O kısımları aynen koru.
+        3. AKICILIK VE TUTARLILIK: Yapılan ekleme/değişiklikler dokümanın genel akışına, diline ve Markdown formatına kusursuz şekilde uyum sağlamalıdır.
+        4. EKSİKSİZ ÇIKTI: Yanıtında sadece değişen parçayı değil; değişmeyen kısımları aynen muhafaza ederek revize edilmiş TÜM DOKÜMANI baştan sona eksiksiz Markdown formatında döndür.
+        """;
+
+    public const string ReQcVerificationPrompt = """
+        Sen uzman bir akademik ve eğitim içerik Kalite Kontrol (QC) denetçisisin.
+        Aşağıdaki GÜNCEL İÇERİK metnini, verilen REFERANS KAYNAKLARI ve varsa BİR ÖNCEKİ KALİTE KONTROL RAPORUNU incele.
+
+        GÜNCEL İÇERİK:
+        {1}
+
+        REFERANS KAYNAKLAR:
+        {2}
+
+        ÖNCEKİ KALİTE KONTROL RAPORU (Düzeltilen veya uyarı alan kısımları takip etmek için):
+        {3}
+
+        GÖREVİN VE ANALİZ ADIMLARI:
+        1. ÖNCEKİ HATA / UYARILARIN KONTROLÜ: Eğer önceki raporda "desteklenmedi" veya "belirsiz" olarak işaretlenmiş iddialar varsa, kullanıcının güncel içerikte bu hataları düzeltip düzeltmediğini, kaynaklarla uyumlu hale getirip getirmediğini öncelikle incele. Düzeltilmişse açıklamanda bunu "Önceki hata düzeltildi ve kaynakla doğrulandı" şeklinde açıkça belirt.
+        2. GÜNCEL İÇERİK İDDİALARI: Güncel içerikteki en kritik toplam {0} adet belirleyici olgusal iddiayı (önceki düzeltilenler dahil) tespit et ve referans kaynaklarla karşılaştır.
+        3. NET SINIFLANDIRMA: Her bir iddiayı kesinlikle şu 3 durumdan birine ata: "desteklendi", "belirsiz", "desteklenmedi".
+        4. AÇIKLAMA: Kaynağa dayanan, yapıcı ve net bir gerekçe yaz.
+
+        Lütfen değerlendirme sonucunu SADECE geçerli bir JSON dizisi (array) formatında ver. Markdown kod bloğu tırnakları (```json gibi) veya fazladan açıklama yazmadan doğrudan saf JSON döndür:
+        [
+          {{
+            "iddia": "Metinden çıkarılan olgusal iddia cümlesi",
+            "durum": "desteklendi",
+            "aciklama": "İddianın kaynakla uyumuna ve varsa önceki hatanın düzeltilme durumuna dair net açıklama"
+          }}
+        ]
+        """;
 }

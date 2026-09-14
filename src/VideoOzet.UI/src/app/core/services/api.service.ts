@@ -63,7 +63,19 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/content-requests`, payload);
   }
 
+  getContentRequests(egitimId: string): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/egitimler/${egitimId}/content-requests`);
+  }
+
   getContentRequest(id: string): Observable<any> {
     return this.http.get<any>(`${this.baseUrl}/content-requests/${id}`);
+  }
+
+  reviseContent(id: string, payload: { revizeTalimati: string, hedefAlan?: string }): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/content-requests/${id}/revise`, payload);
+  }
+
+  reRunQualityCheck(id: string, versionNo: number): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/content-requests/${id}/versions/${versionNo}/re-qc`, {});
   }
 }

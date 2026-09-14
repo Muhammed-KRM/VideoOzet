@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public virtual DbSet<VideoSummary> VideoSummaries { get; set; } = null!;
     public virtual DbSet<ContentRequest> ContentRequests { get; set; } = null!;
     public virtual DbSet<GeneratedContent> GeneratedContents { get; set; } = null!;
+    public virtual DbSet<ContentVersion> ContentVersions { get; set; } = null!;
     public virtual DbSet<QcResult> QcResults { get; set; } = null!;
     public virtual DbSet<PipelineLog> PipelineLogs { get; set; } = null!;
     public virtual DbSet<VideoChunkDocument> VideoChunkDocuments { get; set; } = null!;

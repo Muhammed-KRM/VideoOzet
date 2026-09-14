@@ -12,44 +12,202 @@
 
   <!-- Content -->
   <div *ngIf="!isLoading && result">
-    <!-- Tabs -->
-    <div class="flex border-b border-slate-700 bg-slate-900/50">
-      <button 
-        (click)="activeTab = 'ozet'"
-        [class.border-blue-500]="activeTab === 'ozet'"
-        [class.text-blue-400]="activeTab === 'ozet'"
-        [class.text-slate-400]="activeTab !== 'ozet'"
-        class="flex-1 py-4 px-6 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors"
+
+    <!-- ==================== VERSİYON GEÇİŞ VE REVİZYON ÇUBUĞU ==================== -->
+    <div class="bg-slate-950/80 border-b border-slate-700/80 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Sol: Versiyon Seçici Butonları -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mr-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Versiyonlar:
+        </span>
+        
+        <!-- V1, V2, V3... Buton Grubu -->
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <button
+            *ngFor="let ver of versions"
+            (click)="selectVersion(ver)"
+            type="button"
+            [ngClass]="activeVersion?.versiyonNo === ver.versiyonNo 
+              ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/30' 
+              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-700/60 cursor-pointer"
+            [title]="getVersionTitle(ver)"
+          >
+            <span>V{{ ver.versiyonNo }}</span>
+            <span *ngIf="isLatestVersion(ver)" class="text-[10px] bg-indigo-950/60 text-indigo-200 px-1.5 py-0.5 rounded font-normal">
+              Son
+            </span>
+          </button>
+        </div>
+
+        <!-- Aktif versiyon bilgi etiketi -->
+        <div *ngIf="activeVersion" class="text-xs text-slate-400 ml-2 hidden sm:flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>Aktif: <strong class="text-slate-200">V{{ activeVersion.versiyonNo }}</strong></span>
+          <span *ngIf="activeVersion.olusturmaTarihi" class="text-slate-500">
+            ({{ activeVersion.olusturmaTarihi | date:'dd.MM.yyyy HH:mm' }})
+          </span>
+        </div>
+      </div>
+
+      <!-- Sağ: Yapay Zeka ile Revize Et Butonu -->
+      <button
+        (click)="openRevisionModal()"
+        type="button"
+        class="inline-flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-purple-500/25 transition-all active:scale-95 cursor-pointer"
       >
-        Araştırma Özeti
-      </button>
-      <button 
-        (click)="activeTab = 'plan'"
-        [class.border-blue-500]="activeTab === 'plan'"
-        [class.text-blue-400]="activeTab === 'plan'"
-        [class.text-slate-400]="activeTab !== 'plan'"
-        class="flex-1 py-4 px-6 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors"
-      >
-        Video Planı
-      </button>
-      <button 
-        (click)="activeTab = 'qc'"
-        [class.border-blue-500]="activeTab === 'qc'"
-        [class.text-blue-400]="activeTab === 'qc'"
-        [class.text-slate-400]="activeTab !== 'qc'"
-        class="flex-1 py-4 px-6 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors flex items-center justify-center gap-2"
-      >
-        QC Raporu
-        <span class="px-2 py-0.5 rounded-full bg-slate-800 text-xs font-bold"
-          [ngClass]="{
-            'text-emerald-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) >= 80,
-            'text-amber-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) >= 50 && (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) < 80,
-            'text-red-400': (result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0) < 50
-          }"
-        >
-          %{{ result.qcResult?.guvenSkorYuzde ?? result.guvenSkorYuzde ?? 0 }}
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-purple-200 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        <span>İçeriği Revize Et</span>
+        <span class="bg-purple-950/60 text-purple-200 text-[11px] px-1.5 py-0.5 rounded border border-purple-400/30">
+          +V{{ versions.length + 1 }}
         </span>
       </button>
+    </div>
+
+    <!-- Aktif Versiyonun Revizyon Talimatı Varsa Bilgi Kutusu -->
+    <div *ngIf="activeVersion?.revizeTalimati && activeVersion.versiyonNo > 1" class="bg-purple-950/20 border-b border-purple-800/30 px-4 sm:px-6 py-2 flex items-start gap-2 text-xs text-purple-200">
+      <span class="text-purple-400 font-bold">💡</span>
+      <div>
+        <span class="font-semibold text-purple-300">V{{ activeVersion.versiyonNo }} Revizyon Talimatı:</span>
+        <span class="text-slate-300 ml-1 italic">"{{ activeVersion.revizeTalimati }}"</span>
+      </div>
+    </div>
+
+    <!-- Tabs & Action Bar -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-700 bg-slate-900/50 px-2 sm:px-6">
+      
+      <!-- Tabs -->
+      <div class="flex flex-1 overflow-x-auto">
+        <button 
+          (click)="activeTab = 'ozet'"
+          [class.border-blue-500]="activeTab === 'ozet'"
+          [class.text-blue-400]="activeTab === 'ozet'"
+          [class.text-slate-400]="activeTab !== 'ozet'"
+          class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors whitespace-nowrap"
+        >
+          Araştırma Özeti
+        </button>
+        <button 
+          (click)="activeTab = 'plan'"
+          [class.border-blue-500]="activeTab === 'plan'"
+          [class.text-blue-400]="activeTab === 'plan'"
+          [class.text-slate-400]="activeTab !== 'plan'"
+          class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors whitespace-nowrap"
+        >
+          Video Planı
+        </button>
+        <button 
+          (click)="activeTab = 'qc'"
+          [class.border-blue-500]="activeTab === 'qc'"
+          [class.text-blue-400]="activeTab === 'qc'"
+          [class.text-slate-400]="activeTab !== 'qc'"
+          class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+        >
+          <span>QC Raporu</span>
+          <span class="px-2 py-0.5 rounded-full bg-slate-800 text-xs font-bold"
+            [ngClass]="{
+              'text-emerald-400': activeQcScore >= 80,
+              'text-amber-400': activeQcScore >= 50 && activeQcScore < 80,
+              'text-red-400': activeQcScore < 50
+            }"
+          >
+            %{{ activeQcScore }}
+          </span>
+        </button>
+      </div>
+
+      <!-- Sağ Kolon: İndirme Butonu ve Açılır Menüsü -->
+      <div class="relative py-2.5 sm:py-0 self-end sm:self-center">
+        
+        <!-- İndir Butonu -->
+        <button 
+          (click)="toggleDownloadMenu()"
+          type="button"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          <span>Döküman Olarak İndir</span>
+          <span *ngIf="activeVersion" class="bg-indigo-900/60 text-indigo-200 text-[10px] px-1.5 py-0.5 rounded">
+            V{{ activeVersion.versiyonNo }}
+          </span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-200" [class.rotate-180]="isDownloadMenuOpen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <!-- Kopyalandı Bildirimi -->
+        <span *ngIf="copySuccess" class="absolute right-0 -top-8 bg-emerald-600 text-white text-xs font-semibold px-2.5 py-1 rounded shadow-lg animate-bounce">
+          Panoya kopyalandı! ✓
+        </span>
+
+        <!-- Arka Plan Kapatma Katmanı -->
+        <div *ngIf="isDownloadMenuOpen" (click)="isDownloadMenuOpen = false" class="fixed inset-0 z-20"></div>
+
+        <!-- İndirme Menüsü Açılır Kutusu -->
+        <div *ngIf="isDownloadMenuOpen" class="absolute right-0 mt-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2.5 z-30 text-xs sm:text-sm animate-in fade-in zoom-in-95 duration-150">
+          
+          <!-- Word Bölümü -->
+          <div class="px-3.5 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span> Word Belgesi (.doc)
+          </div>
+          <button (click)="downloadDoc('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white font-medium flex items-center gap-2">
+              <span class="text-blue-400 font-bold">W</span> Tüm Raporu İndir
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Özet+Plan+QC</span>
+          </button>
+          <button (click)="downloadDoc('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white font-medium flex items-center gap-2">
+              <span class="text-blue-400 font-bold">W</span> Sadece {{ activeTabTitle }}
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Bu Sekme</span>
+          </button>
+
+          <div class="border-t border-slate-700/80 my-1.5"></div>
+
+          <!-- PDF Bölümü -->
+          <div class="px-3.5 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-rose-400"></span> PDF / Yazdır (.pdf)
+          </div>
+          <button (click)="downloadPdf('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white font-medium flex items-center gap-2">
+              <span>🖨️</span> Tüm Raporu Yazdır / PDF
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">A4 Baskı</span>
+          </button>
+          <button (click)="downloadPdf('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white font-medium flex items-center gap-2">
+              <span>🖨️</span> Sadece {{ activeTabTitle }}
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Bu Sekme</span>
+          </button>
+
+          <div class="border-t border-slate-700/80 my-1.5"></div>
+
+          <!-- Diğer Seçenekler -->
+          <button (click)="downloadMarkdown('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white flex items-center gap-2">
+              <span>📝</span> Markdown (.md) İndir
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Ham Metin</span>
+          </button>
+          <button (click)="copyToClipboard()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group cursor-pointer transition-colors">
+            <span class="group-hover:text-white flex items-center gap-2">
+              <span>📋</span> Metni Panoya Kopyala
+            </span>
+            <span class="text-[11px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Kopyala</span>
+          </button>
+
+        </div>
+      </div>
     </div>
 
     <!-- Tab Content -->
@@ -72,43 +230,304 @@
       </div>
       
       <!-- QC Tab -->
-      <div *ngIf="activeTab === 'qc'">
-        <div class="mb-6 grid grid-cols-3 gap-4 text-center">
-          <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
-            <div class="text-3xl font-bold text-emerald-400 mb-1">{{ result.qcResult?.desteklenenSayisi || 0 }}</div>
-            <div class="text-sm text-slate-400">Doğrulanan İddia</div>
+      <div *ngIf="activeTab === 'qc'" class="space-y-6">
+
+        <!-- QC Üst Bilgi ve Eylem Çubuğu -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-700/80">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-lg border border-indigo-500/30">
+              🛡️
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h4 class="text-sm font-bold text-white">
+                  Versiyon {{ activeVersion?.versiyonNo || 1 }} Kalite Kontrol Raporu
+                </h4>
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold"
+                  [ngClass]="{
+                    'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30': activeQcScore >= 80,
+                    'bg-amber-950/60 text-amber-400 border border-amber-500/30': activeQcScore >= 50 && activeQcScore < 80,
+                    'bg-red-950/60 text-red-400 border border-red-500/30': activeQcScore < 50
+                  }"
+                >
+                  Güven Skoru: %{{ activeQcScore }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">
+                <span *ngIf="activeQcDate">Son Doğrulama: {{ activeQcDate | date:'dd.MM.yyyy HH:mm' }}</span>
+                <span *ngIf="!activeQcDate">Bu versiyon için henüz kontrol çalıştırılmadı</span>
+                <span class="mx-1.5">•</span>
+                <span>Referans video ve döküman kaynakları ile karşılaştırıldı</span>
+              </p>
+            </div>
           </div>
-          <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
-            <div class="text-3xl font-bold text-amber-400 mb-1">{{ result.qcResult?.belirsizSayisi || 0 }}</div>
-            <div class="text-sm text-slate-400">Belirsiz İddia</div>
-          </div>
-          <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
-            <div class="text-3xl font-bold text-red-400 mb-1">{{ result.qcResult?.desteklenmeyenSayisi || 0 }}</div>
-            <div class="text-sm text-slate-400">Desteklenmeyen</div>
+
+          <!-- Tekrar Kalite Kontrolü Yap Butonu -->
+          <button
+            (click)="reRunQualityCheck()"
+            [disabled]="isReQcRunning"
+            type="button"
+            class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-emerald-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          >
+            <svg *ngIf="!isReQcRunning" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span *ngIf="isReQcRunning" class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+            <span>{{ isReQcRunning ? 'Denetleniyor...' : 'Tekrar Kalite Kontrolü Yap (V' + (activeVersion?.versiyonNo || 1) + ')' }}</span>
+          </button>
+        </div>
+
+        <!-- Hata Bildirimi -->
+        <div *ngIf="reQcError" class="p-3.5 bg-red-950/50 border border-red-800 text-red-200 rounded-xl text-xs flex items-start gap-2">
+          <span class="text-base">⚠️</span>
+          <div class="flex-1">{{ reQcError }}</div>
+        </div>
+
+        <!-- Yükleniyor Göstergesi -->
+        <div *ngIf="isReQcRunning" class="p-4 bg-emerald-950/40 border border-emerald-800/40 rounded-xl flex items-center gap-3">
+          <div class="animate-spin rounded-full h-6 w-6 border-2 border-emerald-400 border-t-transparent"></div>
+          <div>
+            <div class="text-xs font-semibold text-emerald-200">
+              Versiyon {{ activeVersion?.versiyonNo || 1 }} için Kalite Kontrolü Yapılıyor...
+            </div>
+            <div class="text-[11px] text-emerald-300/80">
+              Önceki rapordaki hata/uyarıların düzeltilip düzeltilmediği kontrol ediliyor ve güncel içerik kaynaklarla doğrulanıyor.
+            </div>
           </div>
         </div>
 
-        <div class="space-y-4">
-          <h3 class="text-lg font-medium text-white mb-4">İddia Doğrulama Detayları</h3>
-          <div *ngFor="let item of parsedQcReport" class="p-4 rounded-lg bg-slate-900 border border-slate-700">
-            <div class="flex items-start gap-3">
-              <div class="mt-1">
-                <span *ngIf="item.durum === 'desteklendi'" class="text-emerald-400 text-xl">✅</span>
-                <span *ngIf="item.durum === 'belirsiz'" class="text-amber-400 text-xl">⚠️</span>
-                <span *ngIf="item.durum === 'desteklenmedi'" class="text-red-400 text-xl">❌</span>
-              </div>
-              <div>
-                <p class="text-white font-medium mb-2">{{ item.iddia }}</p>
-                <div class="bg-slate-800 rounded p-3 text-sm text-slate-300 border border-slate-700">
-                  <span class="text-slate-500 font-medium block mb-1">Kaynak Açıklaması:</span>
-                  {{ item.aciklama }}
+        <!-- Boş Durum (Bu Versiyon İçin QC Henüz Yoksa) -->
+        <div *ngIf="!hasActiveQc && !isReQcRunning" class="p-8 text-center rounded-xl bg-slate-900 border border-slate-700">
+          <div class="text-4xl mb-3">🔍</div>
+          <h4 class="text-base font-bold text-white mb-1">
+            Versiyon {{ activeVersion?.versiyonNo || 1 }} İçin Kalite Kontrolü Henüz Yapılmadı
+          </h4>
+          <p class="text-xs text-slate-400 max-w-md mx-auto mb-5">
+            Bu versiyon üzerinde yapılan değişikliklerin ve bilgilerin doğruluğunu eğitim kaynaklarıyla karşılaştırmak için kalite kontrolünü başlatabilirsiniz.
+          </p>
+          <button
+            (click)="reRunQualityCheck()"
+            type="button"
+            class="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-lg cursor-pointer"
+          >
+            <span>Kalite Kontrolünü Başlat</span>
+          </button>
+        </div>
+
+        <!-- QC Rapor Sonuçları (Varsa) -->
+        <div *ngIf="hasActiveQc">
+          <!-- İstatistik Kartları -->
+          <div class="mb-6 grid grid-cols-3 gap-4 text-center">
+            <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
+              <div class="text-3xl font-bold text-emerald-400 mb-1">{{ activeDesteklenen }}</div>
+              <div class="text-sm text-slate-400">Doğrulanan İddia</div>
+            </div>
+            <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
+              <div class="text-3xl font-bold text-amber-400 mb-1">{{ activeBelirsiz }}</div>
+              <div class="text-sm text-slate-400">Belirsiz İddia</div>
+            </div>
+            <div class="bg-slate-900 rounded-lg p-4 border border-slate-700">
+              <div class="text-3xl font-bold text-red-400 mb-1">{{ activeDesteklenmeyen }}</div>
+              <div class="text-sm text-slate-400">Desteklenmeyen</div>
+            </div>
+          </div>
+
+          <!-- İddia Doğrulama Listesi -->
+          <div class="space-y-4">
+            <h3 class="text-base font-medium text-white mb-2 flex items-center justify-between">
+              <span>İddia Doğrulama ve Düzeltme Detayları</span>
+              <span class="text-xs text-slate-400 font-normal">Toplam {{ activeQcReport.length }} İddia İncelendi</span>
+            </h3>
+
+            <div *ngFor="let item of activeQcReport" class="p-4 rounded-lg bg-slate-900 border border-slate-700">
+              <div class="flex items-start gap-3">
+                <div class="mt-1 shrink-0">
+                  <span *ngIf="item.durum === 'desteklendi'" class="text-emerald-400 text-xl" title="Kaynak tarafından doğrulandı">✅</span>
+                  <span *ngIf="item.durum === 'belirsiz'" class="text-amber-400 text-xl" title="Kaynakta net bulunamadı">⚠️</span>
+                  <span *ngIf="item.durum === 'desteklenmedi'" class="text-red-400 text-xl" title="Kaynakla çelişiyor">❌</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-2 mb-2">
+                    <p class="text-white font-medium text-sm">{{ item.iddia }}</p>
+                    <span *ngIf="item.aciklama && (item.aciklama.toLowerCase().includes('düzeltil') || item.aciklama.toLowerCase().includes('dogrulandi'))" class="shrink-0 bg-emerald-950/70 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/30">
+                      ✨ Düzeltme Onaylandı
+                    </span>
+                  </div>
+                  <div class="bg-slate-800 rounded-lg p-3 text-xs text-slate-300 border border-slate-700 leading-relaxed">
+                    <span class="text-slate-400 font-semibold block mb-1">Kaynak ve Doğrulama Açıklaması:</span>
+                    {{ item.aciklama }}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
       </div>
 
     </div>
+  </div>
+</div>
+
+<!-- ==================== REVİZYON MODAL DİYALOĞU ==================== -->
+<div *ngIf="isRevisionModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+  <!-- Arka Plan Katmanı -->
+  <div (click)="closeRevisionModal()" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"></div>
+
+  <!-- Modal Kartı -->
+  <div class="relative bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200 my-8">
+    
+    <!-- Modal Başlığı -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center font-bold text-base">
+          ⚡
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white">Yapay Zeka ile İçeriği Revize Et</h3>
+          <p class="text-xs text-slate-400">Yeni versiyon (V{{ versions.length + 1 }}) oluşturulacak</p>
+        </div>
+      </div>
+      <button 
+        (click)="closeRevisionModal()" 
+        [disabled]="isRevising"
+        type="button"
+        class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+      >
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Modal Gövdesi -->
+    <div class="p-6 space-y-4">
+      <!-- Bilgilendirme Notu -->
+      <div class="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3.5 flex items-start gap-3">
+        <svg class="w-5 h-5 text-blue-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="text-xs text-blue-200 leading-relaxed">
+          <strong class="text-blue-300">Hassas Revizyon Garantisi:</strong> Yalnızca değiştirmek, eklemek veya çıkarmak istediğiniz kısımları yazın. Değinmediğiniz tüm diğer bölümler, başlıklar ve formatlar <span class="underline decoration-blue-400">bozulmadan aynen korunur</span>.
+        </div>
+      </div>
+
+      <!-- Hedef Alan Seçimi -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 mb-1.5">Hangi Bölüm Üzerinde Değişiklik Yapılsın?</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            (click)="revisionTarget = 'hepsi'"
+            [ngClass]="revisionTarget === 'hepsi' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'"
+            class="py-2 px-3 rounded-lg border text-xs font-medium transition-all text-center cursor-pointer"
+          >
+            Tüm İçerik (Özet + Plan)
+          </button>
+          <button
+            type="button"
+            (click)="revisionTarget = 'ozet'"
+            [ngClass]="revisionTarget === 'ozet' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'"
+            class="py-2 px-3 rounded-lg border text-xs font-medium transition-all text-center cursor-pointer"
+          >
+            Yalnızca Araştırma Özeti
+          </button>
+          <button
+            type="button"
+            (click)="revisionTarget = 'plan'"
+            [ngClass]="revisionTarget === 'plan' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'"
+            class="py-2 px-3 rounded-lg border text-xs font-medium transition-all text-center cursor-pointer"
+          >
+            Yalnızca Video Planı
+          </button>
+        </div>
+      </div>
+
+      <!-- Talimat Girişi -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 mb-1.5">
+          Revizyon Talimatınız <span class="text-rose-400">*</span>
+        </label>
+        <textarea
+          [(ngModel)]="revisionInstruction"
+          [disabled]="isRevising"
+          rows="4"
+          placeholder="Örneğin: Giriş bölümünü biraz daha çarpıcı ve soru odaklı yap. İkinci bölüme somut 1 örnek ekle. 4. bölümdeki gereksiz detayları çıkar..."
+          class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all resize-none disabled:opacity-50"
+        ></textarea>
+      </div>
+
+      <!-- Hızlı Öneri Etiketleri -->
+      <div>
+        <div class="text-[11px] font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Hızlı Talimat Ekle:</div>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            (click)="appendQuickTag('Giriş bölümünü daha dikkat çekici ve soru odaklı hale getir.')"
+            class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700/60 transition-colors cursor-pointer"
+          >
+            + Girişi Çarpıcı Yap
+          </button>
+          <button
+            type="button"
+            (click)="appendQuickTag('Konuyla ilgili 2 adet somut ve pratik vaka örneği ekle.')"
+            class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700/60 transition-colors cursor-pointer"
+          >
+            + Pratik Örnekler Ekle
+          </button>
+          <button
+            type="button"
+            (click)="appendQuickTag('Ağır teknik terimleri sadeleştirip herkesin anlayabileceği benzetmelerle açıkla.')"
+            class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700/60 transition-colors cursor-pointer"
+          >
+            + Dili Sadeleştir
+          </button>
+          <button
+            type="button"
+            (click)="appendQuickTag('Bölüm alt başlıklarını ve maddeleme ayrıntılarını daha detaylı hale getir.')"
+            class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700/60 transition-colors cursor-pointer"
+          >
+            + Ayrıntıyı Artır
+          </button>
+        </div>
+      </div>
+
+      <!-- Hata Bildirimi -->
+      <div *ngIf="revisionError" class="p-3 bg-red-950/50 border border-red-800 text-red-200 rounded-xl text-xs flex items-start gap-2">
+        <span class="text-base">⚠️</span>
+        <div class="flex-1">{{ revisionError }}</div>
+      </div>
+
+      <!-- Yükleniyor Durumu -->
+      <div *ngIf="isRevising" class="p-4 bg-indigo-950/40 border border-indigo-800/40 rounded-xl flex items-center gap-3">
+        <div class="animate-spin rounded-full h-6 w-6 border-2 border-indigo-400 border-t-transparent"></div>
+        <div>
+          <div class="text-xs font-semibold text-indigo-200">Claude 3.5 içeriği revize ediyor...</div>
+          <div class="text-[11px] text-indigo-300/80">Dokunulmayan kısımlar korunarak yeni versiyon (V{{ versions.length + 1 }}) hazırlanıyor. Lütfen bekleyin...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Altı (Eylem Butonları) -->
+    <div class="px-6 py-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-end gap-3">
+      <button
+        type="button"
+        (click)="closeRevisionModal()"
+        [disabled]="isRevising"
+        class="px-4 py-2 text-xs sm:text-sm font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+      >
+        İptal
+      </button>
+      <button
+        type="button"
+        (click)="submitRevision()"
+        [disabled]="!revisionInstruction.trim() || isRevising"
+        class="inline-flex items-center gap-2 px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 rounded-lg shadow-lg hover:shadow-purple-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      >
+        <span *ngIf="isRevising" class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+        <span>Revize Et ve V{{ versions.length + 1 }} Oluştur</span>
+      </button>
+    </div>
+
   </div>
 </div>

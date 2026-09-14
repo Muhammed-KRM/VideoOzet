@@ -29,4 +29,14 @@ public interface ISynthesisProvider
     /// Metindeki ana iddiaları çıkarıp kaynaklarla tek seferde toplu olarak doğrular (Batch QC).
     /// </summary>
     Task<string> BatchQualityCheckAsync(string summaryText, string contextData, int claimCount = 8, CancellationToken ct = default);
+
+    /// <summary>
+    /// Mevcut içerik üzerinde kullanıcının revize talimatına göre sadece ilgili kısımları günceller, değinilmeyen kısımları aynen korur.
+    /// </summary>
+    Task<string> ReviseContentAsync(string originalContent, string revisionInstruction, string contentType, string topic, string contextData = "", CancellationToken ct = default);
+
+    /// <summary>
+    /// Varsa önceki QC raporundaki hataların düzeltilip düzeltilmediğini ve güncel içeriğin kaynaklarla uyumunu toplu olarak denetler.
+    /// </summary>
+    Task<string> ReQualityCheckAsync(string currentContent, string previousQcReportJson, string contextData, int claimCount = 8, CancellationToken ct = default);
 }

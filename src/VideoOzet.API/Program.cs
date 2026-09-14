@@ -7,6 +7,31 @@ using VideoOzet.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load root .env file if present
+var searchDir = new DirectoryInfo(Directory.GetCurrentDirectory());
+while (searchDir != null)
+{
+    var envPath = Path.Combine(searchDir.FullName, ".env");
+    if (File.Exists(envPath))
+    {
+        foreach (var line in File.ReadAllLines(envPath))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#")) continue;
+            var parts = trimmed.Split('=', 2);
+            if (parts.Length == 2)
+            {
+                var key = parts[0].Trim();
+                var val = parts[1].Trim();
+                Environment.SetEnvironmentVariable(key, val);
+                builder.Configuration[key] = val;
+            }
+        }
+        break;
+    }
+    searchDir = searchDir.Parent;
+}
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

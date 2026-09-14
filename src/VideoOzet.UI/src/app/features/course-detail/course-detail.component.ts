@@ -26,6 +26,8 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   isRequestingContent = false;
   
   contentResult: any = null;
+  pastContentRequests: any[] = [];
+  selectedRequestId: string = '';
   
   // İlerleme Durumu
   contentStatus: string = '';
@@ -67,6 +69,8 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
             this.apiService.getContentRequest(data.contentRequestId).subscribe(result => {
               this.isRequestingContent = false;
               this.contentResult = result;
+              this.selectedRequestId = data.contentRequestId;
+              this.loadPastRequests(false);
               if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
             });
           }
@@ -126,10 +130,39 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
         });
         
         this.isLoading = false;
+        this.loadPastRequests(true);
       },
       error: () => {
         this.router.navigate(['/dashboard']);
       }
+    });
+  }
+
+  loadPastRequests(autoSelectFirst: boolean = false) {
+    this.apiService.getContentRequests(this.egitimId).subscribe({
+      next: (requests) => {
+        this.pastContentRequests = requests || [];
+        if (autoSelectFirst && this.pastContentRequests.length > 0 && !this.contentResult) {
+          const completed = this.pastContentRequests.find(r => r.durum === 'Tamamlandi');
+          if (completed) {
+            this.selectContentRequest(completed.id);
+          } else if (this.pastContentRequests[0]) {
+            this.selectContentRequest(this.pastContentRequests[0].id);
+          }
+        }
+      },
+      error: (err) => console.error('Geçmiş içerikler yüklenemedi:', err)
+    });
+  }
+
+  selectContentRequest(id: string) {
+    if (!id) return;
+    this.selectedRequestId = id;
+    this.apiService.getContentRequest(id).subscribe({
+      next: (result) => {
+        this.contentResult = result;
+      },
+      error: (err) => console.error('İçerik detayı yüklenemedi:', err)
     });
   }
 

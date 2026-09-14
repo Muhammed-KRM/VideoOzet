@@ -143,9 +143,39 @@
     </div>
   </div>
 
-  <!-- Üretilen İçerik Sonucu Component'i (Alt Kısımda) -->
-  <div class="mt-8" *ngIf="contentResult || isRequestingContent">
-     <app-content-result [result]="contentResult" [isLoading]="isRequestingContent"></app-content-result>
+  <!-- Üretilen İçerik Sonucu Alanı (Alt Kısımda) -->
+  <div class="mt-8 space-y-4" *ngIf="contentResult || isRequestingContent || pastContentRequests.length > 0">
+    <!-- Geçmiş Üretilen İçerikler Seçim Çubuğu -->
+    <div *ngIf="pastContentRequests.length > 0" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-slate-800 rounded-xl border border-slate-700/60 shadow-lg">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-white">Yapay Zeka İçerik Geçmişi ({{ pastContentRequests.length }})</h3>
+          <p class="text-xs text-slate-400">Önceki üretilen tüm analiz ve video planlarına buradan ulaşabilirsiniz.</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <label for="historySelect" class="text-xs font-medium text-slate-300 shrink-0">Kayıtlı İçerik:</label>
+        <select 
+          id="historySelect"
+          [ngModel]="selectedRequestId" 
+          (ngModelChange)="selectContentRequest($event)"
+          class="px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs md:text-sm text-white focus:ring-2 focus:ring-indigo-500 max-w-xs md:max-w-md truncate"
+        >
+          <option *ngFor="let req of pastContentRequests" [value]="req.id">
+            {{ req.olusturmaTarihi | date:'dd.MM.yyyy HH:mm' }} - {{ req.konu | slice:0:35 }}... ({{ req.durum }})
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Üretilen İçerik Detayı -->
+    <app-content-result *ngIf="contentResult || isRequestingContent" [result]="contentResult" [isLoading]="isRequestingContent"></app-content-result>
   </div>
 
 </div>

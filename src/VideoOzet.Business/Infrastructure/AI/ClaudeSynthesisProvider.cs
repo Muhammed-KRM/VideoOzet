@@ -111,4 +111,17 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var prompt = string.Format(PromptTemplates.BatchQcPrompt, claimCount, summaryText, contextData);
         return await CallLlmAsync(prompt, ct);
     }
+
+    public async Task<string> ReviseContentAsync(string originalContent, string revisionInstruction, string contentType, string topic, string contextData = "", CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.RevisionPrompt, contentType, originalContent, revisionInstruction, topic, contextData);
+        return await CallLlmAsync(prompt, ct);
+    }
+
+    public async Task<string> ReQualityCheckAsync(string currentContent, string previousQcReportJson, string contextData, int claimCount = 8, CancellationToken ct = default)
+    {
+        var prevReport = string.IsNullOrWhiteSpace(previousQcReportJson) ? "Önceki QC raporu bulunmuyor (İlk denetim)." : previousQcReportJson;
+        var prompt = string.Format(PromptTemplates.ReQcVerificationPrompt, claimCount, currentContent, contextData, prevReport);
+        return await CallLlmAsync(prompt, ct);
+    }
 }
