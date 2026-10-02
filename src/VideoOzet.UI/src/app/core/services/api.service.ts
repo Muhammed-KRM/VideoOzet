@@ -27,6 +27,10 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/egitimler/${id}`);
   }
 
+  cloneEgitim(id: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${id}/clone`, {});
+  }
+
   uploadFile(egitimId: string, formData: FormData): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/upload`, formData);
   }
@@ -37,6 +41,14 @@ export class ApiService {
 
   deleteVideo(egitimId: string, videoId: string): Observable<any> {
     return this.http.delete<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/${videoId}`);
+  }
+
+  retryVideo(egitimId: string, videoId: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/${videoId}/retry`, {});
+  }
+
+  resetQueue(egitimId: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/reset-queue`, {});
   }
 
   deleteDokuman(egitimId: string, dokumanId: string): Observable<any> {

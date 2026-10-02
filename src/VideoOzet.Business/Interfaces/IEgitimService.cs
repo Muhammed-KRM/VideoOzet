@@ -12,4 +12,5 @@ public interface IEgitimService
     Task<EgitimDetailDto> CreateAsync(EgitimCreateDto dto);
     Task<EgitimDetailDto> UpdateAsync(EgitimUpdateDto dto);
     Task DeleteAsync(Guid id);
+    Task<EgitimDetailDto> CloneAsync(Guid id);
 }

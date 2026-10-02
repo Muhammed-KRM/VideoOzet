@@ -107,4 +107,24 @@ export class DashboardComponent implements OnInit {
       }
     });
   }
+
+  cloneCourse(egitim: any, event: Event) {
+    event.stopPropagation();
+    if (!confirm(`"${egitim.ad}" adlı eğitimi tüm içerikleri ve veritabanıyla birlikte klonlamak istediğinize emin misiniz? (Bu işlem eğitim içindeki verilerin büyüklüğüne göre biraz sürebilir)`)) {
+      return;
+    }
+    
+    this.isLoading = true; // Klonlama biraz zaman alabilir diye loading çıkaralım
+    this.apiService.cloneEgitim(egitim.id).subscribe({
+      next: (cloned) => {
+        alert('Eğitim başarıyla klonlandı!');
+        this.loadEgitimler();
+      },
+      error: (err) => {
+        console.error('Klonlama hatası', err);
+        alert('Eğitim klonlanırken bir hata oluştu.');
+        this.isLoading = false;
+      }
+    });
+  }
 }

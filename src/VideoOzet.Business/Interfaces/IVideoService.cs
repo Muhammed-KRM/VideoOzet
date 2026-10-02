@@ -10,4 +10,6 @@ public interface IVideoService
     Task<VideoListDto> UploadVideoAsync(VideoUploadDto dto);
     Task<IEnumerable<VideoListDto>> GetVideosByEgitimIdAsync(Guid egitimId);
     Task DeleteVideoAsync(Guid id);
+    Task RetryVideoAsync(Guid id);
+    Task ResetQueueForEgitimAsync(Guid egitimId);
 }

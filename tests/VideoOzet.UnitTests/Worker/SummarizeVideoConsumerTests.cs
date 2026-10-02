@@ -54,10 +54,13 @@ public class SummarizeVideoConsumerTests
         geminiProviderMock.Setup(g => g.SummarizeAsync(It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync("Mock JSON Summary");
 
+        var publishEndpointMock = new Mock<IPublishEndpoint>();
+        
         var consumer = new SummarizeVideoConsumer(
             loggerMock.Object,
             dbContextMock.Object,
-            geminiProviderMock.Object);
+            geminiProviderMock.Object,
+            publishEndpointMock.Object);
 
         var contextMock = new Mock<ConsumeContext<TranscriptReadyEvent>>();
         contextMock.Setup(c => c.Message).Returns(new TranscriptReadyEvent
@@ -69,7 +72,8 @@ public class SummarizeVideoConsumerTests
         
         // Setup Publish for context to track events published during Consume
         var publishedEvents = new List<object>();
-        contextMock.Setup(c => c.Publish(It.IsAny<PipelineProgressEvent>(), It.IsAny<CancellationToken>()))
+        
+        publishEndpointMock.Setup(c => c.Publish(It.IsAny<PipelineProgressEvent>(), It.IsAny<CancellationToken>()))
             .Callback<PipelineProgressEvent, CancellationToken>((msg, ct) => publishedEvents.Add(msg))
             .Returns(Task.CompletedTask);
             
@@ -81,7 +85,7 @@ public class SummarizeVideoConsumerTests
         await consumer.Consume(contextMock.Object);
 
         // Assert
-        geminiProviderMock.Verify(g => g.SummarizeAsync("Test metni", "gemini-3.5-flash"), Times.Once);
+        geminiProviderMock.Verify(g => g.SummarizeAsync("Test metni", "gemini-1.5-flash"), Times.Once);
         
         savedSummaries.Should().HaveCount(1);
         savedSummaries[0].VideoId.Should().Be(videoId);

@@ -65,7 +65,7 @@ public static class ServiceRegistration
                 });
 
                 // Resilience: Automatic exponential retry for transient errors
-                cfg.UseMessageRetry(r => r.Exponential(3, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(2)));
+                cfg.UseMessageRetry(r => r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5)));
                 
                 cfg.ConfigureEndpoints(context); // Auto-configures consumers
             });

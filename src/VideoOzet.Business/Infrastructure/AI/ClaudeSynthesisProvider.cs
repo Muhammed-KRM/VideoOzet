@@ -51,21 +51,79 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var geminiKey = _configuration["GEMINI_API_KEY"];
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
-            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-3.5-flash";
-            var googleAI = new GoogleAI(geminiKey);
-            try
+            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-1.5-flash";
+            var apiKeys = geminiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                   .Select(k => k.Trim())
+                                   .ToArray();
+            
+            Exception lastException = null;
+            int maxRetries = Math.Max(apiKeys.Length, 3);
+
+            for (int tryCount = 0; tryCount < maxRetries; tryCount++)
             {
-                var genModel = googleAI.GenerativeModel(model: geminiModel);
-                var response = await genModel.GenerateContent(prompt);
-                return response.Text ?? string.Empty;
+                var keyToUse = apiKeys[tryCount % apiKeys.Length];
+
+                try
+                {
+                    using var httpClient = new System.Net.Http.HttpClient();
+                    var requestBody = new
+                    {
+                        model = geminiModel,
+                        messages = new[]
+                        {
+                            new { role = "user", content = prompt }
+                        }
+                    };
+                    var jsonContent = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
+                    var requestUrl = "http://localhost:8045/v1/chat/completions";
+                    
+                    using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, requestUrl);
+                    requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                    requestMessage.Content = jsonContent;
+                    
+                    var response = await httpClient.SendAsync(requestMessage, ct);
+                    
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    if (response.IsSuccessStatusCode)
+                    {
+                        using var jsonDoc = System.Text.Json.JsonDocument.Parse(responseString);
+                        var root = jsonDoc.RootElement;
+                        if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                        {
+                            var firstChoice = choices[0];
+                            if (firstChoice.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content))
+                            {
+                                var textResult = content.GetString();
+                                return textResult ?? string.Empty;
+                            }
+                        }
+                    }
+                    
+                    if (responseString.Contains("503") || responseString.Contains("UNAVAILABLE") || responseString.Contains("429") || responseString.Contains("exhausted"))
+                    {
+                        throw new Exception($"High Demand or Limit: {responseString}");
+                    }
+
+                    throw new Exception($"Gemini API error: {responseString}");
+                }
+                catch (Exception ex) when (ex.Message.Contains("High Demand") || ex.Message.Contains("Limit") || ex.Message.Contains("503") || ex.Message.Contains("429"))
+                {
+                    lastException = ex;
+                    _logger.LogWarning("Gemini API call hit limit/demand on try {Try}. Error: {Error}", tryCount + 1, ex.Message);
+                    if (tryCount < maxRetries - 1)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2 * (tryCount + 1)), ct);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Gemini modeli {Model} beklenmedik hata ile başarısız oldu", geminiModel);
+                    return $"[GEMINI_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}";
+                }
             }
-            catch (Exception ex) when (geminiModel != "gemini-3.6-flash")
-            {
-                _logger.LogWarning(ex, "Gemini modeli {Model} başarısız oldu, yedek model (gemini-3.6-flash) deneniyor...", geminiModel);
-                var fallbackModel = googleAI.GenerativeModel(model: "gemini-3.6-flash");
-                var response = await fallbackModel.GenerateContent(prompt);
-                return response.Text ?? string.Empty;
-            }
+
+            _logger.LogError(lastException, "Gemini modeli {Model} tüm denemelere rağmen başarısız oldu", geminiModel);
+            return "[GEMINI_API_ERROR]: Servis şu anda yoğun talep altında. Lütfen kısa bir süre sonra tekrar deneyin.";
         }
 
         var openAiKey = _configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"];

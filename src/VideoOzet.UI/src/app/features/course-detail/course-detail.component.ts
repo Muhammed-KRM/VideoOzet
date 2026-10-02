@@ -227,6 +227,57 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  retryVideo(item: any) {
+    if (item.tip !== 'video') return;
+    
+    item.durum = 'Bekliyor';
+    item.islemDurumu = 'Bekliyor';
+    item.sonAsama = 'Yeniden Başlatılıyor';
+    item.hataMesaji = null;
+    
+    this.apiService.retryVideo(this.egitimId, item.id).subscribe({
+      next: () => {
+        // Backend'den eventler gelecek
+      },
+      error: (err) => {
+        console.error('Yeniden başlatma hatası:', err);
+        alert('Yeniden başlatılırken hata oluştu.');
+      }
+    });
+  }
+
+  retryAllFailed() {
+    if (!this.egitim || !this.egitim.videos) return;
+    
+    const failedVideos = this.egitim.videos.filter((v: any) => v.tip === 'video' && (v.islemDurumu === 'Hata' || v.durum === 'Hata'));
+    
+    if (failedVideos.length === 0) {
+      alert('Yeniden başlatılacak hatalı video bulunamadı.');
+      return;
+    }
+    
+    if (!confirm(`${failedVideos.length} adet hatalı videoyu kaldığı yerden (transkript varsa özetlemeden) yeniden başlatmak istiyor musunuz?`)) return;
+    
+    failedVideos.forEach((v: any) => {
+      this.retryVideo(v);
+    });
+  }
+
+  resetQueue() {
+    if (!confirm('RabbitMQ kuyruğu boşaltılacak ve eğitimdeki (Tamamlanmamış) tüm videolar yeniden sıraya eklenecektir. Bu işlem eski tıkanıklıkları çözer. Onaylıyor musunuz?')) return;
+    
+    this.apiService.resetQueue(this.egitimId).subscribe({
+      next: (res) => {
+        alert(res.message || 'Kuyruk sıfırlandı!');
+        this.loadEgitim(); // Durumları güncelle
+      },
+      error: (err) => {
+        console.error('Kuyruk sıfırlama hatası:', err);
+        alert('Kuyruk sıfırlanırken hata oluştu.');
+      }
+    });
+  }
+
   goBack() {
     this.router.navigate(['/dashboard']);
   }

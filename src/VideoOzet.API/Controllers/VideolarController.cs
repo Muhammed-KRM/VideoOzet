@@ -50,4 +50,39 @@ public class VideolarController : ControllerBase
         await _videoService.DeleteVideoAsync(id);
         return NoContent();
     }
+
+    [HttpPost("{id:guid}/retry")]
+    public async Task<IActionResult> RetryVideo(Guid egitimId, Guid id)
+    {
+        await _videoService.RetryVideoAsync(id);
+        return Ok(new { message = "Yeniden başlatıldı" });
+    }
+
+    [HttpPost("reset-queue")]
+    public async Task<IActionResult> ResetQueue(Guid egitimId)
+    {
+        // 1. RabbitMQ kuyruklarını temizle (HTTP üzerinden)
+        using var client = new HttpClient();
+        var authBytes = System.Text.Encoding.ASCII.GetBytes("guest:guest");
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
+        
+        var queues = new[] { 
+            "SummarizeVideo", "SummarizeVideo_error", 
+            "ExtractTranscript", "ExtractTranscript_error", 
+            "IndexSummary", "IndexSummary_error",
+            "QualityCheck", "QualityCheck_error",
+            "GenerateContent", "GenerateContent_error",
+            "ExtractDokumanText", "ExtractDokumanText_error",
+            "IndexDokuman", "IndexDokuman_error"
+        };
+        foreach(var q in queues)
+        {
+            try { await client.DeleteAsync($"http://localhost:15672/api/queues/%2f/{q}/contents"); } catch { }
+        }
+
+        // 2. Eğitimdeki videoları yeniden kuyruğa ekle
+        await _videoService.ResetQueueForEgitimAsync(egitimId);
+        
+        return Ok(new { message = "Kuyruk sıfırlandı ve eğitimdeki videolar yeniden sıraya alındı." });
+    }
 }

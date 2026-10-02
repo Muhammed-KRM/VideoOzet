@@ -18,7 +18,23 @@
     <!-- Sol Kolon: Video Listesi ve Yükleme Alanı -->
     <div class="lg:col-span-2 space-y-6">
       <div class="bg-slate-800 rounded-xl p-6 border border-slate-700/50">
-        <h2 class="text-xl font-semibold text-white mb-4">Dosyalar ({{ egitim.videos?.length || 0 }})</h2>
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-white">Dosyalar ({{ egitim.videos?.length || 0 }})</h2>
+          <div class="flex gap-2">
+            <button (click)="resetQueue()" class="px-3 py-1.5 text-xs font-medium bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 rounded-lg border border-rose-500/30 transition-colors flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Kuyruğu Sıfırla
+            </button>
+            <button (click)="retryAllFailed()" class="px-3 py-1.5 text-xs font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 rounded-lg border border-amber-500/30 transition-colors flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Hatalıları Yenile
+            </button>
+          </div>
+        </div>
         
         <!-- Yükleme Komponenti -->
         <app-video-upload [egitimId]="egitimId" (uploadComplete)="onUploadComplete()"></app-video-upload>
@@ -53,6 +69,16 @@
                 </span>
                 <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
               </div>
+              <button 
+                *ngIf="v.tip === 'video' && (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.durum === 'Bekliyor')"
+                (click)="retryVideo(v)" 
+                title="Kaldığı Yerden Yeniden Başlat" 
+                class="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
               <button 
                 (click)="deleteItem(v)" 
                 title="Dosyayı Sil / İptal Et" 

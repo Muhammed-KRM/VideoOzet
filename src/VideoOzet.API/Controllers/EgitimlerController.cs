@@ -46,6 +46,13 @@ public class EgitimlerController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("{id}/clone")]
+    public async Task<IActionResult> Clone(Guid id)
+    {
+        var result = await _egitimService.CloneAsync(id);
+        return Ok(result);
+    }
+
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(Guid id)
     {

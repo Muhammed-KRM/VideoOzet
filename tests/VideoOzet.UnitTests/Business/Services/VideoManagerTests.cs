@@ -24,6 +24,7 @@ public class VideoManagerTests
 {
     private readonly Mock<IRepository<Video>> _mockVideoRepo;
     private readonly Mock<IRepository<Egitim>> _mockEgitimRepo;
+    private readonly Mock<IRepository<VideoTranscript>> _mockTranscriptRepo;
     private readonly Mock<IFileStorageService> _mockFileService;
     private readonly Mock<IPublishEndpoint> _mockPublishEndpoint;
     private readonly Mock<IMapper> _mockMapper;
@@ -34,6 +35,7 @@ public class VideoManagerTests
     {
         _mockVideoRepo = new Mock<IRepository<Video>>();
         _mockEgitimRepo = new Mock<IRepository<Egitim>>();
+        _mockTranscriptRepo = new Mock<IRepository<VideoTranscript>>();
         _mockFileService = new Mock<IFileStorageService>();
         _mockPublishEndpoint = new Mock<IPublishEndpoint>();
         _mockMapper = new Mock<IMapper>();
@@ -42,6 +44,7 @@ public class VideoManagerTests
         _videoManager = new VideoManager(
             _mockVideoRepo.Object,
             _mockEgitimRepo.Object,
+            _mockTranscriptRepo.Object,
             _mockFileService.Object,
             _mockPublishEndpoint.Object,
             _mockMapper.Object,
