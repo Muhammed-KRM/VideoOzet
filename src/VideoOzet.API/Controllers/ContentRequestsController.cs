@@ -168,7 +168,14 @@ public class ContentRequestDetailsController : ControllerBase
                 VideoPlani = request.GeneratedContent.VideoPlani,
                 RevizeTalimati = "İlk Üretim (Orijinal Versiyon)",
                 LlmModel = request.GeneratedContent.LlmModel,
-                OlusturmaTarihi = request.GeneratedContent.OlusturmaTarihi
+                OlusturmaTarihi = request.GeneratedContent.OlusturmaTarihi,
+                ToplamIddiaSayisi = request.QcResult?.ToplamIddiaSayisi,
+                DesteklenenSayisi = request.QcResult?.DesteklenenSayisi,
+                BelirsizSayisi = request.QcResult?.BelirsizSayisi,
+                DesteklenmeyenSayisi = request.QcResult?.DesteklenmeyenSayisi,
+                DetayliRapor = request.QcResult?.DetayliRapor,
+                GuvenSkorYuzde = request.QcResult?.GuvenSkorYuzde,
+                QcTarihi = request.QcResult?.OlusturmaTarihi
             });
         }
 

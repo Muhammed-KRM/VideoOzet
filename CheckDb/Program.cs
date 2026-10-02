@@ -1,0 +1,1 @@
+using Npgsql; using System; var conn = new NpgsqlConnection("Host=localhost;Port=5432;Database=videoozet;Username=postgres;Password=postgres"); conn.Open(); using var cmd = new NpgsqlCommand("SELECT detayli_rapor FROM qc_results ORDER BY olusturma_tarihi DESC LIMIT 1;", conn); using var reader = cmd.ExecuteReader(); while(reader.Read()) { Console.WriteLine(reader.GetString(0)); }
