@@ -120,4 +120,72 @@ public static class PromptTemplates
           }}
         ]
         """;
+
+    public const string TopicAnalysisPrompt = """
+        Aşağıdaki kaynak verilerini kullanarak "{0}" konusu için bir 'Konu Analizi' yap.
+        Amacımız: Verilen kaynakları en verimli şekilde kullanarak hedef kitlenin ilgisini çekecek, sıkıcı bir ders vermekten ziyade ana fikri iyi anlatan dinamik bir içerik tasarlamak.
+
+        KAYNAKLAR:
+        {1}
+
+        Lütfen SADECE geçerli bir JSON objesi döndür:
+        {{
+            "AnaFikir": "Tüm kaynaklardan çıkarılan genel ana fikir",
+            "BeklenenKonular": [ "Konu 1", "Konu 2" ],
+            "KonuHaritasi": [ {{ "Konu": "Konu 1", "Aciklama": "Detay" }} ],
+            "KaynaktaOlmayanlar": [ "Şu konular beklenebilir ancak kaynaklarda yok" ],
+            "OnerilenVideoSayisi": 3,
+            "OneriSuresiDk": 10,
+            "OneriGerekcesi": "Neden bu şekilde bölündüğü ve süresi..."
+        }}
+        """;
+
+    public const string SeriesPlanPrompt = """
+        Aşağıdaki konu analizi ve kaynakları göz önünde bulundurarak "{0}" konusu için detaylı bir çoklu video serisi planı oluştur.
+        Hedef Kitle: {1}
+        
+        KONU ANALİZİ:
+        {2}
+        
+        KAYNAKLAR:
+        {3}
+        
+        KULLANICI KISITLARI (Varsa):
+        {4}
+        
+        Eğer kullanıcı video sayısını belirtmişse veya bazı konuların dışarıda bırakılmasını istemişse KESİNLİKLE uymalısın.
+        Lütfen SADECE geçerli bir JSON objesi döndür:
+        {{
+            "VideoSayisi": 3,
+            "VarsayilanVideoSuresiDk": 10,
+            "OneridenFarkli": false,
+            "SeriHaritasi": [ 
+                {{ "BolumNo": 1, "CalismaBasligi": "Bölüm 1", "HedefSureDk": 10, "AnaFikir": "...", "Konular": ["Konu 1", "Konu 2"] }}
+            ],
+            "DisaridaBirakilanlar": [ "Kaynak yetersizliği veya kısıtlamalar nedeniyle alınmayanlar" ]
+        }}
+        """;
+
+    public const string SeriesVideoGenerationPrompt = """
+        Çoklu video serisinin "{0}" başlıklı bölümü için detaylı araştırma özeti, video planı ve bir sonraki bölüme aktarılacak 'devir notu' oluştur.
+        
+        BÖLÜM KONULARI:
+        {1}
+        
+        ÖNCEKİ VİDEODAN DEVİR NOTU (Eğer varsa dikkate al, bağlamı koparma):
+        {2}
+        
+        HEDEF KİTLE:
+        {3}
+        
+        KAYNAKLAR:
+        {4}
+
+        Lütfen SADECE geçerli bir JSON objesi döndür:
+        {{
+            "ArastirmaOzeti": "Bu bölümün detaylı araştırma özeti (Markdown destekli)",
+            "VideoPlani": "Bu bölümün video yapısı/planı (Markdown destekli)",
+            "DevirNotu": "Eğer varsa bir sonraki videoda bahsedilmesi veya atıfta bulunulması gereken kısa not (yoksa boş bırak)"
+        }}
+        """;
 }

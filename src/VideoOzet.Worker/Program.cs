@@ -65,6 +65,11 @@ var host = Host.CreateDefaultBuilder(args)
             mt.AddConsumer<QualityCheckConsumer>();
             mt.AddConsumer<ExtractDokumanTextConsumer>();
             mt.AddConsumer<IndexDokumanConsumer>();
+            
+            // Phase 3 Consumers
+            mt.AddConsumer<TopicAnalysisConsumer>();
+            mt.AddConsumer<SeriesPlanConsumer>();
+            mt.AddConsumer<SeriesVideoGenerationConsumer>();
         });
 
     })

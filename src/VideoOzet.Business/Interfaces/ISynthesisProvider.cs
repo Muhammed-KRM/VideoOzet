@@ -44,4 +44,22 @@ public interface ISynthesisProvider
     /// Varsa önceki QC raporundaki hataların düzeltilip düzeltilmediğini ve güncel içeriğin kaynaklarla uyumunu toplu olarak denetler.
     /// </summary>
     Task<string> ReQualityCheckAsync(string currentContent, string previousQcReportJson, string contextData, int claimCount = 8, CancellationToken ct = default);
+
+    /// <summary>
+    /// Çoklu video senaryosunda tüm içerikleri tarayarak ana konuyu analiz eder.
+    /// JSON formatında döner (AnaFikir, BeklenenKonular vs).
+    /// </summary>
+    Task<string> AnalyzeTopicAsync(string topic, string allSourcesData, CancellationToken ct = default);
+
+    /// <summary>
+    /// Konu analizine ve mevcut kaynaklara göre bir çoklu video serisi planı oluşturur.
+    /// JSON formatında döner.
+    /// </summary>
+    Task<string> GenerateSeriesPlanAsync(string topic, string targetAudience, string konuAnaliziJson, string allSourcesData, string userConstraintsJson = "", CancellationToken ct = default);
+
+    /// <summary>
+    /// Çoklu video serisindeki belirli bir bölümün içeriğini ve sonraki videoya devir notunu üretir.
+    /// JSON formatında döner.
+    /// </summary>
+    Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, CancellationToken ct = default);
 }

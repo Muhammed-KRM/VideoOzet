@@ -202,4 +202,22 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var prompt = string.Format(PromptTemplates.ReQcVerificationPrompt, claimCount, currentContent, contextData, prevReport);
         return await CallLlmAsync(prompt, ct);
     }
+
+    public async Task<string> AnalyzeTopicAsync(string topic, string allSourcesData, CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.TopicAnalysisPrompt, topic, allSourcesData);
+        return await CallLlmAsync(prompt, ct);
+    }
+
+    public async Task<string> GenerateSeriesPlanAsync(string topic, string targetAudience, string konuAnaliziJson, string allSourcesData, string userConstraintsJson = "", CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.SeriesPlanPrompt, topic, targetAudience, konuAnaliziJson, allSourcesData, userConstraintsJson);
+        return await CallLlmAsync(prompt, ct);
+    }
+
+    public async Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.SeriesVideoGenerationPrompt, bolumBasligi, bolumKonulariJson, oncekiVideoDevirNotuJson, targetAudience, contextData);
+        return await CallLlmAsync(prompt, ct);
+    }
 }
