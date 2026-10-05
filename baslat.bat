@@ -6,8 +6,6 @@ echo ========================================================
 echo.
 
 echo [1/4] Eski acik servisler temizleniyor (Eger varsa)...
-taskkill /F /IM "dotnet.exe" /T > nul 2>&1
-taskkill /F /IM "node.exe" /T > nul 2>&1
 taskkill /F /IM "VideoOzet.API.exe" /T > nul 2>&1
 taskkill /F /IM "VideoOzet.Worker.exe" /T > nul 2>&1
 taskkill /FI "WINDOWTITLE eq VideoOzet-*" /F /T > nul 2>&1
