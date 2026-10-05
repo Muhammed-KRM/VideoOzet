@@ -93,9 +93,9 @@ public class SummarizeVideoConsumerTests
 
         dbContextMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
 
-        // It should publish PipelineProgressEvent (started), SummaryReadyEvent, PipelineProgressEvent (completed)
-        publishedEvents.Should().HaveCount(3);
-        publishedEvents[1].Should().BeOfType<SummaryReadyEvent>();
-        ((SummaryReadyEvent)publishedEvents[1]).VideoId.Should().Be(videoId);
+        // It should publish PipelineProgressEvent (queued), PipelineProgressEvent (started), SummaryReadyEvent, PipelineProgressEvent (completed)
+        publishedEvents.Should().HaveCount(4);
+        publishedEvents[2].Should().BeOfType<SummaryReadyEvent>();
+        ((SummaryReadyEvent)publishedEvents[2]).VideoId.Should().Be(videoId);
     }
 }

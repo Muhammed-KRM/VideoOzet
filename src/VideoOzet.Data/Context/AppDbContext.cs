@@ -43,12 +43,12 @@ public class AppDbContext : DbContext
         {
             modelBuilder.HasPostgresExtension("vector");
         }
-        else if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+        // Apply all configurations in this assembly
+        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
         {
             modelBuilder.Ignore<VideoChunkDocument>();
         }
-
-        // Apply all configurations in this assembly
-        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
     }
 }

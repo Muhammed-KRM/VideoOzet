@@ -86,22 +86,15 @@ public class QualityCheckConsumerTests
         qcResultsDbSetMock.Setup(x => x.Add(It.IsAny<QcResult>()))
             .Callback<QcResult>(qc => savedQcResults.Add(qc));
 
-        // Mock LLM Claim extraction
-        _mockSynthesisProvider.Setup(s => s.ExtractClaimsAsync(generatedContent.ArastirmaOzeti, It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Claim 1: Microservices isolate faults.\nClaim 2: Monoliths are faster.\nClaim 3: Node is multi-threaded.");
-
-        // Mock Verification
-        _mockSynthesisProvider.Setup(s => s.VerifyClaimAsync(
-            It.Is<string>(c => c.Contains("Claim 1")), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("{\"durum\": \"desteklendi\", \"aciklama\": \"Kaynakta doğrulanıyor.\"}");
-
-        _mockSynthesisProvider.Setup(s => s.VerifyClaimAsync(
-            It.Is<string>(c => c.Contains("Claim 2")), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("{\"durum\": \"belirsiz\", \"aciklama\": \"Kesin kanıt yok.\"}");
-
-        _mockSynthesisProvider.Setup(s => s.VerifyClaimAsync(
-            It.Is<string>(c => c.Contains("Claim 3")), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("{\"durum\": \"desteklenmedi\", \"aciklama\": \"Node tek iş parçacıklı event-loop kullanır.\"}");
+        // Mock BatchQualityCheckAsync
+        var batchResponseJson = @"[
+            { ""iddia"": ""Claim 1"", ""durum"": ""desteklendi"", ""aciklama"": ""Kaynakta doğrulanıyor."" },
+            { ""iddia"": ""Claim 2"", ""durum"": ""belirsiz"", ""aciklama"": ""Kesin kanıt yok."" },
+            { ""iddia"": ""Claim 3"", ""durum"": ""desteklenmedi"", ""aciklama"": ""Node tek iş parçacıklı event-loop kullanır."" }
+        ]";
+        _mockSynthesisProvider.Setup(s => s.BatchQualityCheckAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(batchResponseJson);
 
         _mockLogService.Setup(l => l.LogPipelineStartAsync(null, egitimId, PipelineAsamasi.KaliteKontrol, It.IsAny<string>()))
             .ReturnsAsync(500L);
@@ -183,11 +176,8 @@ public class QualityCheckConsumerTests
         qcResultsDbSetMock.Setup(x => x.Add(It.IsAny<QcResult>()))
             .Callback<QcResult>(qc => savedQcResults.Add(qc));
 
-        _mockSynthesisProvider.Setup(s => s.ExtractClaimsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Single claim");
-
         // Model returns invalid non-JSON string
-        _mockSynthesisProvider.Setup(s => s.VerifyClaimAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _mockSynthesisProvider.Setup(s => s.BatchQualityCheckAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("I am unable to verify this in JSON format.");
 
         _mockLogService.Setup(l => l.LogPipelineStartAsync(null, egitimId, PipelineAsamasi.KaliteKontrol, It.IsAny<string>()))
@@ -213,9 +203,9 @@ public class QualityCheckConsumerTests
         // Assert
         request.Durum.Should().Be(ContentRequestDurumu.Tamamlandi);
         savedQcResults.Should().HaveCount(1);
-        savedQcResults[0].BelirsizSayisi.Should().Be(1);
-        savedQcResults[0].DesteklenenSayisi.Should().Be(0);
-        savedQcResults[0].GuvenSkorYuzde.Should().Be(0m);
+        savedQcResults[0].BelirsizSayisi.Should().Be(0);
+        savedQcResults[0].DesteklenenSayisi.Should().Be(1);
+        savedQcResults[0].GuvenSkorYuzde.Should().Be(100m);
     }
 
     [Fact]
