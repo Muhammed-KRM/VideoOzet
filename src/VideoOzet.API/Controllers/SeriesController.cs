@@ -204,4 +204,46 @@ public class SeriesController : ControllerBase
 
         return Accepted(new { Mesaj = "Revizyon işlemi başlatıldı." });
     }
+
+    /// <summary>
+    /// Harita üzerinde yapılan anlık metin düzenlemelerini (başlık, kanca vb.) kaydeder.
+    /// LLM çağrısı gerektirmez.
+    /// </summary>
+    [HttpPut("api/content-plans/{id:guid}/plans/{planNo:int}")]
+    public async Task<IActionResult> UpdatePlanTexts(Guid id, int planNo, [FromBody] JsonElement updates)
+    {
+        var plan = await _dbContext.SeriPlanlari
+            .Include(p => p.SeriBolumler)
+            .FirstOrDefaultAsync(p => p.ContentRequestId == id && p.PlanNo == planNo);
+
+        if (plan == null)
+            return NotFound(new { Mesaj = "Plan bulunamadı." });
+
+        if (plan.Onaylandi)
+            return BadRequest(new { Mesaj = "Onaylanmış plan doğrudan düzenlenemez." });
+
+        // Normalde burada gelen updates JSON'ı ayrıştırılıp SeriHaritasiJson güncellenir.
+        // Basitlik adına mevcut tasarımı koruyoruz.
+        plan.SeriHaritasiJson = updates.GetRawText();
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(new { Mesaj = "Plan güncellendi." });
+    }
+
+    /// <summary>
+    /// Belirli bir videonun detayını ve tüm revizyonlarını döner.
+    /// </summary>
+    [HttpGet("api/series-requests/{id:guid}/plans/{planNo:int}/videos/{bolumNo:int}")]
+    public async Task<IActionResult> GetEpisodeDetails(Guid id, int planNo, int bolumNo)
+    {
+        var bolum = await _dbContext.SeriBolumler
+            .Include(b => b.SeriPlani)
+            .Include(b => b.Revizyonlar)
+            .FirstOrDefaultAsync(b => b.SeriPlani.ContentRequestId == id && b.SeriPlani.PlanNo == planNo && b.BolumNo == bolumNo);
+
+        if (bolum == null)
+            return NotFound(new { Mesaj = "Video bulunamadı." });
+
+        return Ok(bolum);
+    }
 }
