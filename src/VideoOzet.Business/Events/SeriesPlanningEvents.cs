@@ -59,3 +59,11 @@ public class SeriesVideoGeneratedEvent
     public Guid SeriBolumId { get; set; }
     public Guid BolumRevizyonuId { get; set; }
 }
+
+public class SeriesPlanCompletedEvent
+{
+    public Guid ContentRequestId { get; set; }
+    public Guid EgitimId { get; set; }
+    public Guid SeriPlaniId { get; set; }
+}
+

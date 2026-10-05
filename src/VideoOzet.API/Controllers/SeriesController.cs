@@ -81,9 +81,50 @@ public class SeriesController : ControllerBase
         return Ok(new
         {
             request.Id,
-            request.Durum,
-            KonuAnalizi = request.KonuAnalizi,
-            GuncelPlan = currentPlan
+            Durum = request.Durum.ToString(),
+            KonuAnalizi = request.KonuAnalizi == null ? null : new
+            {
+                request.KonuAnalizi.Id,
+                request.KonuAnalizi.ContentRequestId,
+                request.KonuAnalizi.AnaFikir,
+                request.KonuAnalizi.BeklenenKonularJson,
+                request.KonuAnalizi.KonuHaritasiJson,
+                request.KonuAnalizi.KaynaktaOlmayanlarJson,
+                request.KonuAnalizi.OnerilenVideoSayisi,
+                request.KonuAnalizi.OneriSuresiDk,
+                request.KonuAnalizi.OneriGerekcesi,
+                Durum = request.KonuAnalizi.Durum.ToString(),
+                request.KonuAnalizi.LlmModel
+            },
+            GuncelPlan = currentPlan == null ? null : new
+            {
+                currentPlan.Id,
+                currentPlan.ContentRequestId,
+                currentPlan.PlanNo,
+                currentPlan.VideoSayisi,
+                currentPlan.VarsayilanVideoSuresiDk,
+                currentPlan.SeriHaritasiJson,
+                currentPlan.DisaridaBirakilanlarJson,
+                currentPlan.KullaniciKisitlariJson,
+                currentPlan.OneridenFarkli,
+                currentPlan.Onaylandi,
+                Durum = currentPlan.Durum.ToString(),
+                SeriBolumler = currentPlan.SeriBolumler.OrderBy(b => b.BolumNo).Select(b => new
+                {
+                    b.Id,
+                    b.SeriPlaniId,
+                    b.BolumNo,
+                    b.CalismaBasligi,
+                    b.AnaFikir,
+                    b.HedefSureDk,
+                    b.KonularJson,
+                    Durum = b.Durum.ToString(),
+                    b.AktifRevizyonId,
+                    b.BaglamEskidi,
+                    b.BaglamSorunlariJson,
+                    RevizyonSayisi = b.Revizyonlar.Count
+                }).ToList()
+            }
         });
     }
 
@@ -244,6 +285,36 @@ public class SeriesController : ControllerBase
         if (bolum == null)
             return NotFound(new { Mesaj = "Video bulunamadı." });
 
-        return Ok(bolum);
+        return Ok(new
+        {
+            bolum.Id,
+            bolum.SeriPlaniId,
+            bolum.BolumNo,
+            bolum.CalismaBasligi,
+            bolum.AnaFikir,
+            bolum.HedefSureDk,
+            bolum.KonularJson,
+            Durum = bolum.Durum.ToString(),
+            bolum.AktifRevizyonId,
+            bolum.BaglamEskidi,
+            bolum.BaglamSorunlariJson,
+            Revizyonlar = bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).Select(r => new
+            {
+                r.Id,
+                r.SeriBolumId,
+                r.RevizyonNo,
+                Tip = r.Tip.ToString(),
+                r.Talimat,
+                r.HedefAlan,
+                r.ArastirmaOzeti,
+                r.VideoPlani,
+                r.DevirNotuJson,
+                r.BaglamJson,
+                r.KullanilanKaynaklar,
+                r.GuvenSkorYuzde,
+                r.LlmModel,
+                Durum = r.Durum.ToString()
+            }).ToList()
+        });
     }
 }

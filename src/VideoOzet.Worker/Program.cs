@@ -68,8 +68,11 @@ var host = Host.CreateDefaultBuilder(args)
             
             // Phase 3 Consumers
             mt.AddConsumer<TopicAnalysisConsumer>();
+            mt.AddConsumer<TopicAnalysisCompletedConsumer>();
             mt.AddConsumer<SeriesPlanConsumer>();
             mt.AddConsumer<SeriesVideoGenerationConsumer>();
+            mt.AddConsumer<SeriesVideoGeneratedConsumer>();
+            mt.AddConsumer<SeriesVideoRevisionConsumer>();
         });
 
     })

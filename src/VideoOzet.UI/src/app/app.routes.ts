@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { LoginComponent } from './features/login/login.component';
 import { DashboardComponent } from './features/dashboard/dashboard.component';
 import { CourseDetailComponent } from './features/course-detail/course-detail.component';
+import { SeriesPlannerComponent } from './features/series-planner/series-planner.component';
 import { authGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
@@ -9,5 +10,6 @@ export const routes: Routes = [
   { path: 'login', component: LoginComponent },
   { path: 'dashboard', component: DashboardComponent, canActivate: [authGuard] },
   { path: 'egitim/:id', component: CourseDetailComponent, canActivate: [authGuard] },
+  { path: 'series-planner/:id', component: SeriesPlannerComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'dashboard' }
 ];

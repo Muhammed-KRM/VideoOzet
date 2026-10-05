@@ -50,13 +50,46 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
 
         try
         {
-            var seriPlani = new SeriPlani
+            var existingPlans = await _dbContext.SeriPlanlari
+                .Include(p => p.SeriBolumler)
+                .Where(p => p.ContentRequestId == request.Id)
+                .OrderByDescending(p => p.PlanNo)
+                .ToListAsync(context.CancellationToken);
+
+            var latestPlan = existingPlans.FirstOrDefault();
+
+            SeriPlani seriPlani;
+            if (latestPlan == null)
             {
-                ContentRequestId = request.Id,
-                Durum = SeriPlanDurumu.Olusturuluyor,
-                OneridenFarkli = false
-            };
-            _dbContext.SeriPlanlari.Add(seriPlani);
+                seriPlani = new SeriPlani
+                {
+                    ContentRequestId = request.Id,
+                    PlanNo = 1,
+                    Durum = SeriPlanDurumu.Olusturuluyor,
+                    OneridenFarkli = false
+                };
+                _dbContext.SeriPlanlari.Add(seriPlani);
+            }
+            else if (!latestPlan.Onaylandi)
+            {
+                // Onaylanmamışsa üzerine yazılır
+                seriPlani = latestPlan;
+                seriPlani.Durum = SeriPlanDurumu.Olusturuluyor;
+                _dbContext.SeriBolumler.RemoveRange(seriPlani.SeriBolumler);
+                seriPlani.SeriBolumler.Clear();
+            }
+            else
+            {
+                // Onaylıysa yeni plan açılır
+                seriPlani = new SeriPlani
+                {
+                    ContentRequestId = request.Id,
+                    PlanNo = latestPlan.PlanNo + 1,
+                    Durum = SeriPlanDurumu.Olusturuluyor,
+                    OneridenFarkli = false
+                };
+                _dbContext.SeriPlanlari.Add(seriPlani);
+            }
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
             await context.Publish(new PipelineProgressEvent
@@ -89,8 +122,11 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             
             var kAnaliziStr = System.Text.Json.JsonSerializer.Serialize(konuAnaliziJson);
 
-            // Mod kontrolü kaldırıldı, AI kendisi karar veriyor.
-            var constraints = "";
+            var constraints = seriPlani.KullaniciKisitlariJson ?? "";
+            if (!string.IsNullOrWhiteSpace(constraints) && constraints != "{}")
+            {
+                seriPlani.OneridenFarkli = true;
+            }
             
             var planJsonStr = await _synthesisProvider.GenerateSeriesPlanAsync(
                 request.Konu,
@@ -104,12 +140,13 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
 
             seriPlani.VideoSayisi = planData.TryGetProperty("VideoSayisi", out var videoSayisi) ? videoSayisi.GetInt32() : 1;
             seriPlani.VarsayilanVideoSuresiDk = planData.TryGetProperty("VarsayilanVideoSuresiDk", out var sure) ? sure.GetInt32() : 10;
-            seriPlani.OneridenFarkli = planData.TryGetProperty("OneridenFarkli", out var farkli) && farkli.GetBoolean();
+            seriPlani.OneridenFarkli = seriPlani.OneridenFarkli || (planData.TryGetProperty("OneridenFarkli", out var farkli) && farkli.GetBoolean());
             seriPlani.DisaridaBirakilanlarJson = planData.TryGetProperty("DisaridaBirakilanlar", out var disarida) ? disarida.ToString() : "[]";
             seriPlani.Durum = SeriPlanDurumu.OnayBekliyor;
             
             if (planData.TryGetProperty("SeriHaritasi", out var harita) && harita.ValueKind == System.Text.Json.JsonValueKind.Array)
             {
+                seriPlani.SeriHaritasiJson = harita.ToString();
                 foreach (var b in harita.EnumerateArray())
                 {
                     seriPlani.SeriBolumler.Add(new SeriBolum

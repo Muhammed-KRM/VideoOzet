@@ -100,69 +100,71 @@
     <!-- Sağ Kolon: İçerik Üretimi (RAG) -->
     <div class="space-y-6">
       <div class="bg-slate-800 rounded-xl p-6 border border-slate-700/50">
-        <h2 class="text-xl font-semibold text-white mb-4">Yeni İçerik Üret</h2>
+        <h2 class="text-xl font-semibold text-white mb-4">Seri İçerik Planla (Akıllı)</h2>
         
-        <form (ngSubmit)="requestContent()" class="space-y-4">
+        <form (ngSubmit)="planSeries()" class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Konu veya Detaylı İçerik Planı</label>
-            <textarea 
-              [(ngModel)]="contentTopic" 
-              name="topic"
-              rows="6"
-              placeholder="Bölüm planınızı, odaklanılmasını istediğiniz maddeleri veya konuyu buraya doğrudan yapıştırabilirsiniz..."
-              class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 text-sm leading-relaxed"
-            ></textarea>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Odak Konu (Opsiyonel)</label>
+            <input 
+              type="text"
+              [(ngModel)]="seriesOdak" 
+              name="odak"
+              placeholder="Örn: MVC Mimarisi"
+              class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 text-sm"
+            />
           </div>
           
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Hedef Uzunluk</label>
-              <select [(ngModel)]="contentLength" name="length" class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white">
-                <option value="kisa">Kısa</option>
-                <option value="orta">Orta</option>
-                <option value="uzun">Uzun</option>
-              </select>
-            </div>
-            <div>
               <label class="block text-sm font-medium text-slate-300 mb-1">Hedef Kitle</label>
-              <select [(ngModel)]="contentAudience" name="audience" class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white">
+              <select [(ngModel)]="seriesHedefKitle" name="hedefKitle" class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white">
                 <option value="genel">Genel</option>
                 <option value="akademik">Akademik</option>
                 <option value="ogrenci">Öğrenci</option>
               </select>
             </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Ek Ton Talimatı (Opsiyonel)</label>
+              <input 
+                type="text"
+                [(ngModel)]="seriesEkTon" 
+                name="ekTon"
+                placeholder="Örn: Eğlenceli ve dinamik olsun"
+                class="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
           </div>
 
           <button 
             type="submit"
-            *ngIf="!isRequestingContent"
-            [disabled]="!contentTopic || (egitim.islenmiVideoSayisi === 0)"
+            *ngIf="!isPlanningSeries"
+            [disabled]="egitim.islenmiVideoSayisi === 0"
             class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-lg shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            İçerik Üret
+            İçerik Planla
           </button>
           
-          <p *ngIf="egitim.islenmiVideoSayisi === 0 && !isRequestingContent" class="text-xs text-amber-500 mt-2 text-center">İçerik üretebilmek için en az 1 videonun işleminin (STT, Özetleme, İndeksleme) tamamlanmış olması gerekir.</p>
+          <p *ngIf="egitim.islenmiVideoSayisi === 0 && !isPlanningSeries" class="text-xs text-amber-500 mt-2 text-center">İçerik planlayabilmek için en az 1 videonun işleminin (STT, vb.) tamamlanmış olması gerekir.</p>
 
           <!-- İlerleme Çubuğu ve Durum -->
-          <div *ngIf="isRequestingContent" class="mt-4 p-4 bg-slate-900 rounded-lg border border-indigo-500/30">
+          <div *ngIf="isPlanningSeries" class="mt-4 p-4 bg-slate-900 rounded-lg border border-indigo-500/30">
             <div class="flex justify-between items-center mb-2">
-              <span class="text-sm font-medium text-indigo-400">{{ contentStatus || 'İçerik Üretiliyor...' }}</span>
-              <span class="text-sm font-bold text-white">{{ contentProgress }}%</span>
+              <span class="text-sm font-medium text-indigo-400">{{ planStatus || 'Analiz başlatılıyor...' }}</span>
+              <span class="text-sm font-bold text-white">{{ planProgress }}%</span>
             </div>
             <div class="w-full bg-slate-800 rounded-full h-2.5 border border-slate-700 overflow-hidden">
-              <div class="bg-indigo-500 h-2.5 rounded-full transition-all duration-500 ease-out relative" [style.width]="contentProgress + '%'">
+              <div class="bg-indigo-500 h-2.5 rounded-full transition-all duration-500 ease-out relative" [style.width]="planProgress + '%'">
                 <div class="absolute top-0 left-0 right-0 bottom-0 bg-white/20 animate-pulse"></div>
               </div>
             </div>
           </div>
 
           <!-- Hata Mesajı -->
-          <div *ngIf="contentError" class="mt-4 p-4 bg-rose-500/10 border border-rose-500/30 rounded-lg flex gap-3 items-start">
+          <div *ngIf="planError" class="mt-4 p-4 bg-rose-500/10 border border-rose-500/30 rounded-lg flex gap-3 items-start">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-rose-400 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
             </svg>
-            <p class="text-sm text-rose-300">{{ contentError }}</p>
+            <p class="text-sm text-rose-300">{{ planError }}</p>
           </div>
         </form>
       </div>
@@ -170,7 +172,7 @@
   </div>
 
   <!-- Üretilen İçerik Sonucu Alanı (Alt Kısımda) -->
-  <div class="mt-8 space-y-4" *ngIf="contentResult || isRequestingContent || pastContentRequests.length > 0">
+  <div class="mt-8 space-y-4" *ngIf="contentResult || pastContentRequests.length > 0">
     <!-- Geçmiş Üretilen İçerikler Seçim Çubuğu -->
     <div *ngIf="pastContentRequests.length > 0" class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-slate-800 rounded-xl border border-slate-700/60 shadow-lg">
       <div class="flex items-center gap-3">
@@ -201,7 +203,7 @@
     </div>
 
     <!-- Üretilen İçerik Detayı -->
-    <app-content-result *ngIf="contentResult || isRequestingContent" [result]="contentResult" [isLoading]="isRequestingContent"></app-content-result>
+    <app-content-result *ngIf="contentResult" [result]="contentResult" [isLoading]="false"></app-content-result>
   </div>
 
 </div>

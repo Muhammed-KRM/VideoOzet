@@ -90,4 +90,34 @@ export class ApiService {
   reRunQualityCheck(id: string, versionNo: number): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}/content-requests/${id}/versions/${versionNo}/re-qc`, {});
   }
+
+  // --- v3 Series Planner Endpoints ---
+
+  createSeriesPlan(egitimId: string, payload: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/content-plans`, payload);
+  }
+
+  getSeriesPlan(id: string): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/content-plans/${id}`);
+  }
+
+  generatePlanDraft(id: string, draftDto: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/content-plans/${id}/plans/draft`, draftDto);
+  }
+
+  updatePlanTexts(id: string, planNo: number, updates: any): Observable<any> {
+    return this.http.put<any>(`${this.baseUrl}/content-plans/${id}/plans/${planNo}`, updates);
+  }
+
+  approvePlan(id: string, planNo: number): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/plans/${planNo}/approve`, {});
+  }
+
+  getEpisodeDetails(id: string, planNo: number, bolumNo: number): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/series-requests/${id}/plans/${planNo}/videos/${bolumNo}`);
+  }
+
+  reviseEpisode(id: string, bolumNo: number, dto: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions`, dto);
+  }
 }

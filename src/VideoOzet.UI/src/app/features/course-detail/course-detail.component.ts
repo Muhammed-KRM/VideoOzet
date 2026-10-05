@@ -19,11 +19,14 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   egitimId: string = '';
   isLoading = true;
   
-  // İçerik Talep Formu
-  contentTopic = '';
-  contentLength = 'orta';
-  contentAudience = 'genel';
-  isRequestingContent = false;
+  // Seri İçerik Planlama
+  seriesOdak = '';
+  seriesHedefKitle = 'genel';
+  seriesEkTon = '';
+  isPlanningSeries = false;
+  planStatus: string = '';
+  planProgress: number = 0;
+  planError: string = '';
   
   contentResult: any = null;
   pastContentRequests: any[] = [];
@@ -63,11 +66,11 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       
       this.subs.push(
         this.signalRService.contentGenerated$.subscribe(data => {
-          if (data && data.contentRequestId && this.isRequestingContent) {
+          if (data && data.contentRequestId && this.isPlanningSeries) {
             this.contentProgress = 100;
             this.contentStatus = 'Tamamlandı! Sonuçlar yükleniyor...';
             this.apiService.getContentRequest(data.contentRequestId).subscribe(result => {
-              this.isRequestingContent = false;
+              this.isPlanningSeries = false;
               this.contentResult = result;
               this.selectedRequestId = data.contentRequestId;
               this.loadPastRequests(false);
@@ -79,7 +82,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
       this.subs.push(
         this.signalRService.contentProgress$.subscribe(data => {
-          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
+          if (data && data.egitimId === this.egitimId && this.isPlanningSeries) {
             this.contentStatus = data.asama;
             this.contentProgress = data.yuzde;
             this.resetContentTimeout();
@@ -89,9 +92,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
       this.subs.push(
         this.signalRService.contentError$.subscribe(data => {
-          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
+          if (data && data.egitimId === this.egitimId && this.isPlanningSeries) {
             this.contentError = 'İçerik üretilirken hata oluştu: ' + data.hataMesaji;
-            this.isRequestingContent = false;
+            this.isPlanningSeries = false;
             if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
           }
         })
@@ -102,9 +105,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   private resetContentTimeout() {
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
     this.contentTimeoutId = setTimeout(() => {
-      if (this.isRequestingContent) {
-        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde (RabbitMQ veya Worker) bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
-        this.isRequestingContent = false;
+      if (this.isPlanningSeries) {
+        this.planError = 'İşlem beklediğimizden çok uzun sürdü. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
+        this.isPlanningSeries = false;
       }
     }, 4 * 60 * 1000);
   }
@@ -170,37 +173,49 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.loadEgitim();
   }
 
-  requestContent() {
-    if (!this.contentTopic) return;
-    this.isRequestingContent = true;
-    this.contentResult = null;
-    this.contentStatus = 'Sıraya Alındı, Bekleniyor...';
-    this.contentProgress = 5;
-    this.contentError = '';
+  planSeries() {
+    this.planError = '';
+    
+    if (this.egitim.islenmiVideoSayisi === 0) {
+      this.planError = 'İçerik üretebilmek için en az 1 videonun işlemi tamamlanmış olmalıdır.';
+      return;
+    }
+
+    this.isPlanningSeries = true;
+    this.planStatus = 'Analiz isteği gönderiliyor...';
+    this.planProgress = 10;
     
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
 
     // 5 dakikalık zaman aşımı
     this.contentTimeoutId = setTimeout(() => {
-      if (this.isRequestingContent) {
-        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde (RabbitMQ veya Worker) bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
-        this.isRequestingContent = false;
+      if (this.isPlanningSeries) {
+        this.planError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir.';
+        this.isPlanningSeries = false;
       }
     }, 5 * 60 * 1000);
     
     const payload = {
-      konu: this.contentTopic,
-      hedefUzunluk: this.contentLength,
-      hedefKitle: this.contentAudience
+      odak: this.seriesOdak,
+      hedefKitle: this.seriesHedefKitle,
+      ekTonTalimati: this.seriesEkTon
     };
     
-    this.apiService.createContentRequest(this.egitimId, payload).subscribe({
-      next: (res) => {
-        // Backend Accepted döner, sonuc SignalR'dan gelecek.
+    this.apiService.createSeriesPlan(this.egitimId, payload).subscribe({
+      next: (res: any) => {
+        this.planStatus = 'Harita planlaması yapılıyor... Lütfen bekleyin.';
+        this.planProgress = 40;
+        if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+        
+        setTimeout(() => {
+           this.router.navigate(['/series-planner', res.contentRequestId]);
+        }, 1500); 
       },
-      error: () => {
-        this.isRequestingContent = false;
-        this.contentError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
+      error: (err) => {
+        console.error('İstek hatası:', err);
+        this.isPlanningSeries = false;
+        this.planProgress = 0;
+        this.planError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
         if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
       }
     });
