@@ -77,6 +77,21 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Otomatik veritabanı migration'ları
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<VideoOzet.Data.Context.AppDbContext>();
+        db.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+        logger?.LogWarning(ex, "Veritabanı migration kontrolü atlandı veya hata oluştu.");
+    }
+}
+
 // Configure the HTTP request pipeline.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 

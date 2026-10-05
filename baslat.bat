@@ -37,6 +37,10 @@ if %errorlevel% neq 0 (
 )
 
 echo.
+echo [3.8/4] Veritabani migrationlari uygulaniyor...
+dotnet ef database update --project "%~dp0src\VideoOzet.Data" --startup-project "%~dp0src\VideoOzet.API" --no-build
+
+echo.
 echo [4/4] API, Worker ve Frontend pencereleri aciliyor...
 
 start "VideoOzet-API" cmd /k "cd /d "%~dp0src\VideoOzet.API" && dotnet run --no-build"
