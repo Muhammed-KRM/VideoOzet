@@ -18,17 +18,20 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
 {
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceTopicMapper _topicMapper;
     private readonly ILogService _logService;
     private readonly ILogger<TopicAnalysisConsumer> _logger;
 
     public TopicAnalysisConsumer(
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
+        ISourceTopicMapper topicMapper,
         ILogService logService,
         ILogger<TopicAnalysisConsumer> logger)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
+        _topicMapper = topicMapper;
         _logService = logService;
         _logger = logger;
     }
@@ -77,36 +80,10 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
                 Mesaj = "Eğitim içerikleri analiz ediliyor..."
             }, context.CancellationToken);
 
-            // 2. Tüm kaynakları topla
-            var contextBuilder = new StringBuilder();
-            
-            var videolar = await _dbContext.Videolar
-                .Include(v => v.Summary)
-                .Where(v => v.EgitimId == message.EgitimId && v.Summary != null)
-                .ToListAsync(context.CancellationToken);
-                
-            var dokumanlar = await _dbContext.Dokumanlar
-                .Include(d => d.DokumanMetin)
-                .Where(d => d.EgitimId == message.EgitimId && d.DokumanMetin != null)
-                .ToListAsync(context.CancellationToken);
-                
-            foreach (var video in videolar)
-            {
-                contextBuilder.AppendLine($"[VİDEO: {video.Baslik}]");
-                contextBuilder.AppendLine(video.Summary!.OzetMetni);
-                contextBuilder.AppendLine();
-            }
-            
-            foreach (var doc in dokumanlar)
-            {
-                contextBuilder.AppendLine($"[DÖKÜMAN: {doc.DosyaAdi}]");
-                contextBuilder.AppendLine(doc.DokumanMetin!.HamMetin);
-                contextBuilder.AppendLine();
-            }
+            // 2. Map-Reduce: Kaynak başına konu çıkarımı ve özet haritası (Önbellekli)
+            var allSourcesData = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
 
-            var allSourcesData = contextBuilder.ToString();
-
-            // 3. AI ile Analiz
+            // 3. AI ile Analiz (Reduce)
             var analizJsonStr = await _synthesisProvider.AnalyzeTopicAsync(request.Konu, allSourcesData, context.CancellationToken);
             var analizData = LlmJson.Deserialize<System.Text.Json.JsonElement>(analizJsonStr);
             

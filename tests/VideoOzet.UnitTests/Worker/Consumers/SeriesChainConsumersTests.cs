@@ -215,4 +215,163 @@ public class SeriesChainConsumersTests
         updatedRequest!.Durum.Should().Be(ContentRequestDurumu.Tamamlandi);
         updatedRequest.TamamlanmaTarihi.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task SeriesVideoGenerationConsumer_ShouldRetrieveChunks_AndSaveKullanilanKaynaklar()
+    {
+        // Arrange
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+
+        using var dbContext = new AppDbContext(options);
+        var requestId = Guid.NewGuid();
+        var egitimId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var bolumId = Guid.NewGuid();
+        var chunkId = Guid.NewGuid();
+
+        var egitim = new Egitim { Id = egitimId, Ad = "Test Egitim" };
+        var request = new ContentRequest
+        {
+            Id = requestId,
+            EgitimId = egitimId,
+            Konu = "Clean Code",
+            HedefKitle = "Yazılımcılar"
+        };
+
+        var plan = new SeriPlani
+        {
+            Id = planId,
+            ContentRequestId = requestId,
+            PlanNo = 1,
+            Durum = SeriPlanDurumu.Onaylandi
+        };
+
+        var bolum = new SeriBolum
+        {
+            Id = bolumId,
+            SeriPlaniId = planId,
+            BolumNo = 1,
+            CalismaBasligi = "İsimlendirme Standartları",
+            AnaFikir = "Anlamlı isimler kullanmak kodu temiz kılar",
+            KonularJson = "[\"Değişken İsimleri\", \"Fonksiyon İsimleri\"]",
+            Durum = BolumDurumu.Bekliyor
+        };
+
+        plan.SeriBolumler.Add(bolum);
+        dbContext.Egitimler.Add(egitim);
+        dbContext.ContentRequests.Add(request);
+        dbContext.SeriPlanlari.Add(plan);
+        dbContext.SeriBolumler.Add(bolum);
+        await dbContext.SaveChangesAsync();
+
+        var mockSynthesis = new Mock<ISynthesisProvider>();
+        mockSynthesis.Setup(s => s.GenerateSeriesVideoContentAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"{
+                ""ArastirmaOzeti"": ""Temiz kod araştırma özeti"",
+                ""VideoPlani"": ""1. Giriş\n2. İsimlendirme"",
+                ""DevirNotu"": ""Sonraki bölüm fonksiyon boyutlarına geçmeli""
+            }");
+
+        var mockEmbedding = new Mock<IEmbeddingProvider>();
+        mockEmbedding.Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new float[1536]);
+
+        var mockLogService = new Mock<ILogService>();
+        mockLogService.Setup(s => s.LogPipelineStartAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<PipelineAsamasi>(), It.IsAny<string?>()))
+            .ReturnsAsync(1L);
+
+        var mockLogger = new Mock<ILogger<SeriesVideoGenerationConsumer>>();
+
+        var dummyChunks = new List<VideoChunkDocument>
+        {
+            new VideoChunkDocument
+            {
+                Id = chunkId,
+                EgitimId = egitimId,
+                VideoId = Guid.NewGuid(),
+                Text = "Değişkenler niyetini belli etmeli.",
+                StartTimeMs = 1000,
+                EndTimeMs = 5000
+            }
+        };
+
+        var consumer = new TestableSeriesVideoGenerationConsumer(
+            dbContext,
+            mockSynthesis.Object,
+            mockEmbedding.Object,
+            mockLogService.Object,
+            mockLogger.Object,
+            dummyChunks);
+
+        var contextMock = new Mock<ConsumeContext<SeriesVideoGenerationCommand>>();
+        contextMock.Setup(c => c.Message).Returns(new SeriesVideoGenerationCommand
+        {
+            ContentRequestId = requestId,
+            EgitimId = egitimId,
+            SeriPlaniId = planId,
+            SeriBolumId = bolumId,
+            BolumNo = 1
+        });
+
+        var publishedEvents = new List<object>();
+        contextMock.Setup(c => c.Publish(It.IsAny<PipelineProgressEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<PipelineProgressEvent, CancellationToken>((ev, ct) => publishedEvents.Add(ev))
+            .Returns(Task.CompletedTask);
+        contextMock.Setup(c => c.Publish(It.IsAny<SeriesVideoGeneratedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<SeriesVideoGeneratedEvent, CancellationToken>((ev, ct) => publishedEvents.Add(ev))
+            .Returns(Task.CompletedTask);
+        contextMock.Setup(c => c.Publish(It.IsAny<ContentErrorEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<ContentErrorEvent, CancellationToken>((ev, ct) => publishedEvents.Add(ev))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await consumer.Consume(contextMock.Object);
+
+        // Assert
+        var err = publishedEvents.OfType<ContentErrorEvent>().FirstOrDefault();
+        err.Should().BeNull(err?.HataMesaji ?? "no error");
+
+        var updatedBolum = await dbContext.SeriBolumler
+            .Include(b => b.Revizyonlar)
+            .FirstOrDefaultAsync(b => b.Id == bolumId);
+
+        updatedBolum.Should().NotBeNull();
+        updatedBolum!.Durum.Should().Be(BolumDurumu.Tamamlandi);
+        updatedBolum.Revizyonlar.Should().HaveCount(1);
+
+        var rev = updatedBolum.Revizyonlar.First();
+        rev.ArastirmaOzeti.Should().Contain("Temiz kod araştırma özeti");
+        rev.KullanilanKaynaklar.Should().Contain(chunkId.ToString());
+
+        publishedEvents.OfType<SeriesVideoGeneratedEvent>().Should().HaveCount(1);
+    }
+
+    private class TestableSeriesVideoGenerationConsumer : SeriesVideoGenerationConsumer
+    {
+        private readonly List<VideoChunkDocument> _chunksToReturn;
+
+        public TestableSeriesVideoGenerationConsumer(
+            AppDbContext dbContext,
+            ISynthesisProvider synthesisProvider,
+            IEmbeddingProvider embeddingProvider,
+            ILogService logService,
+            ILogger<SeriesVideoGenerationConsumer> logger,
+            List<VideoChunkDocument> chunksToReturn)
+            : base(dbContext, synthesisProvider, embeddingProvider, logService, logger)
+        {
+            _chunksToReturn = chunksToReturn;
+        }
+
+        protected override Task<List<VideoChunkDocument>> GetRelevantChunksAsync(
+            Guid egitimId,
+            Pgvector.Vector queryVector,
+            int limit,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_chunksToReturn);
+        }
+    }
 }

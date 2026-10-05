@@ -52,9 +52,14 @@ public class TopicAnalysisConsumerTests
         mockSynthesisProvider.Setup(x => x.AnalyzeTopicAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jsonResult);
 
+        var mockTopicMapper = new Mock<ISourceTopicMapper>();
+        mockTopicMapper.Setup(x => x.BuildTopicDigestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Test Digest Content");
+
         var consumer = new TopicAnalysisConsumer(
             dbContext,
             mockSynthesisProvider.Object,
+            mockTopicMapper.Object,
             mockLogService.Object,
             mockLogger.Object);
 

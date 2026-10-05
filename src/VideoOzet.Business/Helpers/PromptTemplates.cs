@@ -188,4 +188,25 @@ public static class PromptTemplates
             "DevirNotu": "Eğer varsa bir sonraki videoda bahsedilmesi veya atıfta bulunulması gereken kısa not (yoksa boş bırak)"
         }}
         """;
+
+    public const string SourceTopicExtractionPrompt = """
+        Aşağıda verilen kaynak içeriği ({0}, Parça {1}/{2}) dikkatlice incele ve içeriğinde anlatılan temel konuları çıkar.
+        
+        KAYNAK METNİ:
+        {3}
+        
+        GÖREV:
+        - İçerikte geçen tüm önemli başlıkları ve konuları tespit et.
+        - Her konu için kısa bir açıklama ve tahmini anlatım süresi (dakika) belirle.
+        - Yalnızca saf JSON formatında yanıt ver:
+        {{
+            "Konular": [
+                {{
+                    "Baslik": "Konu Başlığı",
+                    "Aciklama": "Bu konunun içeriği ve nelerin anlatıldığı hakkında 1-2 cümle",
+                    "TahminiSureDk": 3
+                }}
+            ]
+        }}
+        """;
 }

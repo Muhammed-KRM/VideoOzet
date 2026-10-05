@@ -9,4 +9,5 @@ public class KaynakKonuCikarimi
     public string KaynakTuru { get; set; } = string.Empty;
     public string KonularJson { get; set; } = string.Empty;
     public int PromptVersiyonu { get; set; }
+    public string? IcerikHash { get; set; }
 }

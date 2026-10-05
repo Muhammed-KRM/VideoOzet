@@ -62,4 +62,10 @@ public interface ISynthesisProvider
     /// JSON formatında döner.
     /// </summary>
     Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, CancellationToken ct = default);
+
+    /// <summary>
+    /// Kaynak metninden (video veya doküman) anlatılan temel konuları ve tahmini süreleri çıkarır (Map adımı).
+    /// JSON formatında döner.
+    /// </summary>
+    Task<string> ExtractSourceTopicsAsync(string kaynakAdi, string metin, int parcaNo, int parcaSayisi, CancellationToken ct = default);
 }

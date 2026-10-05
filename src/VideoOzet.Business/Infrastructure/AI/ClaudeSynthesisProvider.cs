@@ -220,4 +220,10 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var prompt = string.Format(PromptTemplates.SeriesVideoGenerationPrompt, bolumBasligi, bolumKonulariJson, oncekiVideoDevirNotuJson, targetAudience, contextData);
         return await CallLlmAsync(prompt, ct);
     }
+
+    public async Task<string> ExtractSourceTopicsAsync(string kaynakAdi, string metin, int parcaNo, int parcaSayisi, CancellationToken ct = default)
+    {
+        var prompt = string.Format(PromptTemplates.SourceTopicExtractionPrompt, kaynakAdi, parcaNo, parcaSayisi, metin);
+        return await CallLlmAsync(prompt, ct);
+    }
 }
