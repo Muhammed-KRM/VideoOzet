@@ -43,6 +43,7 @@ public class ContentRequestsController : ControllerBase
             HedefUzunluk = requestDto.HedefUzunluk,
             HedefKitle = requestDto.HedefKitle,
             Durum = ContentRequestDurumu.Bekliyor,
+            Mod = IcerikModu.Klasik,
             OlusturmaTarihi = DateTime.UtcNow
         };
 
@@ -76,6 +77,9 @@ public class ContentRequestsController : ControllerBase
                 r.Id,
                 r.Konu,
                 Durum = r.Durum.ToString(),
+                Mod = (int)r.Mod,
+                ModAdi = r.Mod.ToString(),
+                VideoSayisi = r.SeriPlanlari.OrderByDescending(p => p.PlanNo).Select(p => (int?)p.VideoSayisi).FirstOrDefault(),
                 r.OlusturmaTarihi
             })
             .ToListAsync();

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VideoOzet.API.Controllers;
 using VideoOzet.Business.DTOs;
+using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
@@ -97,5 +98,109 @@ public class ContentRequestsControllerTests
         v2.RevizeTalimati.Should().Be("Daha detaylı yap");
         v2.ArastirmaOzeti.Should().Be("Revize Edilmis Metin");
         v2.VideoPlani.Should().Be("Revize Edilmis Metin");
+    }
+
+    [Fact]
+    public async Task CreateContentRequest_ShouldSetModToKlasik_AndPublishEvent()
+    {
+        // Arrange
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+
+        using var dbContext = new AppDbContext(options);
+        var egitimId = Guid.NewGuid();
+        dbContext.Egitimler.Add(new Egitim { Id = egitimId, Ad = "Test Egitim" });
+        await dbContext.SaveChangesAsync();
+
+        var mockPublish = new Mock<MassTransit.IPublishEndpoint>();
+        var controller = new ContentRequestsController(dbContext, mockPublish.Object);
+
+        var dto = new CreateContentRequestDto
+        {
+            Konu = "Clean Code",
+            HedefUzunluk = "orta",
+            HedefKitle = "genel"
+        };
+
+        // Act
+        var result = await controller.CreateContentRequest(egitimId, dto);
+
+        // Assert
+        result.Should().BeOfType<AcceptedResult>();
+        var created = await dbContext.ContentRequests.FirstOrDefaultAsync(r => r.EgitimId == egitimId);
+        created.Should().NotBeNull();
+        created!.Mod.Should().Be(IcerikModu.Klasik);
+        created.Konu.Should().Be("Clean Code");
+
+        mockPublish.Verify(p => p.Publish(It.Is<ContentRequestedEvent>(e => e.EgitimId == egitimId && e.Konu == "Clean Code"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetRequests_ShouldIncludeModAndVideoSayisi_ForBothModes()
+    {
+        // Arrange
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+
+        using var dbContext = new AppDbContext(options);
+        var egitimId = Guid.NewGuid();
+        dbContext.Egitimler.Add(new Egitim { Id = egitimId, Ad = "Test Egitim" });
+
+        var classicReq = new ContentRequest
+        {
+            Id = Guid.NewGuid(),
+            EgitimId = egitimId,
+            Konu = "Tekil Video",
+            Mod = IcerikModu.Klasik,
+            Durum = ContentRequestDurumu.Tamamlandi,
+            OlusturmaTarihi = DateTime.UtcNow.AddMinutes(-10)
+        };
+
+        var plannerReq = new ContentRequest
+        {
+            Id = Guid.NewGuid(),
+            EgitimId = egitimId,
+            Konu = "Çoklu Seri",
+            Mod = IcerikModu.Planli,
+            Durum = ContentRequestDurumu.Tamamlandi,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+
+        var plan = new SeriPlani
+        {
+            Id = Guid.NewGuid(),
+            ContentRequestId = plannerReq.Id,
+            PlanNo = 1,
+            VideoSayisi = 4,
+            Durum = SeriPlanDurumu.Onaylandi
+        };
+        plannerReq.SeriPlanlari.Add(plan);
+
+        dbContext.ContentRequests.AddRange(classicReq, plannerReq);
+        dbContext.SeriPlanlari.Add(plan);
+        await dbContext.SaveChangesAsync();
+
+        var mockPublish = new Mock<MassTransit.IPublishEndpoint>();
+        var controller = new ContentRequestsController(dbContext, mockPublish.Object);
+
+        // Act
+        var result = await controller.GetRequests(egitimId);
+
+        // Assert
+        result.Should().BeOfType<OkObjectResult>();
+        var okResult = (OkObjectResult)result;
+        var list = okResult.Value as IEnumerable<object>;
+        list.Should().NotBeNull();
+        list.Should().HaveCount(2);
+
+        // Verify JSON properties
+        var json = System.Text.Json.JsonSerializer.Serialize(list);
+        json.Should().Contain("\"Mod\":0");
+        json.Should().Contain("\"ModAdi\":\"Klasik\"");
+        json.Should().Contain("\"Mod\":1");
+        json.Should().Contain("\"ModAdi\":\"Planli\"");
+        json.Should().Contain("\"VideoSayisi\":4");
     }
 }

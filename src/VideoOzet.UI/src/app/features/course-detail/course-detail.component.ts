@@ -18,12 +18,25 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   egitim: any = null;
   egitimId: string = '';
   isLoading = true;
+
+  // Mod Seçimi: 'classic' (⚡ Hızlı İçerik) | 'planner' (✨ Akıllı Seri Planlayıcı)
+  selectedMode: 'classic' | 'planner' = 'classic';
   
-  // Seri İçerik Planlama
-  seriesOdak = '';
-  seriesHedefKitle = 'genel';
-  seriesEkTon = '';
-  isPlanningSeries = false;
+  // 1. Klasik Mod (Tek Video - Fast Vector RAG)
+  contentTopic: string = '';
+  contentLength: string = 'orta';
+  contentAudience: string = 'genel';
+  isRequestingContent: boolean = false;
+  contentStatus: string = '';
+  contentProgress: number = 0;
+  contentError: string = '';
+  private contentTimeoutId: any;
+
+  // 2. Akıllı Planlayıcı Modu (Çoklu Video Serisi)
+  seriesOdak: string = '';
+  seriesHedefKitle: string = 'genel';
+  seriesEkTon: string = '';
+  isPlanningSeries: boolean = false;
   planStatus: string = '';
   planProgress: number = 0;
   planError: string = '';
@@ -31,12 +44,6 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   contentResult: any = null;
   pastContentRequests: any[] = [];
   selectedRequestId: string = '';
-  
-  // İlerleme Durumu
-  contentStatus: string = '';
-  contentProgress: number = 0;
-  contentError: string = '';
-  private contentTimeoutId: any;
 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -47,6 +54,13 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.egitimId = this.route.snapshot.paramMap.get('id') || '';
+
+    // Kullanıcının kayıtlı mod tercihini yükle
+    const savedMode = localStorage.getItem('videoozet.icerikModu');
+    if (savedMode === 'classic' || savedMode === 'planner') {
+      this.selectedMode = savedMode;
+    }
+
     if (this.egitimId) {
       this.loadEgitim();
       this.signalRService.startConnection();
@@ -64,13 +78,14 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
         })
       );
       
+      // Klasik mod SignalR bildirimleri
       this.subs.push(
         this.signalRService.contentGenerated$.subscribe(data => {
-          if (data && data.contentRequestId && this.isPlanningSeries) {
+          if (data && data.contentRequestId && this.isRequestingContent) {
             this.contentProgress = 100;
             this.contentStatus = 'Tamamlandı! Sonuçlar yükleniyor...';
             this.apiService.getContentRequest(data.contentRequestId).subscribe(result => {
-              this.isPlanningSeries = false;
+              this.isRequestingContent = false;
               this.contentResult = result;
               this.selectedRequestId = data.contentRequestId;
               this.loadPastRequests(false);
@@ -82,7 +97,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
       this.subs.push(
         this.signalRService.contentProgress$.subscribe(data => {
-          if (data && data.egitimId === this.egitimId && this.isPlanningSeries) {
+          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
             this.contentStatus = data.asama;
             this.contentProgress = data.yuzde;
             this.resetContentTimeout();
@@ -92,9 +107,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
       this.subs.push(
         this.signalRService.contentError$.subscribe(data => {
-          if (data && data.egitimId === this.egitimId && this.isPlanningSeries) {
+          if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
             this.contentError = 'İçerik üretilirken hata oluştu: ' + data.hataMesaji;
-            this.isPlanningSeries = false;
+            this.isRequestingContent = false;
             if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
           }
         })
@@ -102,14 +117,19 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     }
   }
 
+  setMode(mode: 'classic' | 'planner') {
+    this.selectedMode = mode;
+    localStorage.setItem('videoozet.icerikModu', mode);
+  }
+
   private resetContentTimeout() {
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
     this.contentTimeoutId = setTimeout(() => {
-      if (this.isPlanningSeries) {
-        this.planError = 'İşlem beklediğimizden çok uzun sürdü. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
-        this.isPlanningSeries = false;
+      if (this.isRequestingContent) {
+        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
+        this.isRequestingContent = false;
       }
-    }, 4 * 60 * 1000);
+    }, 5 * 60 * 1000);
   }
 
   loadEgitim() {
@@ -125,7 +145,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
         const docs = (data.dokumanlar || []).map((d: any) => ({ 
           ...d, 
           tip: 'dokuman',
-          baslik: d.dosyaAdi // dokumanlarda baslik yerine dosyaAdi var
+          baslik: d.dosyaAdi
         }));
         
         this.egitim.videos = [...vids, ...docs].sort((a, b) => {
@@ -146,10 +166,10 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       next: (requests) => {
         this.pastContentRequests = requests || [];
         if (autoSelectFirst && this.pastContentRequests.length > 0 && !this.contentResult) {
-          const completed = this.pastContentRequests.find(r => r.durum === 'Tamamlandi');
-          if (completed) {
-            this.selectContentRequest(completed.id);
-          } else if (this.pastContentRequests[0]) {
+          const classicCompleted = this.pastContentRequests.find(r => r.durum === 'Tamamlandi' && (r.mod === 0 || r.modAdi === 'Klasik' || !r.mod));
+          if (classicCompleted) {
+            this.selectContentRequest(classicCompleted.id);
+          } else if (this.pastContentRequests[0] && (this.pastContentRequests[0].mod === 0 || this.pastContentRequests[0].modAdi === 'Klasik')) {
             this.selectContentRequest(this.pastContentRequests[0].id);
           }
         }
@@ -160,6 +180,14 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   selectContentRequest(id: string) {
     if (!id) return;
+    const req = this.pastContentRequests.find(r => r.id === id);
+    if (req && (req.mod === 1 || req.modAdi === 'Planli')) {
+      // Akıllı seri talebi: Seri planlayıcı sayfasına yönlendir
+      this.router.navigate(['/series-planner', id]);
+      return;
+    }
+
+    // Klasik talep: İçerik sonucunu sayfada göster
     this.selectedRequestId = id;
     this.apiService.getContentRequest(id).subscribe({
       next: (result) => {
@@ -173,27 +201,54 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.loadEgitim();
   }
 
+  // 1. Klasik Tekil İçerik Üretimi (2fc9178)
+  requestContent() {
+    if (!this.contentTopic) return;
+    this.isRequestingContent = true;
+    this.contentResult = null;
+    this.contentStatus = 'Sıraya Alındı, Bekleniyor...';
+    this.contentProgress = 5;
+    this.contentError = '';
+    
+    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+
+    this.contentTimeoutId = setTimeout(() => {
+      if (this.isRequestingContent) {
+        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir.';
+        this.isRequestingContent = false;
+      }
+    }, 5 * 60 * 1000);
+    
+    const payload = {
+      konu: this.contentTopic,
+      hedefUzunluk: this.contentLength,
+      hedefKitle: this.contentAudience
+    };
+    
+    this.apiService.createContentRequest(this.egitimId, payload).subscribe({
+      next: () => {
+        // Backend Accepted döner, sonuç SignalR'dan gelecek.
+      },
+      error: () => {
+        this.isRequestingContent = false;
+        this.contentError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
+        if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+      }
+    });
+  }
+
+  // 2. Akıllı Çoklu Video Serisi Planlama
   planSeries() {
     this.planError = '';
     
     if (this.egitim.islenmiVideoSayisi === 0) {
-      this.planError = 'İçerik üretebilmek için en az 1 videonun işlemi tamamlanmış olmalıdır.';
+      this.planError = 'İçerik planlayabilmek için en az 1 videonun işlemi tamamlanmış olmalıdır.';
       return;
     }
 
     this.isPlanningSeries = true;
     this.planStatus = 'Analiz isteği gönderiliyor...';
     this.planProgress = 10;
-    
-    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
-
-    // 5 dakikalık zaman aşımı
-    this.contentTimeoutId = setTimeout(() => {
-      if (this.isPlanningSeries) {
-        this.planError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir.';
-        this.isPlanningSeries = false;
-      }
-    }, 5 * 60 * 1000);
     
     const payload = {
       odak: this.seriesOdak,
@@ -205,18 +260,16 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       next: (res: any) => {
         this.planStatus = 'Harita planlaması yapılıyor... Lütfen bekleyin.';
         this.planProgress = 40;
-        if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
         
         setTimeout(() => {
-           this.router.navigate(['/series-planner', res.contentRequestId]);
-        }, 1500); 
+          this.router.navigate(['/series-planner', res.contentRequestId]);
+        }, 1200); 
       },
       error: (err) => {
         console.error('İstek hatası:', err);
         this.isPlanningSeries = false;
         this.planProgress = 0;
         this.planError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
-        if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
       }
     });
   }
@@ -271,7 +324,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       return;
     }
     
-    if (!confirm(`${failedVideos.length} adet hatalı videoyu kaldığı yerden (transkript varsa özetlemeden) yeniden başlatmak istiyor musunuz?`)) return;
+    if (!confirm(`${failedVideos.length} adet hatalı videoyu kaldığı yerden yeniden başlatmak istiyor musunuz?`)) return;
     
     failedVideos.forEach((v: any) => {
       this.retryVideo(v);
@@ -284,7 +337,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.apiService.resetQueue(this.egitimId).subscribe({
       next: (res) => {
         alert(res.message || 'Kuyruk sıfırlandı!');
-        this.loadEgitim(); // Durumları güncelle
+        this.loadEgitim();
       },
       error: (err) => {
         console.error('Kuyruk sıfırlama hatası:', err);
