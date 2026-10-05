@@ -367,7 +367,7 @@ export class ContentResultComponent implements OnChanges {
     const dateStr = dateSource
       ? new Date(dateSource).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       : new Date().toLocaleDateString('tr-TR');
-    const model = this.activeVersion?.llmModel || this.result?.generatedContent?.llmModel || 'Claude-3.5-Sonnet';
+    const model = this.activeVersion?.llmModel || this.result?.generatedContent?.llmModel || 'Bilinmiyor';
     const score = this.result?.qcResult?.guvenSkorYuzde ?? this.result?.guvenSkorYuzde ?? 100;
     const targetLength = this.result?.hedefUzunluk || 'Orta Uzunluk';
     const targetAudience = this.result?.hedefKitle || 'Genel İzleyici';

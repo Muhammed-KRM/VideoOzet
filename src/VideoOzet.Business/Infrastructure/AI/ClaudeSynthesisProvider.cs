@@ -24,6 +24,26 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// CallLlmAsync ile aynı sağlayıcı seçim sırasını kullanır (Anthropic → Gemini → OpenAI).
+    /// </summary>
+    public string ActiveModelName
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_configuration["ANTHROPIC_API_KEY"]))
+                return _configuration["CLAUDE_MODEL"] ?? "claude-3-5-sonnet-20240620";
+
+            if (!string.IsNullOrWhiteSpace(_configuration["GEMINI_API_KEY"]))
+                return _configuration["GEMINI_MODEL"] ?? "gemini-1.5-flash";
+
+            if (!string.IsNullOrWhiteSpace(_configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"]))
+                return _configuration["OPENAI_MODEL"] ?? "gpt-4o";
+
+            return "mock";
+        }
+    }
+
     private async Task<string> CallLlmAsync(string prompt, CancellationToken ct)
     {
         var anthropicKey = _configuration["ANTHROPIC_API_KEY"];
@@ -118,12 +138,12 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Gemini modeli {Model} beklenmedik hata ile başarısız oldu", geminiModel);
-                    return $"[GEMINI_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}";
+                    throw new Exception($"[GEMINI_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}", ex);
                 }
             }
 
             _logger.LogError(lastException, "Gemini modeli {Model} tüm denemelere rağmen başarısız oldu", geminiModel);
-            return "[GEMINI_API_ERROR]: Servis şu anda yoğun talep altında. Lütfen kısa bir süre sonra tekrar deneyin.";
+            throw new Exception("[GEMINI_API_ERROR]: Servis şu anda yoğun talep altında. Lütfen kısa bir süre sonra tekrar deneyin.", lastException);
         }
 
         var openAiKey = _configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"];

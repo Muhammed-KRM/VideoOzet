@@ -6,6 +6,11 @@ namespace VideoOzet.Business.Interfaces;
 public interface ISynthesisProvider
 {
     /// <summary>
+    /// Mevcut yapılandırmaya göre LLM çağrılarında fiilen kullanılan model adı (kayıtlardaki LlmModel alanı için).
+    /// </summary>
+    string ActiveModelName => string.Empty;
+
+    /// <summary>
     /// RAG sonuçlarını kullanarak araştırma özeti üretir.
     /// </summary>
     Task<string> GenerateResearchSummaryAsync(string topic, string targetLength, string targetAudience, string contextData, CancellationToken ct = default);

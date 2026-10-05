@@ -41,7 +41,7 @@ public static class ServiceRegistration
         services.AddScoped<ILogService, LogManager>();
 
         // Redis Registration
-        var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6379";
+        var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6380";
         var redisOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConn);
         redisOptions.AbortOnConnectFail = false;
         services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(StackExchange.Redis.ConnectionMultiplexer.Connect(redisOptions));
@@ -56,7 +56,7 @@ public static class ServiceRegistration
             {
                 var host = configuration["RabbitMQ:Host"] ?? "localhost";
                 var portStr = configuration["RabbitMQ:Port"];
-                ushort port = ushort.TryParse(portStr, out var p) ? p : (ushort)5672;
+                ushort port = ushort.TryParse(portStr, out var p) ? p : (ushort)5673;
 
                 cfg.Host(host, port, "/", h =>
                 {

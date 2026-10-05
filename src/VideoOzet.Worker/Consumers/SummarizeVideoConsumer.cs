@@ -79,13 +79,32 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     _throttle.Release();
                 }
                 
+                string ozetMetni = jsonResponse;
+                string konuBasliklariJson = "[]";
+                string konuEtiketleriJson = "[]";
+
+                try
+                {
+                    var parsed = VideoOzet.Business.Helpers.LlmJson.Deserialize<SummaryLlmResponse>(jsonResponse);
+                    if (parsed != null)
+                    {
+                        ozetMetni = parsed.OzetMetni ?? jsonResponse; // Fallback
+                        konuBasliklariJson = parsed.KonuBasliklari != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuBasliklari) : "[]";
+                        konuEtiketleriJson = parsed.KonuEtiketleri != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuEtiketleri) : "[]";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LLM json parse failed. Using raw response as summary. Raw: {Raw}", jsonResponse);
+                }
+
                 var summary = new VideoSummary
                 {
                     VideoId = evt.VideoId,
-                    OzetMetni = jsonResponse,
-                    KonuBasliklari = "[]", 
-                    KonuEtiketleri = "[]",
-                    LlmModel = "gemini-1.5-flash",
+                    OzetMetni = ozetMetni,
+                    KonuBasliklari = konuBasliklariJson, 
+                    KonuEtiketleri = konuEtiketleriJson,
+                    LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "bilinmiyor" : _geminiProvider.ActiveModelName,
                     OlusturmaTarihi = DateTime.UtcNow
                 };
 
@@ -166,5 +185,12 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 }
             }
         }
+    }
+
+    private class SummaryLlmResponse
+    {
+        public string OzetMetni { get; set; }
+        public string[] KonuBasliklari { get; set; }
+        public string[] KonuEtiketleri { get; set; }
     }
 }

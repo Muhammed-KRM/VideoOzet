@@ -115,7 +115,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
                 ArastirmaOzeti = arastirmaOzeti,
                 VideoPlani = videoPlani,
                 KullanilanKaynaklar = System.Text.Json.JsonSerializer.Serialize(topChunks.Select(c => c.Id)),
-                LlmModel = "Claude-3.5-Sonnet", // Varsayılan/Config'den alınabilir
+                LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 UretimSuresiMs = 0, // Ölçülebilir
                 OlusturmaTarihi = DateTime.UtcNow
             };

@@ -284,7 +284,7 @@ public class ContentRequestDetailsController : ControllerBase
             ArastirmaOzeti = revisedOzet,
             VideoPlani = revisedPlan,
             RevizeTalimati = dto.RevizeTalimati,
-            LlmModel = "Claude-3.5-Sonnet",
+            LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
             OlusturmaTarihi = DateTime.UtcNow
         };
 

@@ -48,16 +48,16 @@ start "VideoOzet-UI" cmd /k "cd /d "%~dp0src\VideoOzet.UI" && npm start"
 echo.
 echo Tarayici aciliyor...
 ping 127.0.0.1 -n 7 > nul
-start http://localhost:4200
-start http://localhost:5001/swagger
+start http://localhost:4201
+start http://localhost:5002/swagger
 
 echo.
 echo ========================================================
 echo Sistem Basariyla Baslatildi!
-echo Arayuz:    http://localhost:4200
-echo Swagger:   http://localhost:5001/swagger
-echo MinIO:     http://localhost:9001 (minioadmin / minioadmin)
-echo RabbitMQ:  http://localhost:15672 (guest / guest)
+echo Arayuz:    http://localhost:4201
+echo Swagger:   http://localhost:5002/swagger
+echo MinIO:     http://localhost:9003 (minioadmin / minioadmin)
+echo RabbitMQ:  http://localhost:15673 (guest / guest)
 echo API Key:   SUPER_SECRET_API_KEY_123!
 echo ========================================================
 echo Bu pencereyi kapatabilirsiniz.

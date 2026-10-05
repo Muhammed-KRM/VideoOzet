@@ -77,7 +77,7 @@ public class VideolarController : ControllerBase
         };
         foreach(var q in queues)
         {
-            try { await client.DeleteAsync($"http://localhost:15672/api/queues/%2f/{q}/contents"); } catch { }
+            try { await client.DeleteAsync($"http://localhost:15673/api/queues/%2f/{q}/contents"); } catch { }
         }
 
         // 2. Eğitimdeki videoları yeniden kuyruğa ekle

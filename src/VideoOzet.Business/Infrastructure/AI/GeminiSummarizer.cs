@@ -17,6 +17,11 @@ public class GeminiSummarizer : IGeminiProvider
     private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     private static int _currentKeyIndex = 0;
 
+    // Proxy'ye gönderilen model; kayıtlardaki LlmModel alanı da buradan beslenir.
+    private const string ModelName = "gemini-3.8-flash-tiered";
+
+    public string ActiveModelName => ModelName;
+
     public GeminiSummarizer(IConfiguration configuration, ILogger<GeminiSummarizer> logger)
     {
         _configuration = configuration;
@@ -57,7 +62,7 @@ public class GeminiSummarizer : IGeminiProvider
 
         var requestBody = new
         {
-            model = "gemini-3.8-flash-tiered",
+            model = ModelName,
             messages = new[]
             {
                 new { role = "user", content = prompt }
