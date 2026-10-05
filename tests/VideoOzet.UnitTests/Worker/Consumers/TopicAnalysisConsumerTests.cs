@@ -66,8 +66,11 @@ public class TopicAnalysisConsumerTests
         });
         
         var publishedEvents = new List<object>();
-        contextMock.Setup(c => c.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()))
-            .Callback<object, CancellationToken>((msg, ct) => publishedEvents.Add(msg))
+        contextMock.Setup(c => c.Publish(It.IsAny<PipelineProgressEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<PipelineProgressEvent, CancellationToken>((msg, ct) => publishedEvents.Add(msg))
+            .Returns(Task.CompletedTask);
+        contextMock.Setup(c => c.Publish(It.IsAny<TopicAnalysisCompletedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<TopicAnalysisCompletedEvent, CancellationToken>((msg, ct) => publishedEvents.Add(msg))
             .Returns(Task.CompletedTask);
 
         // Act
