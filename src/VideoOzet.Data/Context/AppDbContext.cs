@@ -46,9 +46,37 @@ public class AppDbContext : DbContext
         // Apply all configurations in this assembly
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
+        ConfigureClientGeneratedGuidKeys(modelBuilder);
+
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
         {
             modelBuilder.Ignore<VideoChunkDocument>();
+        }
+    }
+
+    /// <summary>
+    /// Tüm entity'ler Id'yi istemci tarafında üretir (<c>Id = Guid.NewGuid()</c>).
+    /// EF Core ise Guid anahtarları varsayılan olarak "store-generated" (ValueGeneratedOnAdd) kabul eder.
+    /// Bu uyumsuzluk yüzünden, navigation koleksiyonuna eklenen yeni bir alt kayıt
+    /// (örn. <c>seriPlani.SeriBolumler.Add(...)</c>) anahtarı dolu olduğu için "mevcut kayıt" sanılır,
+    /// INSERT yerine UPDATE üretilir ve 0 satır etkilendiği için DbUpdateConcurrencyException fırlatılır.
+    /// Anahtarları ValueGeneratedNever olarak işaretlemek EF'e gerçeği söyler: keşfedilen yeni entity = Added.
+    /// Not: DB tarafındaki gen_random_uuid() default'ları korunur; EF her zaman istemci değerini gönderir.
+    /// </summary>
+    private static void ConfigureClientGeneratedGuidKeys(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (entityType.IsOwned()) continue;
+
+            var pk = entityType.FindPrimaryKey();
+            if (pk == null || pk.Properties.Count != 1) continue;
+
+            var keyProperty = pk.Properties[0];
+            if (keyProperty.ClrType == typeof(Guid))
+            {
+                keyProperty.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never;
+            }
         }
     }
 }

@@ -302,6 +302,7 @@ public class SeriesChainConsumersTests
             dbContext,
             mockSynthesis.Object,
             mockEmbedding.Object,
+            new Mock<ISourceTopicMapper>().Object,
             mockLogService.Object,
             mockLogger.Object,
             dummyChunks);
@@ -357,10 +358,11 @@ public class SeriesChainConsumersTests
             AppDbContext dbContext,
             ISynthesisProvider synthesisProvider,
             IEmbeddingProvider embeddingProvider,
+            ISourceTopicMapper topicMapper,
             ILogService logService,
             ILogger<SeriesVideoGenerationConsumer> logger,
             List<VideoChunkDocument> chunksToReturn)
-            : base(dbContext, synthesisProvider, embeddingProvider, logService, logger)
+            : base(dbContext, synthesisProvider, embeddingProvider, topicMapper, logService, logger)
         {
             _chunksToReturn = chunksToReturn;
         }

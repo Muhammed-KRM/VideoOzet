@@ -15,6 +15,7 @@ using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -23,6 +24,7 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
     private readonly IEmbeddingProvider _embeddingProvider;
+    private readonly ISourceTopicMapper _topicMapper;
     private readonly ILogService _logService;
     private readonly ILogger<SeriesVideoGenerationConsumer> _logger;
 
@@ -30,12 +32,14 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
         IEmbeddingProvider embeddingProvider,
+        ISourceTopicMapper topicMapper,
         ILogService logService,
         ILogger<SeriesVideoGenerationConsumer> logger)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _embeddingProvider = embeddingProvider;
+        _topicMapper = topicMapper;
         _logService = logService;
         _logger = logger;
     }
@@ -158,11 +162,10 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
             }
             else
             {
-                // Fallback: chunk yoksa özet ve dökümanlardan bağlam oluştur
-                var videolar = await _dbContext.Videolar.Include(v => v.Summary).Where(v => v.EgitimId == message.EgitimId && v.Summary != null).ToListAsync(context.CancellationToken);
-                var dokumanlar = await _dbContext.Dokumanlar.Include(d => d.DokumanMetin).Where(d => d.EgitimId == message.EgitimId && d.DokumanMetin != null).ToListAsync(context.CancellationToken);
-                foreach (var video in videolar) { contextBuilder.AppendLine($"[VİDEO: {video.Baslik}]\n{video.Summary!.OzetMetni}\n"); }
-                foreach (var doc in dokumanlar) { contextBuilder.AppendLine($"[DÖKÜMAN: {doc.DosyaAdi}]\n{doc.DokumanMetin!.HamMetin}\n"); }
+                // Fallback: chunk yoksa önbellekli konu özeti kullanılır (ham doküman metinleri
+                // yüz binlerce karakter olabilir ve tek prompt'a sığmaz).
+                var digest = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
+                contextBuilder.AppendLine(digest);
             }
 
             var allSourcesData = contextBuilder.ToString();
@@ -212,8 +215,9 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 Durum = BolumDurumu.Tamamlandi
             };
 
-            bolum.Revizyonlar.Add(revizyon);
-            _dbContext.Entry(revizyon).State = EntityState.Added;
+            // Açık DbSet.Add: SeriBolumId FK'si sayesinde bolum.Revizyonlar navigation'ı da otomatik güncellenir.
+            _dbContext.BolumRevizyonlari.Add(revizyon);
+            bolum.AktifRevizyonId = revizyon.Id;
             bolum.Durum = BolumDurumu.Tamamlandi;
             
             await _dbContext.SaveChangesAsync(context.CancellationToken);
@@ -240,24 +244,29 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
         catch (Exception ex)
         {
             _logger.LogError(ex, "SeriesVideoGenerationConsumer hata fırlattı: {Message}", ex.Message);
-            try { _dbContext.ChangeTracker.Clear(); } catch { }
-            
-            var bolum = await _dbContext.SeriBolumler.FirstOrDefaultAsync(x => x.Id == message.SeriBolumId, context.CancellationToken);
-            if (bolum != null)
-            {
-                bolum.Durum = BolumDurumu.Hata;
-                await _dbContext.SaveChangesAsync(context.CancellationToken);
-            }
-            
-            await _logService.LogFunctionErrorAsync(nameof(SeriesVideoGenerationConsumer), ex, message);
-            await _logService.LogPipelineErrorAsync(logId, ex);
 
-            await context.Publish(new ContentErrorEvent
+            // Hata yolu ASLA fırlatmamalı (aksi halde MassTransit bölüm üretimini/LLM çağrısını tekrar çalıştırır).
+            await ConsumerFailureGuard.TryPersistFailureStateAsync(_dbContext, _logger, async (db, ct) =>
             {
-                ContentRequestId = message.ContentRequestId,
-                EgitimId = message.EgitimId,
-                HataMesaji = $"Bölüm {message.BolumNo} üretim hatası: " + ex.Message
-            }, context.CancellationToken);
+                var bolum = await db.SeriBolumler.FirstOrDefaultAsync(x => x.Id == message.SeriBolumId, ct);
+                if (bolum != null)
+                {
+                    bolum.Durum = BolumDurumu.Hata;
+                }
+            });
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "LogFunctionError",
+                () => _logService.LogFunctionErrorAsync(nameof(SeriesVideoGenerationConsumer), ex, message));
+            await ConsumerFailureGuard.TryRunAsync(_logger, "LogPipelineError",
+                () => _logService.LogPipelineErrorAsync(logId, ex));
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "Publish ContentErrorEvent",
+                () => context.Publish(new ContentErrorEvent
+                {
+                    ContentRequestId = message.ContentRequestId,
+                    EgitimId = message.EgitimId,
+                    HataMesaji = $"Bölüm {message.BolumNo} üretim hatası: " + ex.Message
+                }, CancellationToken.None));
         }
     }
 

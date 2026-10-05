@@ -287,10 +287,24 @@ export class ContentResultComponent implements OnChanges {
 
   downloadDoc(scope: 'active' | 'all') {
     const html = this.generateDocumentHtml(scope, 'word');
-    const blob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
     const suffix = scope === 'all' ? 'Tam_Rapor' : (this.activeTab === 'ozet' ? 'Arastirma_Ozeti' : (this.activeTab === 'plan' ? 'Video_Plani' : 'QC_Raporu'));
-    this.saveBlob(blob, `${this.cleanFileName}_${suffix}.doc`);
-    this.isDownloadMenuOpen = false;
+    
+    import('html-docx-js-typescript').then(({ asBlob }) => {
+      asBlob(html).then((blob: any) => {
+        this.saveBlob(blob, `${this.cleanFileName}_${suffix}.docx`);
+        this.isDownloadMenuOpen = false;
+      }).catch((err: any) => {
+        console.error('Word oluşturma hatası:', err);
+        const fallbackBlob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
+        this.saveBlob(fallbackBlob, `${this.cleanFileName}_${suffix}.doc`);
+        this.isDownloadMenuOpen = false;
+      });
+    }).catch((err) => {
+      console.error('html-docx-js-typescript yüklenemedi:', err);
+      const fallbackBlob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
+      this.saveBlob(fallbackBlob, `${this.cleanFileName}_${suffix}.doc`);
+      this.isDownloadMenuOpen = false;
+    });
   }
 
   downloadPdf(scope: 'active' | 'all') {

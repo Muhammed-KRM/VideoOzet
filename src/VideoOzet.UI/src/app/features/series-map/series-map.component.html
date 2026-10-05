@@ -1,92 +1,81 @@
 <div class="h-full w-full bg-slate-900 rounded-lg p-6 overflow-x-auto overflow-y-hidden custom-scrollbar flex gap-6">
-  
-  <div *ngIf="!haritaData" class="w-full h-full flex items-center justify-center">
-    <p class="text-slate-400">Harita verisi bulunamadı veya çözümlenemedi.</p>
+
+  <div *ngIf="bolumler.length === 0" class="w-full h-full flex items-center justify-center">
+    <p class="text-slate-400">Bu planda henüz bölüm bulunmuyor.</p>
   </div>
 
-  <div *ngFor="let video of getVideos(); let i = index" 
+  <div *ngFor="let b of bolumler; trackBy: trackByBolum"
        class="flex-shrink-0 w-80 flex flex-col h-full bg-slate-800 rounded-xl border-2 transition-all group relative"
        [ngClass]="{
-         'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]': plan.onaylandi && plan.seriBolumler[i]?.durum === 1,
-         'border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]': plan.onaylandi && plan.seriBolumler[i]?.durum === 2,
-         'border-slate-700/50 hover:border-slate-600': !plan.onaylandi || plan.seriBolumler[i]?.durum === 0,
+         'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]': plan.onaylandi && b.durum === 'Isleniyor',
+         'border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]': plan.onaylandi && b.durum === 'Tamamlandi',
+         'border-rose-500/50': plan.onaylandi && b.durum === 'Hata',
+         'border-slate-700/50 hover:border-slate-600': !plan.onaylandi || b.durum === 'Bekliyor',
          'cursor-pointer hover:translate-y-[-2px]': plan.onaylandi
        }"
-       (click)="goToEpisode(video.BolumNo)">
-    
-    <!-- Video Header -->
+       (click)="goToEpisode(b.bolumNo)">
+
+    <!-- Bölüm Başlığı -->
     <div class="p-4 border-b border-slate-700/50 bg-slate-800/80 rounded-t-xl relative overflow-hidden">
-      <div class="absolute top-0 left-0 w-full h-1" 
+      <div class="absolute top-0 left-0 w-full h-1"
            [ngClass]="{
-             'bg-indigo-500': plan.onaylandi && plan.seriBolumler[i]?.durum === 1,
-             'bg-emerald-500': plan.onaylandi && plan.seriBolumler[i]?.durum === 2,
-             'bg-slate-600': !plan.onaylandi || plan.seriBolumler[i]?.durum === 0
+             'bg-indigo-500': plan.onaylandi && b.durum === 'Isleniyor',
+             'bg-emerald-500': plan.onaylandi && b.durum === 'Tamamlandi',
+             'bg-rose-500': plan.onaylandi && b.durum === 'Hata',
+             'bg-slate-600': !plan.onaylandi || b.durum === 'Bekliyor'
            }">
       </div>
-      
+
       <div class="flex justify-between items-start mb-2">
-        <span class="px-2 py-1 bg-slate-700 text-xs font-bold text-white rounded-md">Bölüm {{ video.BolumNo }}</span>
-        <span class="text-xs font-medium text-slate-400 bg-slate-900 px-2 py-1 rounded-full border border-slate-700">~{{ video.HedefSureDk }} dk</span>
+        <span class="px-2 py-1 bg-slate-700 text-xs font-bold text-white rounded-md">Bölüm {{ b.bolumNo }}</span>
+        <span class="text-xs font-medium text-slate-400 bg-slate-900 px-2 py-1 rounded-full border border-slate-700">~{{ b.hedefSureDk }} dk</span>
       </div>
-      <h4 class="text-base font-bold text-white leading-tight mb-1">{{ video.CalismaBasligi }}</h4>
-      <p class="text-xs text-indigo-300 italic">"{{ video.Kanca }}"</p>
+      <h4 class="text-base font-bold text-white leading-tight mb-1">{{ b.calismaBasligi }}</h4>
     </div>
 
-    <!-- Video Body (Scrollable) -->
+    <!-- Bölüm İçeriği -->
     <div class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-      
       <div>
         <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Ana Fikir</h5>
-        <p class="text-sm text-slate-300">{{ video.AnaFikir }}</p>
-      </div>
-      
-      <div>
-        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Görsel / Ton</h5>
-        <p class="text-sm text-amber-200/80">{{ video.GorselTon }}</p>
+        <p class="text-sm text-slate-300">{{ b.anaFikir }}</p>
       </div>
 
-      <div>
-        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Zaman Çizelgesi</h5>
-        <div class="space-y-3 relative before:absolute before:inset-0 before:ml-2 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-700 before:to-transparent">
-          <div *ngFor="let z of getZamanCizelgesi(video)" class="relative flex items-start justify-between">
-            <div class="flex items-center w-full">
-              <div class="z-10 flex items-center justify-center w-4 h-4 rounded-full bg-slate-800 border-2 border-indigo-500 shadow shrink-0"></div>
-              <div class="ml-3 w-full">
-                <span class="text-[10px] font-bold text-indigo-400">{{ z.dakika }}</span>
-                <p class="text-xs text-slate-300 leading-snug">{{ z.aciklama }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div *ngIf="getKonular(b).length">
+        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Kapsanan Konular</h5>
+        <ul class="space-y-2">
+          <li *ngFor="let k of getKonular(b)" class="flex items-start gap-2">
+            <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"></span>
+            <span class="text-xs text-slate-300 leading-snug">{{ k }}</span>
+          </li>
+        </ul>
       </div>
     </div>
 
-    <!-- Video Footer / Status -->
+    <!-- Durum -->
     <div *ngIf="plan.onaylandi" class="p-3 border-t border-slate-700/50 bg-slate-800/80 rounded-b-xl flex justify-between items-center">
       <div class="flex items-center gap-2">
-        <ng-container [ngSwitch]="plan.seriBolumler[i]?.durum">
-          <span *ngSwitchCase="0" class="flex h-2 w-2 relative">
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-slate-500"></span>
-          </span>
-          <span *ngSwitchCase="1" class="flex h-2 w-2 relative">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-          </span>
-          <span *ngSwitchCase="2" class="flex h-2 w-2 relative">
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-        </ng-container>
-        <span class="text-xs font-medium" 
+        <span class="flex h-2 w-2 relative">
+          <span *ngIf="b.durum === 'Isleniyor'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2"
+                [ngClass]="{
+                  'bg-slate-500': b.durum === 'Bekliyor',
+                  'bg-indigo-500': b.durum === 'Isleniyor',
+                  'bg-emerald-500': b.durum === 'Tamamlandi',
+                  'bg-rose-500': b.durum === 'Hata'
+                }"></span>
+        </span>
+        <span class="text-xs font-medium"
               [ngClass]="{
-                'text-slate-400': plan.seriBolumler[i]?.durum === 0,
-                'text-indigo-400': plan.seriBolumler[i]?.durum === 1,
-                'text-emerald-400': plan.seriBolumler[i]?.durum === 2
+                'text-slate-400': b.durum === 'Bekliyor',
+                'text-indigo-400': b.durum === 'Isleniyor',
+                'text-emerald-400': b.durum === 'Tamamlandi',
+                'text-rose-400': b.durum === 'Hata'
               }">
-          {{ plan.seriBolumler[i]?.durum === 0 ? 'Sırada' : (plan.seriBolumler[i]?.durum === 1 ? 'Üretiliyor...' : 'Tamamlandı') }}
+          {{ durumEtiketi(b.durum) }}
         </span>
       </div>
-      <button *ngIf="plan.seriBolumler[i]?.durum === 2" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors">
-        İzle
+      <button *ngIf="b.durum === 'Tamamlandi'" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors">
+        Görüntüle
       </button>
     </div>
   </div>

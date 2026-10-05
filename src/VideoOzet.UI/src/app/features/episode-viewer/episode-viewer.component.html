@@ -6,7 +6,7 @@
       </svg>
     </button>
     <div>
-      <h1 class="text-2xl font-bold text-white tracking-tight">Bölüm {{ bolumNo }}: {{ episode?.CalismaBasligi || 'Yükleniyor...' }}</h1>
+      <h1 class="text-2xl font-bold text-white tracking-tight">Bölüm {{ bolumNo }}: {{ episode?.calismaBasligi || 'Yükleniyor...' }}</h1>
       <p class="text-sm text-slate-400 mt-1">Bu bölüm için üretilmiş video planı, metin ve revizyon geçmişi.</p>
     </div>
   </div>
@@ -27,39 +27,32 @@
           <div>
             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Durum</p>
             <div class="flex items-center gap-2">
-              <ng-container [ngSwitch]="episode.durum">
-                <span *ngSwitchCase="0" class="flex h-2.5 w-2.5 relative">
-                  <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500"></span>
-                </span>
-                <span *ngSwitchCase="1" class="flex h-2.5 w-2.5 relative">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
-                </span>
-                <span *ngSwitchCase="2" class="flex h-2.5 w-2.5 relative">
-                  <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                </span>
-              </ng-container>
+              <span class="flex h-2.5 w-2.5 relative">
+                <span *ngIf="episode.durum === 'Isleniyor'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5"
+                      [ngClass]="{'bg-slate-500': episode.durum === 'Bekliyor', 'bg-indigo-500': episode.durum === 'Isleniyor', 'bg-emerald-500': episode.durum === 'Tamamlandi', 'bg-rose-500': episode.durum === 'Hata'}"></span>
+              </span>
               <span class="text-sm font-medium" 
-                    [ngClass]="{'text-slate-300': episode.durum === 0, 'text-indigo-300': episode.durum === 1, 'text-emerald-300': episode.durum === 2}">
-                {{ episode.durum === 0 ? 'Sırada' : (episode.durum === 1 ? 'Üretiliyor...' : 'Tamamlandı') }}
+                    [ngClass]="{'text-slate-300': episode.durum === 'Bekliyor', 'text-indigo-300': episode.durum === 'Isleniyor', 'text-emerald-300': episode.durum === 'Tamamlandi', 'text-rose-300': episode.durum === 'Hata'}">
+                {{ episode.durum === 'Bekliyor' ? 'Sırada' : (episode.durum === 'Isleniyor' ? 'Üretiliyor...' : (episode.durum === 'Hata' ? 'Hata' : 'Tamamlandı')) }}
               </span>
             </div>
           </div>
           
           <div>
-            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Kanca</p>
-            <p class="text-sm text-slate-300 italic">"{{ episode.Kanca }}"</p>
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Ana Fikir</p>
+            <p class="text-sm text-slate-300">{{ episode.anaFikir }}</p>
           </div>
           
           <div>
             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Hedef Süre</p>
-            <p class="text-sm text-slate-300">~{{ episode.HedefSureDk }} Dakika</p>
+            <p class="text-sm text-slate-300">~{{ episode.hedefSureDk }} Dakika</p>
           </div>
         </div>
       </div>
 
       <!-- Revizyon Paneli -->
-      <div class="bg-slate-800 rounded-xl p-5 border border-slate-700/50 shadow-xl" *ngIf="episode.durum === 2 || episode.durum === 1">
+      <div class="bg-slate-800 rounded-xl p-5 border border-slate-700/50 shadow-xl" *ngIf="episode.durum === 'Tamamlandi' || episode.durum === 'Isleniyor' || episode.durum === 'Hata'">
         <h3 class="text-base font-semibold text-white mb-2">Videoyu Revize Et</h3>
         <p class="text-xs text-slate-400 mb-4">Bu video için metin, ton veya içerikte değişiklik isteyin.</p>
         
@@ -70,14 +63,14 @@
             rows="4" 
             placeholder="Örn: Giriş çok sıkıcı olmuş, daha heyecanlı bir dille yeniden yaz..." 
             class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm"
-            [disabled]="episode.durum === 1">
+            [disabled]="episode.durum === 'Isleniyor'">
           </textarea>
           <button 
             type="submit" 
-            [disabled]="!revizyonTalimati || episode.durum === 1 || isRevising" 
+            [disabled]="!revizyonTalimati || episode.durum === 'Isleniyor' || isRevising" 
             class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg shadow-lg transition-all disabled:opacity-50 flex justify-center items-center gap-2 text-sm">
-            <span *ngIf="episode.durum === 1 || isRevising" class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-            {{ episode.durum === 1 || isRevising ? 'Revize Ediliyor...' : 'Revizyon İste' }}
+            <span *ngIf="episode.durum === 'Isleniyor' || isRevising" class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+            {{ episode.durum === 'Isleniyor' || isRevising ? 'Revize Ediliyor...' : 'Revizyon İste' }}
           </button>
         </form>
       </div>
@@ -89,8 +82,8 @@
           <div *ngFor="let rev of episode.revizyonlar" class="flex items-center justify-between p-2 rounded-lg"
                [ngClass]="{'bg-indigo-500/20 border border-indigo-500/30': rev.id === getAktifRevizyon()?.id, 'hover:bg-slate-700 cursor-pointer': rev.id !== getAktifRevizyon()?.id}">
             <div>
-              <p class="text-sm font-medium text-white">Versiyon {{ rev.versiyonNo }}</p>
-              <p class="text-xs text-slate-400 truncate w-32" title="{{ rev.revizeTalimati }}">{{ rev.revizeTalimati }}</p>
+              <p class="text-sm font-medium text-white">Revizyon {{ rev.revizyonNo }}</p>
+              <p class="text-xs text-slate-400 truncate w-32" title="{{ rev.talimat }}">{{ rev.talimat || rev.tip }}</p>
             </div>
             <span *ngIf="rev.id === getAktifRevizyon()?.id" class="text-[10px] bg-indigo-500 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">Aktif</span>
           </div>
@@ -100,7 +93,7 @@
 
     <!-- Sağ Kolon: İçerik Gösterici -->
     <div class="lg:col-span-3">
-      <div *ngIf="episode.durum === 0" class="bg-slate-800 rounded-xl p-10 border border-slate-700/50 shadow-xl h-full flex flex-col items-center justify-center text-center">
+      <div *ngIf="episode.durum === 'Bekliyor'" class="bg-slate-800 rounded-xl p-10 border border-slate-700/50 shadow-xl h-full flex flex-col items-center justify-center text-center">
         <div class="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -110,7 +103,7 @@
         <p class="text-slate-400 max-w-md">Bu video şu an üretim sırasında bekliyor. Önceki videolar tamamlandığında bunun üretimi başlayacaktır.</p>
       </div>
 
-      <div *ngIf="episode.durum === 1" class="bg-slate-800 rounded-xl p-10 border border-slate-700/50 shadow-xl h-full flex flex-col items-center justify-center text-center">
+      <div *ngIf="episode.durum === 'Isleniyor'" class="bg-slate-800 rounded-xl p-10 border border-slate-700/50 shadow-xl h-full flex flex-col items-center justify-center text-center">
         <div class="relative w-20 h-20 mb-6">
           <div class="absolute inset-0 rounded-full border-4 border-slate-700"></div>
           <div class="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin"></div>
@@ -124,7 +117,13 @@
         <p class="text-slate-400 max-w-md">Senaryo yazılıyor, kalite kontrolleri yapılıyor. Lütfen bekleyin.</p>
       </div>
 
-      <div *ngIf="episode.durum === 2 && getAktifRevizyon()" class="h-full">
+      <div *ngIf="episode.durum === 'Hata'" class="bg-slate-800 rounded-xl p-10 border border-rose-500/30 shadow-xl h-full flex flex-col items-center justify-center text-center">
+        <div class="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center mb-4 text-rose-400 text-3xl">!</div>
+        <h3 class="text-xl font-bold text-rose-300 mb-2">Bu bölüm üretilemedi</h3>
+        <p class="text-slate-400 max-w-md">Soldaki panelden bir talimat yazarak bölümü yeniden üretmeyi deneyebilirsiniz.</p>
+      </div>
+
+      <div *ngIf="episode.durum === 'Tamamlandi' && getAktifRevizyon()" class="h-full">
         <!-- Burada plan-viewer componentini kullanıyoruz -->
         <app-plan-viewer [revision]="getAktifRevizyon()"></app-plan-viewer>
       </div>

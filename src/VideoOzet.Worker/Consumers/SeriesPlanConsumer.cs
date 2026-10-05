@@ -11,6 +11,7 @@ using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -18,17 +19,20 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
 {
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceTopicMapper _topicMapper;
     private readonly ILogService _logService;
     private readonly ILogger<SeriesPlanConsumer> _logger;
 
     public SeriesPlanConsumer(
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
+        ISourceTopicMapper topicMapper,
         ILogService logService,
         ILogger<SeriesPlanConsumer> logger)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
+        _topicMapper = topicMapper;
         _logService = logService;
         _logger = logger;
     }
@@ -47,6 +51,8 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             _logger.LogWarning("ContentRequest veya KonuAnalizi bulunamadı (Id: {Id}).", message.ContentRequestId);
             return;
         }
+
+        Guid? activePlanId = null;
 
         try
         {
@@ -91,6 +97,7 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 _dbContext.SeriPlanlari.Add(seriPlani);
             }
             await _dbContext.SaveChangesAsync(context.CancellationToken);
+            activePlanId = seriPlani.Id;
 
             await context.Publish(new PipelineProgressEvent
             {
@@ -101,14 +108,10 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 Mesaj = "Seri planı oluşturuluyor..."
             }, context.CancellationToken);
 
-            var contextBuilder = new StringBuilder();
-            var videolar = await _dbContext.Videolar.Include(v => v.Summary).Where(v => v.EgitimId == message.EgitimId && v.Summary != null).ToListAsync(context.CancellationToken);
-            var dokumanlar = await _dbContext.Dokumanlar.Include(d => d.DokumanMetin).Where(d => d.EgitimId == message.EgitimId && d.DokumanMetin != null).ToListAsync(context.CancellationToken);
-            
-            foreach (var video in videolar) { contextBuilder.AppendLine($"[VİDEO: {video.Baslik}]\n{video.Summary!.OzetMetni}\n"); }
-            foreach (var doc in dokumanlar) { contextBuilder.AppendLine($"[DÖKÜMAN: {doc.DosyaAdi}]\n{doc.DokumanMetin!.HamMetin}\n"); }
-
-            var allSourcesData = contextBuilder.ToString();
+            // Kaynak bağlamı: Konu analizinde üretilen (ve KaynakKonuCikarimlari tablosunda önbelleklenen)
+            // map-reduce konu özeti yeniden kullanılır. Ham doküman metinlerini (yüz binlerce karakter)
+            // tek bir prompt'a gömmek LLM çağrısını dakikalarca uzatıyor ve bağlam limitlerini zorluyordu.
+            var allSourcesData = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
             
             var konuAnaliziJson = new
             {
@@ -142,28 +145,43 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
             }
 
-            seriPlani.VideoSayisi = planData.TryGetProperty("VideoSayisi", out var videoSayisi) ? videoSayisi.GetInt32() : 1;
-            seriPlani.VarsayilanVideoSuresiDk = planData.TryGetProperty("VarsayilanVideoSuresiDk", out var sure) ? sure.GetInt32() : 10;
-            seriPlani.OneridenFarkli = seriPlani.OneridenFarkli || (planData.TryGetProperty("OneridenFarkli", out var farkli) && farkli.GetBoolean());
+            seriPlani.VarsayilanVideoSuresiDk = ReadInt(planData, "VarsayilanVideoSuresiDk", 10);
+            seriPlani.OneridenFarkli = seriPlani.OneridenFarkli || ReadBool(planData, "OneridenFarkli");
             seriPlani.DisaridaBirakilanlarJson = planData.TryGetProperty("DisaridaBirakilanlar", out var disarida) ? disarida.ToString() : "[]";
             seriPlani.Durum = SeriPlanDurumu.OnayBekliyor;
-            
+
+            var bolumSayaci = 0;
             if (planData.TryGetProperty("SeriHaritasi", out var harita) && harita.ValueKind == System.Text.Json.JsonValueKind.Array)
             {
                 seriPlani.SeriHaritasiJson = harita.ToString();
                 foreach (var b in harita.EnumerateArray())
                 {
-                    seriPlani.SeriBolumler.Add(new SeriBolum
+                    if (b.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+
+                    // BolumNo LLM'e bırakılmaz: (SeriPlaniId, BolumNo) benzersiz index'i tekrar eden/eksik
+                    // numaralarda kaydı patlatır. Sıra, LLM'in döndürdüğü dizideki sıradır.
+                    bolumSayaci++;
+
+                    // Açık DbSet.Add: entity durumunu (Added) niyetle belirtir; navigation keşfine güvenmez.
+                    _dbContext.SeriBolumler.Add(new SeriBolum
                     {
-                        BolumNo = b.TryGetProperty("BolumNo", out var bno) ? bno.GetInt32() : 1,
-                        CalismaBasligi = b.TryGetProperty("CalismaBasligi", out var bbaslik) ? bbaslik.GetString() ?? "" : "",
-                        HedefSureDk = b.TryGetProperty("HedefSureDk", out var bsure) ? bsure.GetInt32() : seriPlani.VarsayilanVideoSuresiDk,
-                        AnaFikir = b.TryGetProperty("AnaFikir", out var bfikir) ? bfikir.GetString() ?? "" : "",
+                        SeriPlaniId = seriPlani.Id,
+                        BolumNo = bolumSayaci,
+                        CalismaBasligi = ReadString(b, "CalismaBasligi"),
+                        HedefSureDk = ReadInt(b, "HedefSureDk", seriPlani.VarsayilanVideoSuresiDk),
+                        AnaFikir = ReadString(b, "AnaFikir"),
                         KonularJson = b.TryGetProperty("Konular", out var bkonu) ? bkonu.ToString() : "[]",
                         Durum = BolumDurumu.Bekliyor
                     });
                 }
             }
+
+            if (bolumSayaci == 0)
+            {
+                throw new InvalidOperationException("Yapay zeka seri haritasında hiç bölüm döndürmedi.");
+            }
+
+            seriPlani.VideoSayisi = bolumSayaci;
             
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
@@ -186,24 +204,65 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "SeriesPlanConsumer hata fırlattı: {Message}", ex.Message);
-            await _logService.LogFunctionErrorAsync(nameof(SeriesPlanConsumer), ex, message);
-            
-            // Eğer plan eklendiyse durumu hata yap, eklenmediyse hata dön.
-            var seriPlani = await _dbContext.SeriPlanlari
-                .FirstOrDefaultAsync(x => x.ContentRequestId == request.Id, context.CancellationToken);
-                
-            if (seriPlani != null)
+
+            // Hata yolu ASLA fırlatmamalı: fırlatırsa MassTransit tüm akışı (LLM çağrısı dahil) yeniden çalıştırır.
+            await ConsumerFailureGuard.TryPersistFailureStateAsync(_dbContext, _logger, async (db, ct) =>
             {
-                seriPlani.Durum = SeriPlanDurumu.Hata;
-                await _dbContext.SaveChangesAsync(context.CancellationToken);
-            }
-            
-            await context.Publish(new ContentErrorEvent
-            {
-                ContentRequestId = request.Id,
-                EgitimId = request.EgitimId,
-                HataMesaji = ex.Message
-            }, context.CancellationToken);
+                var plan = activePlanId.HasValue
+                    ? await db.SeriPlanlari.FirstOrDefaultAsync(x => x.Id == activePlanId.Value, ct)
+                    : await db.SeriPlanlari
+                        .Where(x => x.ContentRequestId == request.Id)
+                        .OrderByDescending(x => x.PlanNo)
+                        .FirstOrDefaultAsync(ct);
+
+                if (plan != null && !plan.Onaylandi)
+                {
+                    plan.Durum = SeriPlanDurumu.Hata;
+                }
+            });
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "LogFunctionError",
+                () => _logService.LogFunctionErrorAsync(nameof(SeriesPlanConsumer), ex, message));
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "Publish ContentErrorEvent",
+                () => context.Publish(new ContentErrorEvent
+                {
+                    ContentRequestId = request.Id,
+                    EgitimId = request.EgitimId,
+                    HataMesaji = ex.Message
+                }, CancellationToken.None));
         }
+    }
+
+    // ---- LLM JSON çıktısı için toleranslı okuyucular ----
+    // LLM'ler sayıları bazen "10" (string) veya 10.0 (ondalık) olarak döndürür; GetInt32() bu durumda fırlatır.
+
+    private static int ReadInt(System.Text.Json.JsonElement obj, string name, int fallback)
+    {
+        if (!obj.TryGetProperty(name, out var v)) return fallback;
+        return v.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.Number when v.TryGetInt32(out var i) => i,
+            System.Text.Json.JsonValueKind.Number when v.TryGetDouble(out var d) => (int)Math.Round(d),
+            System.Text.Json.JsonValueKind.String when int.TryParse(v.GetString(), out var s) => s,
+            _ => fallback
+        };
+    }
+
+    private static bool ReadBool(System.Text.Json.JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var v)) return false;
+        return v.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.True => true,
+            System.Text.Json.JsonValueKind.String => bool.TryParse(v.GetString(), out var b) && b,
+            _ => false
+        };
+    }
+
+    private static string ReadString(System.Text.Json.JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var v)) return string.Empty;
+        return v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? string.Empty : v.ToString();
     }
 }

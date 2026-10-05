@@ -197,6 +197,32 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Akıllı seri (Planlı mod) talepleri — en yeni üstte. */
+  get seriesRequests(): any[] {
+    return this.pastContentRequests.filter(r => r.mod === 1 || r.modAdi === 'Planli');
+  }
+
+  /** Seri talebinin kullanıcıya gösterilecek durumu (plan durumu esas alınır). */
+  seriesStatus(req: any): { label: string; cls: string } {
+    if (req.durum === 'Hata') return { label: 'Hata', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' };
+    switch (req.planDurum) {
+      case 'OnayBekliyor': return { label: 'Onay Bekliyor', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+      case 'Onaylandi':
+        return req.durum === 'Tamamlandi'
+          ? { label: 'Tamamlandı', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }
+          : { label: 'Üretimde', cls: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' };
+      case 'Hata': return { label: 'Hata', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' };
+      case 'Iptal': return { label: 'İptal', cls: 'bg-slate-600/30 text-slate-300 border-slate-500/30' };
+      case 'Olusturuluyor':
+      case 'Taslak': return { label: 'Planlanıyor', cls: 'bg-purple-500/15 text-purple-300 border-purple-500/30' };
+      default: return { label: 'Analiz Ediliyor', cls: 'bg-purple-500/15 text-purple-300 border-purple-500/30' };
+    }
+  }
+
+  openSeries(id: string) {
+    this.router.navigate(['/series-planner', id]);
+  }
+
   onUploadComplete() {
     this.loadEgitim();
   }

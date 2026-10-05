@@ -65,8 +65,15 @@ public static class ServiceRegistration
                     h.Password(configuration["RabbitMQ:Password"] ?? "guest");
                 });
 
-                // Resilience: Automatic exponential retry for transient errors
-                cfg.UseMessageRetry(r => r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5)));
+                // Resilience: Automatic exponential retry for TRANSIENT errors only.
+                // Deterministik hatalar (DB durum çakışması, bozuk JSON) tekrar denemeyle düzelmez;
+                // yeniden denemek sadece dakikalar süren LLM çağrılarını baştan çalıştırır.
+                cfg.UseMessageRetry(r =>
+                {
+                    r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5));
+                    r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>(); // DbUpdateConcurrencyException dahil
+                    r.Ignore<System.Text.Json.JsonException>();
+                });
                 
                 cfg.ConfigureEndpoints(context); // Auto-configures consumers
             });

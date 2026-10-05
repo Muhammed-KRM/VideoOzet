@@ -80,6 +80,10 @@ public class ContentRequestsController : ControllerBase
                 Mod = (int)r.Mod,
                 ModAdi = r.Mod.ToString(),
                 VideoSayisi = r.SeriPlanlari.OrderByDescending(p => p.PlanNo).Select(p => (int?)p.VideoSayisi).FirstOrDefault(),
+                // Seri taleplerinde ContentRequest.Durum planlama boyunca "Bekliyor" kalır;
+                // gerçek ilerleme en güncel planın durumundadır.
+                PlanDurum = r.SeriPlanlari.OrderByDescending(p => p.PlanNo).Select(p => (SeriPlanDurumu?)p.Durum).FirstOrDefault(),
+                PlanNo = r.SeriPlanlari.OrderByDescending(p => p.PlanNo).Select(p => (int?)p.PlanNo).FirstOrDefault(),
                 r.OlusturmaTarihi
             })
             .ToListAsync();

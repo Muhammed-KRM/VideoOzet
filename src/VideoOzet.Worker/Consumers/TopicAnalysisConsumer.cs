@@ -11,6 +11,7 @@ using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -126,22 +127,27 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
         catch (Exception ex)
         {
             _logger.LogError(ex, "TopicAnalysisConsumer hata fırlattı: {Message}", ex.Message);
-            
-            var konuAnalizi = await _dbContext.KonuAnalizleri.FirstOrDefaultAsync(x => x.ContentRequestId == request.Id, context.CancellationToken);
-            if (konuAnalizi != null)
+
+            // Hata yolu ASLA fırlatmamalı: fırlatırsa MassTransit tüm analizi (LLM çağrıları dahil) yeniden çalıştırır.
+            await ConsumerFailureGuard.TryPersistFailureStateAsync(_dbContext, _logger, async (db, ct) =>
             {
-                konuAnalizi.Durum = AnalizDurumu.Hata;
-                await _dbContext.SaveChangesAsync(context.CancellationToken);
-            }
-            
-            await _logService.LogFunctionErrorAsync(nameof(TopicAnalysisConsumer), ex, message);
-            
-            await context.Publish(new ContentErrorEvent
-            {
-                ContentRequestId = request.Id,
-                EgitimId = request.EgitimId,
-                HataMesaji = ex.Message
-            }, context.CancellationToken);
+                var konuAnalizi = await db.KonuAnalizleri.FirstOrDefaultAsync(x => x.ContentRequestId == request.Id, ct);
+                if (konuAnalizi != null)
+                {
+                    konuAnalizi.Durum = AnalizDurumu.Hata;
+                }
+            });
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "LogFunctionError",
+                () => _logService.LogFunctionErrorAsync(nameof(TopicAnalysisConsumer), ex, message));
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "Publish ContentErrorEvent",
+                () => context.Publish(new ContentErrorEvent
+                {
+                    ContentRequestId = request.Id,
+                    EgitimId = request.EgitimId,
+                    HataMesaji = ex.Message
+                }, System.Threading.CancellationToken.None));
         }
     }
 }

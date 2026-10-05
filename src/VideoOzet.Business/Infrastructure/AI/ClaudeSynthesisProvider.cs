@@ -86,6 +86,8 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 try
                 {
                     using var httpClient = new System.Net.Http.HttpClient();
+                    httpClient.Timeout = TimeSpan.FromMinutes(10);
+                    
                     var requestBody = new
                     {
                         model = geminiModel,

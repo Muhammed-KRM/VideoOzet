@@ -9,6 +9,7 @@ using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
 using Microsoft.Extensions.Logging;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -122,23 +123,26 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
         catch (Exception ex)
         {
             _logger.LogError(ex, "Seri video revizyonunda hata. BolumId: {BolumId}", msg.SeriBolumId);
-            
-            await _publishEndpoint.Publish(new PipelineProgressEvent
+
+            // Hata yolu ASLA fırlatmamalı (aksi halde MassTransit LLM revizyonunu tekrar tekrar çalıştırır).
+            await ConsumerFailureGuard.TryPersistFailureStateAsync(_dbContext, _logger, async (db, ct) =>
             {
-                VideoId = Guid.Empty,
-                EgitimId = msg.EgitimId,
-                Asama = "Hata",
-                Durum = "Hata",
-                Mesaj = $"Revizyon hatası: {ex.Message}"
+                var bolum = await db.SeriBolumler.FirstOrDefaultAsync(b => b.Id == msg.SeriBolumId, ct);
+                if (bolum != null)
+                {
+                    bolum.Durum = BolumDurumu.Hata;
+                }
             });
-            
-            try { _dbContext.ChangeTracker.Clear(); } catch { }
-            var bolum = await _dbContext.SeriBolumler.FirstOrDefaultAsync(b => b.Id == msg.SeriBolumId);
-            if (bolum != null)
-            {
-                bolum.Durum = BolumDurumu.Hata;
-                await _dbContext.SaveChangesAsync();
-            }
+
+            await ConsumerFailureGuard.TryRunAsync(_logger, "Publish PipelineProgressEvent",
+                () => _publishEndpoint.Publish(new PipelineProgressEvent
+                {
+                    VideoId = Guid.Empty,
+                    EgitimId = msg.EgitimId,
+                    Asama = "Hata",
+                    Durum = "Hata",
+                    Mesaj = $"Revizyon hatası: {ex.Message}"
+                }));
         }
     }
 }

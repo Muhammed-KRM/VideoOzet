@@ -56,8 +56,8 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
         this.episode = res;
         this.isLoading = false;
 
-        // BolumDurumu = 1 (Isleniyor)
-        if (this.episode.durum === 1) {
+        // BolumDurumu API'den STRING gelir (JsonStringEnumConverter)
+        if (this.episode.durum === 'Isleniyor') {
           if (!this.isPolling) this.startPolling();
         } else {
           this.stopPolling();
@@ -94,15 +94,15 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
     if (this.episode.aktifRevizyonId) {
       return this.episode.revizyonlar.find((r: any) => r.id === this.episode.aktifRevizyonId) || this.episode.revizyonlar[0];
     }
-    // En yüksek versiyonNo'ya sahip olanı bul
+    // En yüksek revizyonNo'ya sahip olanı bul
     return this.episode.revizyonlar.reduce((prev: any, current: any) => {
-      return (prev.versiyonNo > current.versiyonNo) ? prev : current;
+      return (prev.revizyonNo > current.revizyonNo) ? prev : current;
     });
   }
 
   requestRevision() {
     if (!this.revizyonTalimati) return;
-    if (this.episode.durum === 1) return; // Zaten işleniyor
+    if (this.episode.durum === 'Isleniyor') return; // Zaten işleniyor
     
     this.isRevising = true;
     this.apiService.reviseEpisode(this.contentRequestId, this.bolumNo, { talimat: this.revizyonTalimati }).subscribe({
