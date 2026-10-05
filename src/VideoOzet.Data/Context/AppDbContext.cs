@@ -26,6 +26,13 @@ public class AppDbContext : DbContext
     
     public virtual DbSet<EndpointLog> EndpointLogs { get; set; } = null!;
     public virtual DbSet<FunctionLog> FunctionLogs { get; set; } = null!;
+    
+    // Çoklu Video Serisi (Series Planning)
+    public virtual DbSet<KonuAnalizi> KonuAnalizleri { get; set; } = null!;
+    public virtual DbSet<SeriPlani> SeriPlanlari { get; set; } = null!;
+    public virtual DbSet<SeriBolum> SeriBolumler { get; set; } = null!;
+    public virtual DbSet<BolumRevizyonu> BolumRevizyonlari { get; set; } = null!;
+    public virtual DbSet<KaynakKonuCikarimi> KaynakKonuCikarimlari { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

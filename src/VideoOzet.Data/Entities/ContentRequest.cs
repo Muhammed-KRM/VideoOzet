@@ -13,9 +13,14 @@ public class ContentRequest
     public ContentRequestDurumu Durum { get; set; }
     public DateTime OlusturmaTarihi { get; set; } = DateTime.UtcNow;
     public DateTime? TamamlanmaTarihi { get; set; }
+    
+    public IcerikModu Mod { get; set; }
+    public string EkTonTalimati { get; set; } = string.Empty;
 
     public Egitim Egitim { get; set; } = null!;
     public GeneratedContent? GeneratedContent { get; set; }
     public QcResult? QcResult { get; set; }
     public ICollection<ContentVersion> Versions { get; set; } = new List<ContentVersion>();
+    public KonuAnalizi? KonuAnalizi { get; set; }
+    public ICollection<SeriPlani> SeriPlanlari { get; set; } = new List<SeriPlani>();
 }
