@@ -188,6 +188,10 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 context.CancellationToken);
 
             var contentData = LlmJson.Deserialize<JsonElement>(contentJsonStr);
+            if (contentData.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
+            }
 
             var yeniVersiyonNo = (bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault()?.RevizyonNo ?? 0) + 1;
             var kullanilanKaynaklar = topChunks.Any()

@@ -12,8 +12,6 @@
     <PackageReference Include="FFMpegCore" Version="5.4.0" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
-    <PackageReference Include="HtmlSanitizer" Version="9.0.892" />
-    <PackageReference Include="MailKit" Version="4.15.1" />
     <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.6" />
     <PackageReference Include="MediatR" Version="14.1.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />

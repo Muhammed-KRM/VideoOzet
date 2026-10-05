@@ -137,6 +137,10 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 context.CancellationToken);
                 
             var planData = LlmJson.Deserialize<System.Text.Json.JsonElement>(planJsonStr);
+            if (planData.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
+            }
 
             seriPlani.VideoSayisi = planData.TryGetProperty("VideoSayisi", out var videoSayisi) ? videoSayisi.GetInt32() : 1;
             seriPlani.VarsayilanVideoSuresiDk = planData.TryGetProperty("VarsayilanVideoSuresiDk", out var sure) ? sure.GetInt32() : 10;

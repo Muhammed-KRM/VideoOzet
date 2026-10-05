@@ -69,11 +69,11 @@ public class GeminiSummarizer : IGeminiProvider
             }
         };
 
-        var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-        Exception lastException = null;
+        Exception? lastException = null;
 
         for (int tryCount = 0; tryCount < apiKeys.Length; tryCount++)
         {
+            var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
             var keyToUse = apiKeys[_currentKeyIndex % apiKeys.Length];
             try
             {
@@ -122,7 +122,7 @@ public class GeminiSummarizer : IGeminiProvider
                 lastException = ex;
                 await Task.Delay(TimeSpan.FromSeconds(3));
             }
-            catch (Exception ex)
+            catch
             {
                 throw;
             }

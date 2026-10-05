@@ -240,7 +240,8 @@ public class SeriesController : ControllerBase
             ContentRequestId = id,
             EgitimId = bolum.SeriPlani.ContentRequest.EgitimId,
             SeriBolumId = bolum.Id,
-            Talimat = dto.Talimat
+            Talimat = dto.Talimat,
+            HedefAlan = string.IsNullOrWhiteSpace(dto.HedefAlan) ? "Hepsi" : dto.HedefAlan
         });
 
         return Accepted(new { Mesaj = "Revizyon işlemi başlatıldı." });

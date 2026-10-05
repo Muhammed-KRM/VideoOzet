@@ -52,7 +52,8 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
 
             await _publishEndpoint.Publish(new PipelineProgressEvent
             {
-                VideoId = bolum.Id,
+                VideoId = Guid.Empty,
+                EgitimId = msg.EgitimId,
                 Asama = "Video revize ediliyor...",
                 Durum = "İşleniyor",
                 Mesaj = "Mevcut video içeriği güncelleniyor."
@@ -64,22 +65,30 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             string currentOzet = sonRevizyon?.ArastirmaOzeti ?? "";
             string currentPlan = sonRevizyon?.VideoPlani ?? "";
 
-            // Revizyon işlemini AI ile gerçekleştir (örnek olarak ikisini de revize ediyoruz)
-            string yeniOzet = await _synthesisProvider.ReviseContentAsync(
-                currentOzet,
-                msg.Talimat,
-                "Araştırma Özeti",
-                bolum.CalismaBasligi,
-                "",
-                context.CancellationToken);
+            // Revizyon işlemini AI ile gerçekleştir
+            string yeniOzet = currentOzet;
+            if (string.IsNullOrEmpty(msg.HedefAlan) || msg.HedefAlan == "Hepsi" || msg.HedefAlan == "ArastirmaOzeti")
+            {
+                yeniOzet = await _synthesisProvider.ReviseContentAsync(
+                    currentOzet,
+                    msg.Talimat,
+                    "Araştırma Özeti",
+                    bolum.CalismaBasligi,
+                    "",
+                    context.CancellationToken);
+            }
 
-            string yeniPlan = await _synthesisProvider.ReviseContentAsync(
-                currentPlan,
-                msg.Talimat,
-                "Video Planı",
-                bolum.CalismaBasligi,
-                "",
-                context.CancellationToken);
+            string yeniPlan = currentPlan;
+            if (string.IsNullOrEmpty(msg.HedefAlan) || msg.HedefAlan == "Hepsi" || msg.HedefAlan == "VideoPlani")
+            {
+                yeniPlan = await _synthesisProvider.ReviseContentAsync(
+                    currentPlan,
+                    msg.Talimat,
+                    "Video Planı",
+                    bolum.CalismaBasligi,
+                    "",
+                    context.CancellationToken);
+            }
 
             var yeniRevizyon = new BolumRevizyonu
             {
@@ -89,7 +98,7 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 ArastirmaOzeti = yeniOzet,
                 VideoPlani = yeniPlan,
                 DevirNotuJson = sonRevizyon?.DevirNotuJson ?? "",
-                LlmModel = _synthesisProvider.ActiveModelName,
+                LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 Tip = RevizyonTipi.KullaniciRevizyonu,
                 Durum = BolumDurumu.Tamamlandi
             };
@@ -103,7 +112,8 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
 
             await _publishEndpoint.Publish(new PipelineProgressEvent
             {
-                VideoId = bolum.Id,
+                VideoId = Guid.Empty,
+                EgitimId = msg.EgitimId,
                 Asama = "Revizyon Tamamlandı",
                 Durum = "Başarılı",
                 Mesaj = "Video başarıyla güncellendi."
@@ -115,16 +125,18 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             
             await _publishEndpoint.Publish(new PipelineProgressEvent
             {
-                VideoId = msg.SeriBolumId,
+                VideoId = Guid.Empty,
+                EgitimId = msg.EgitimId,
                 Asama = "Hata",
                 Durum = "Hata",
                 Mesaj = $"Revizyon hatası: {ex.Message}"
             });
             
+            try { _dbContext.ChangeTracker.Clear(); } catch { }
             var bolum = await _dbContext.SeriBolumler.FirstOrDefaultAsync(b => b.Id == msg.SeriBolumId);
             if (bolum != null)
             {
-                bolum.Durum = BolumDurumu.Tamamlandi; // Eski haline döndür
+                bolum.Durum = BolumDurumu.Hata;
                 await _dbContext.SaveChangesAsync();
             }
         }

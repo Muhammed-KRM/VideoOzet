@@ -86,6 +86,10 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
             // 3. AI ile Analiz (Reduce)
             var analizJsonStr = await _synthesisProvider.AnalyzeTopicAsync(request.Konu, allSourcesData, context.CancellationToken);
             var analizData = LlmJson.Deserialize<System.Text.Json.JsonElement>(analizJsonStr);
+            if (analizData.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
+            }
             
             // 4. Veritabanına kaydet
             konuAnalizi.AnaFikir = analizData.TryGetProperty("AnaFikir", out var af) ? af.GetString() ?? "" : "";
