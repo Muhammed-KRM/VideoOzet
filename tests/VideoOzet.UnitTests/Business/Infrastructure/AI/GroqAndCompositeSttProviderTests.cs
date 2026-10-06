@@ -94,10 +94,16 @@ public class CompositeSttProviderTests
                 Content = new StringContent("{\"text\": \"Groq transcript\"}")
             });
 
+        var localHandler = new Mock<HttpMessageHandler>();
+        localHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Service offline"));
+
         var groqProvider = new GroqWhisperSttProvider(new HttpClient(groqHandler.Object), _mockConfig.Object, Mock.Of<ILogger<GroqWhisperSttProvider>>());
+        var localWhisperProvider = new LocalFasterWhisperSttProvider(new HttpClient(localHandler.Object), _mockConfig.Object, Mock.Of<ILogger<LocalFasterWhisperSttProvider>>());
         var geminiProvider = new GeminiAudioSttProvider(new HttpClient(), _mockConfig.Object, Mock.Of<ILogger<GeminiAudioSttProvider>>());
 
-        var composite = new CompositeSttProvider(groqProvider, geminiProvider, _mockConfig.Object, _mockLogger.Object);
+        var composite = new CompositeSttProvider(groqProvider, localWhisperProvider, geminiProvider, _mockConfig.Object, _mockLogger.Object);
         var stream = new MemoryStream(new byte[50]);
 
         var result = await composite.TranscribeAsync(stream, "test.mp3");
@@ -106,7 +112,41 @@ public class CompositeSttProviderTests
     }
 
     [Fact]
-    public async Task TranscribeAsync_ShouldFallbackToGemini_WhenGroqFails()
+    public async Task TranscribeAsync_ShouldFallbackToLocalWhisper_WhenGroqFailsAndLocalIsAvailable()
+    {
+        _mockConfig.Setup(c => c["GROQ_API_KEY"]).Returns("gsk-key");
+
+        var groqHandler = new Mock<HttpMessageHandler>();
+        groqHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.TooManyRequests,
+                Content = new StringContent("Rate limit exceeded")
+            });
+
+        var localHandler = new Mock<HttpMessageHandler>();
+        localHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.Is<HttpRequestMessage>(req => req.RequestUri != null && req.RequestUri.ToString().Contains("/health")), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = new StringContent("{\"status\":\"healthy\"}") });
+        localHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.Is<HttpRequestMessage>(req => req.RequestUri != null && req.RequestUri.ToString().Contains("/transcribe")), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage { StatusCode = HttpStatusCode.OK, Content = new StringContent("{\"success\":true,\"text\":\"Local Whisper transcript\",\"duration\":10.0,\"elapsed_seconds\":2.0,\"device\":\"cuda\"}") });
+
+        var groqProvider = new GroqWhisperSttProvider(new HttpClient(groqHandler.Object), _mockConfig.Object, Mock.Of<ILogger<GroqWhisperSttProvider>>());
+        var localWhisperProvider = new LocalFasterWhisperSttProvider(new HttpClient(localHandler.Object), _mockConfig.Object, Mock.Of<ILogger<LocalFasterWhisperSttProvider>>());
+        var geminiProvider = new GeminiAudioSttProvider(new HttpClient(), _mockConfig.Object, Mock.Of<ILogger<GeminiAudioSttProvider>>());
+
+        var composite = new CompositeSttProvider(groqProvider, localWhisperProvider, geminiProvider, _mockConfig.Object, _mockLogger.Object);
+        var stream = new MemoryStream(new byte[50]);
+
+        var result = await composite.TranscribeAsync(stream, "test.mp3");
+
+        result.Should().Be("Local Whisper transcript");
+    }
+
+    [Fact]
+    public async Task TranscribeAsync_ShouldFallbackToGemini_WhenGroqAndLocalFail()
     {
         _mockConfig.Setup(c => c["GROQ_API_KEY"]).Returns("gsk-key");
         _mockConfig.Setup(c => c["GEMINI_API_KEY"]).Returns("gemini-key");
@@ -120,6 +160,11 @@ public class CompositeSttProviderTests
                 Content = new StringContent("Server Error")
             });
 
+        var localHandler = new Mock<HttpMessageHandler>();
+        localHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Offline"));
+
         var geminiHandler = new Mock<HttpMessageHandler>();
         geminiHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
@@ -130,9 +175,10 @@ public class CompositeSttProviderTests
             });
 
         var groqProvider = new GroqWhisperSttProvider(new HttpClient(groqHandler.Object), _mockConfig.Object, Mock.Of<ILogger<GroqWhisperSttProvider>>());
+        var localWhisperProvider = new LocalFasterWhisperSttProvider(new HttpClient(localHandler.Object), _mockConfig.Object, Mock.Of<ILogger<LocalFasterWhisperSttProvider>>());
         var geminiProvider = new GeminiAudioSttProvider(new HttpClient(geminiHandler.Object), _mockConfig.Object, Mock.Of<ILogger<GeminiAudioSttProvider>>());
 
-        var composite = new CompositeSttProvider(groqProvider, geminiProvider, _mockConfig.Object, _mockLogger.Object);
+        var composite = new CompositeSttProvider(groqProvider, localWhisperProvider, geminiProvider, _mockConfig.Object, _mockLogger.Object);
         var stream = new MemoryStream(new byte[50]);
 
         var result = await composite.TranscribeAsync(stream, "test.mp3");

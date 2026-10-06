@@ -38,6 +38,10 @@ public static class ServiceRegistration
         {
             client.Timeout = TimeSpan.FromMinutes(5);
         });
+        services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.LocalFasterWhisperSttProvider>(client =>
+        {
+            client.Timeout = TimeSpan.FromMinutes(15);
+        });
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GeminiAudioSttProvider>(client =>
         {
             client.Timeout = TimeSpan.FromMinutes(10);
