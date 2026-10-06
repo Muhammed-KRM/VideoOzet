@@ -125,7 +125,7 @@
 
       <div *ngIf="episode.durum === 'Tamamlandi' && getAktifRevizyon()" class="h-full">
         <!-- Burada plan-viewer componentini kullanıyoruz -->
-        <app-plan-viewer [revision]="getAktifRevizyon()"></app-plan-viewer>
+        <app-plan-viewer [revision]="getAktifRevizyon()" [title]="episode?.calismaBasligi || ''" [bolumNo]="bolumNo"></app-plan-viewer>
       </div>
     </div>
   </div>

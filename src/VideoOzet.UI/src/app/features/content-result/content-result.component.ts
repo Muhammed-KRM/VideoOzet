@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { marked } from 'marked';
 import { ApiService } from '../../core/services/api.service';
+import { markdownToDocxBlob, qcToMarkdown, DocxSection } from '../../core/utils/markdown-docx';
 
 @Component({
   selector: 'app-content-result',
@@ -286,25 +287,52 @@ export class ContentResultComponent implements OnChanges {
   }
 
   downloadDoc(scope: 'active' | 'all') {
-    const html = this.generateDocumentHtml(scope, 'word');
     const suffix = scope === 'all' ? 'Tam_Rapor' : (this.activeTab === 'ozet' ? 'Arastirma_Ozeti' : (this.activeTab === 'plan' ? 'Video_Plani' : 'QC_Raporu'));
-    
-    import('html-docx-js-typescript').then(({ asBlob }) => {
-      asBlob(html).then((blob: any) => {
-        this.saveBlob(blob, `${this.cleanFileName}_${suffix}.docx`);
-        this.isDownloadMenuOpen = false;
-      }).catch((err: any) => {
-        console.error('Word oluşturma hatası:', err);
-        const fallbackBlob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
-        this.saveBlob(fallbackBlob, `${this.cleanFileName}_${suffix}.doc`);
+
+    const ozet = this.activeVersion?.arastirmaOzeti ?? (this.result?.generatedContent?.arastirmaOzeti ?? this.result?.arastirmaOzeti ?? '');
+    const plan = this.activeVersion?.videoPlani ?? (this.result?.generatedContent?.videoPlani ?? this.result?.videoPlani ?? '');
+    const qcItems = (this.activeQcReport && this.activeQcReport.length) ? this.activeQcReport : (this.parsedQcReport || []);
+    const qcMd = qcToMarkdown(qcItems, {
+      skor: this.activeQcScore,
+      desteklenen: this.activeDesteklenen,
+      belirsiz: this.activeBelirsiz,
+      desteklenmeyen: this.activeDesteklenmeyen
+    });
+
+    let sections: DocxSection[];
+    if (scope === 'all') {
+      sections = [
+        { heading: '1. Araştırma Özeti', markdown: ozet },
+        { heading: '2. Video İçerik ve Bölüm Planı', markdown: plan },
+        { heading: '3. Kalite Kontrol (QC) Doğrulama Raporu', markdown: qcMd }
+      ];
+    } else if (this.activeTab === 'ozet') {
+      sections = [{ heading: 'Araştırma Özeti', markdown: ozet }];
+    } else if (this.activeTab === 'plan') {
+      sections = [{ heading: 'Video İçerik ve Bölüm Planı', markdown: plan }];
+    } else {
+      sections = [{ heading: 'Kalite Kontrol (QC) Doğrulama Raporu', markdown: qcMd }];
+    }
+
+    const dateSource = this.activeVersion?.olusturmaTarihi || this.result?.olusturmaTarihi;
+    const dateStr = (dateSource ? new Date(dateSource) : new Date())
+      .toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const verStr = this.activeVersion ? `Versiyon ${this.activeVersion.versiyonNo} · ` : '';
+    const model = this.activeVersion?.llmModel || this.result?.generatedContent?.llmModel;
+
+    markdownToDocxBlob({
+      title: this.documentTitle,
+      subtitle: `${verStr}${dateStr}${model ? ' · ' + model : ''} · Güven Skoru %${this.activeQcScore ?? 0}`,
+      sections
+    })
+      .then((blob) => this.saveBlob(blob, `${this.cleanFileName}_${suffix}.docx`))
+      .catch((err: any) => {
+        console.error('Word (.docx) oluşturulamadı:', err);
+        alert('Word dosyası oluşturulamadı. Lütfen tekrar deneyin.');
+      })
+      .finally(() => {
         this.isDownloadMenuOpen = false;
       });
-    }).catch((err) => {
-      console.error('html-docx-js-typescript yüklenemedi:', err);
-      const fallbackBlob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' });
-      this.saveBlob(fallbackBlob, `${this.cleanFileName}_${suffix}.doc`);
-      this.isDownloadMenuOpen = false;
-    });
   }
 
   downloadPdf(scope: 'active' | 'all') {
