@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Helpers;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -20,6 +21,7 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
     private readonly ISourceTopicMapper _topicMapper;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
     private readonly ILogService _logService;
     private readonly ILogger<SeriesPlanConsumer> _logger;
 
@@ -28,13 +30,15 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
         ISynthesisProvider synthesisProvider,
         ISourceTopicMapper topicMapper,
         ILogService logService,
-        ILogger<SeriesPlanConsumer> logger)
+        ILogger<SeriesPlanConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _topicMapper = topicMapper;
         _logService = logService;
         _logger = logger;
+        _sourceContextBuilder = sourceContextBuilder;
     }
 
     public async Task Consume(ConsumeContext<SeriesPlanRequestedEvent> context)
@@ -113,6 +117,21 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             // tek bir prompt'a gömmek LLM çağrısını dakikalarca uzatıyor ve bağlam limitlerini zorluyordu.
             var allSourcesData = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
             
+            var combinedSources = allSourcesData;
+            if (_sourceContextBuilder != null)
+            {
+                var sourceContext = await _sourceContextBuilder.BuildContextAsync(
+                    message.EgitimId,
+                    new[] { request.Konu },
+                    maxChars: 60000,
+                    ct: context.CancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(sourceContext.ContextText))
+                {
+                    combinedSources = $"--- GERÇEK KAYNAK METİNLERİ ---\n{sourceContext.ContextText}\n\n--- KONU VE BAŞLIK DÖKÜMÜ ---\n{allSourcesData}";
+                }
+            }
+
             var konuAnaliziJson = new
             {
                 request.KonuAnalizi.AnaFikir,
@@ -135,7 +154,7 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 request.Konu,
                 request.HedefKitle ?? "Genel",
                 kAnaliziStr,
-                allSourcesData,
+                combinedSources,
                 constraints,
                 context.CancellationToken);
                 

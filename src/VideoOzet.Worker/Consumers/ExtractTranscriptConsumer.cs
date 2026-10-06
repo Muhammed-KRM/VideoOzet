@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using MassTransit;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
@@ -75,9 +76,13 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             await _publishEndpoint.Publish(new PipelineProgressEvent
             {
                 VideoId = message.VideoId,
+                EgitimId = video.EgitimId,
                 Asama = "Video İşleme (STT)",
                 Durum = VideoIslemDurumu.SttBasladi.ToString(),
-                Mesaj = "Videodan ses çıkarılıyor ve metne dökülüyor..."
+                Mesaj = "Videodan ses çıkarılıyor ve metne dökülüyor...",
+                Yuzde = 5,
+                MevcutAdim = 0,
+                ToplamAdim = 1
             }, context.CancellationToken);
 
             // Create temp paths
@@ -109,6 +114,25 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             // 3. Transcribe Audio using STT Provider
             _logger.LogInformation("Sending audio to STT Provider");
             sttStopwatch.Start();
+
+            if (_sttProvider is ISupportsProgress progressiveProvider)
+            {
+                progressiveProvider.OnProgress = (done, total) =>
+                {
+                    var percent = total > 0 ? (int)Math.Round((double)done / total * 100) : 0;
+                    _ = _publishEndpoint.Publish(new PipelineProgressEvent
+                    {
+                        VideoId = message.VideoId,
+                        EgitimId = video.EgitimId,
+                        Asama = "STT",
+                        Durum = VideoIslemDurumu.SttBasladi.ToString(),
+                        Mesaj = $"Transkript çıkarılıyor: {done}/{total} parça (%{percent})",
+                        Yuzde = percent,
+                        MevcutAdim = done,
+                        ToplamAdim = total
+                    });
+                };
+            }
             
             string transcriptText;
             using (var audioStream = new FileStream(tempAudioPath, FileMode.Open, FileAccess.Read))
@@ -122,18 +146,33 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 throw new Exception("STT Provider returned empty transcript.");
             }
 
-            // 4. Save Transcript to Database
-            var transcript = new VideoTranscript
-            {
-                VideoId = message.VideoId,
-                HamMetin = transcriptText,
-                KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length,
-                SttModel = "Whisper-1", // Veya configten gelebilir
-                SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds,
-                OlusturmaTarihi = DateTime.UtcNow
-            };
+            // 4. Save Transcript to Database (Upsert)
+            var existingTranscript = await _dbContext.VideoTranscripts
+                .FirstOrDefaultAsync(t => t.VideoId == message.VideoId, context.CancellationToken);
 
-            _dbContext.VideoTranscripts.Add(transcript);
+            VideoTranscript transcript;
+            if (existingTranscript != null)
+            {
+                existingTranscript.HamMetin = transcriptText;
+                existingTranscript.KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                existingTranscript.SttModel = "gemini-3.8-flash-tiered";
+                existingTranscript.SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds;
+                existingTranscript.OlusturmaTarihi = DateTime.UtcNow;
+                transcript = existingTranscript;
+            }
+            else
+            {
+                transcript = new VideoTranscript
+                {
+                    VideoId = message.VideoId,
+                    HamMetin = transcriptText,
+                    KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length,
+                    SttModel = "gemini-3.8-flash-tiered",
+                    SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds,
+                    OlusturmaTarihi = DateTime.UtcNow
+                };
+                _dbContext.VideoTranscripts.Add(transcript);
+            }
             
             video.IslemDurumu = VideoIslemDurumu.SttTamamlandi; // STT bitti
             await _dbContext.SaveChangesAsync(context.CancellationToken);
@@ -141,9 +180,13 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             await _publishEndpoint.Publish(new PipelineProgressEvent
             {
                 VideoId = message.VideoId,
+                EgitimId = video.EgitimId,
                 Asama = "Video İşleme (STT)",
                 Durum = VideoIslemDurumu.SttTamamlandi.ToString(),
-                Mesaj = "Videodan metin çıkarma tamamlandı."
+                Mesaj = "Videodan metin çıkarma tamamlandı.",
+                Yuzde = 100,
+                MevcutAdim = 1,
+                ToplamAdim = 1
             }, context.CancellationToken);
 
             _logger.LogInformation("Transcript saved successfully for VideoId: {VideoId}", message.VideoId);

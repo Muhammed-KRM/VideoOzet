@@ -123,10 +123,15 @@ public static class PromptTemplates
 
     public const string TopicAnalysisPrompt = """
         Aşağıdaki kaynak verilerini kullanarak "{0}" konusu için bir 'Konu Analizi' yap.
-        Amacımız: Verilen kaynakları en verimli şekilde kullanarak hedef kitlenin ilgisini çekecek, sıkıcı bir ders vermekten ziyade ana fikri iyi anlatan dinamik bir içerik tasarlamak.
+        Amacımız: Verilen kaynakları en verimli şekilde kullanarak hedef kitlenin ilgisini çekecek, kaynaklardaki asıl kavram ve teorileri doğru aktaran dinamik bir içerik tasarlamak.
 
         KAYNAKLAR:
         {1}
+
+        ÇOK KRİTİK KURALLAR:
+        1. Ana fikir, beklenen konular ve konu haritası SADECE verilen kaynaklardaki gerçek içerik, terim, yazar/hoca anlatımları ve metinlere dayanmalıdır.
+        2. Kaynakta bulunmayan harici/genel teorileri veya rastgele konuları uydurma ya da ekleme.
+        3. Kaynakta olmayan ama konunun gerektirebileceği şeyleri "KaynaktaOlmayanlar" listesinde açıkça belirt.
 
         Lütfen SADECE geçerli bir JSON objesi döndür:
         {{
@@ -152,8 +157,12 @@ public static class PromptTemplates
         
         KULLANICI KISITLARI (Varsa):
         {4}
+
+        ÇOK KRİTİK KURALLAR:
+        1. Seri haritasındaki bölümlerin başlıkları, ana fikirleri ve konuları KESİNLİKLE verilen kaynaklardaki gerçek içeriklere, kavramlara ve alt başlıklara dayanmalıdır.
+        2. Kaynaklarda yer almayan harici konuları uydurma.
+        3. Eğer kullanıcı video sayısını belirtmişse veya bazı konuların dışarıda bırakılmasını istemişse KESİNLİKLE uymalısın.
         
-        Eğer kullanıcı video sayısını belirtmişse veya bazı konuların dışarıda bırakılmasını istemişse KESİNLİKLE uymalısın.
         Lütfen SADECE geçerli bir JSON objesi döndür:
         {{
             "VideoSayisi": 3,
@@ -180,6 +189,12 @@ public static class PromptTemplates
         
         KAYNAKLAR:
         {4}
+
+        ÇOK KRİTİK VE KESİN KURALLAR:
+        1. SADECE VE SADECE verilen KAYNAKLARDAKİ bilgileri, kavramları, argümanları ve analizleri kullan.
+        2. Kaynaklarda yer almayan harici/genel teorileri veya konuları uydurma ya da ekleme.
+        3. Kaynak metinlerde geçen özel kavramları, tanımları, yazar/hoca atıflarını ve örnekleri aynen ve detaylıca aktar.
+        4. Araştırma özeti ve video planı doğrudan kaynakların içeriğini öğretici ve yapılandırılmış şekilde sunmalıdır.
 
         Lütfen SADECE geçerli bir JSON objesi döndür:
         {{

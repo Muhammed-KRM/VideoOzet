@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -19,6 +20,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
     private readonly AppDbContext _dbContext;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
     private readonly ILogService _logService;
     private readonly ILogger<GenerateContentConsumer> _logger;
 
@@ -27,13 +29,15 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
         IEmbeddingProvider embeddingProvider,
         ISynthesisProvider synthesisProvider,
         ILogService logService,
-        ILogger<GenerateContentConsumer> logger)
+        ILogger<GenerateContentConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null)
     {
         _dbContext = dbContext;
         _embeddingProvider = embeddingProvider;
         _synthesisProvider = synthesisProvider;
         _logService = logService;
         _logger = logger;
+        _sourceContextBuilder = sourceContextBuilder;
     }
 
     public async Task Consume(ConsumeContext<ContentRequestedEvent> context)
@@ -63,27 +67,37 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
                 Yuzde = 10
             });
 
-            // 1. Kullanıcının konusunu Vektöre Çevir
-            var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(message.Konu);
-            var queryVector = new Pgvector.Vector(queryEmbedding);
+            // 1 & 2. Bağlam (Context) Hazırlama
+            string contextData;
+            List<Guid> usedChunkIds = new();
 
-            // 2. RAG Arama: pgvector Kosinüs Benzerliği ile en yakın chunk'ları bul (Sadece ilgili Eğitime ait olanlar)
-            var topChunks = await GetRelevantChunksAsync(message.EgitimId, queryVector, context.CancellationToken);
-
-            if (!topChunks.Any())
+            if (_sourceContextBuilder != null)
             {
-                _logger.LogWarning("EgitimId {EgitimId} için hiç kaynak (chunk) bulunamadı.", message.EgitimId);
-            }
+                var sourceContext = await _sourceContextBuilder.BuildContextAsync(
+                    message.EgitimId,
+                    new[] { message.Konu },
+                    maxChars: 80000,
+                    ct: context.CancellationToken);
 
-            // 3. Bağlam (Context) Hazırlama
-            var contextBuilder = new StringBuilder();
-            foreach (var chunk in topChunks)
-            {
-                contextBuilder.AppendLine($"[Kaynak: VideoId={chunk.VideoId}, Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
-                contextBuilder.AppendLine(chunk.Text);
-                contextBuilder.AppendLine("---");
+                contextData = sourceContext.ContextText;
+                usedChunkIds = sourceContext.UsedChunkIds;
             }
-            var contextData = contextBuilder.ToString();
+            else
+            {
+                var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(message.Konu);
+                var queryVector = new Pgvector.Vector(queryEmbedding);
+                var topChunks = await GetRelevantChunksAsync(message.EgitimId, queryVector, context.CancellationToken);
+
+                var contextBuilder = new StringBuilder();
+                foreach (var chunk in topChunks)
+                {
+                    contextBuilder.AppendLine($"[Kaynak: VideoId={chunk.VideoId}, Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
+                    contextBuilder.AppendLine(chunk.Text);
+                    contextBuilder.AppendLine("---");
+                    usedChunkIds.Add(chunk.Id);
+                }
+                contextData = contextBuilder.ToString();
+            }
 
             await context.Publish(new ContentProgressEvent
             {
@@ -114,7 +128,7 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
                 ContentRequestId = request.Id,
                 ArastirmaOzeti = arastirmaOzeti,
                 VideoPlani = videoPlani,
-                KullanilanKaynaklar = System.Text.Json.JsonSerializer.Serialize(topChunks.Select(c => c.Id)),
+                KullanilanKaynaklar = System.Text.Json.JsonSerializer.Serialize(usedChunkIds),
                 LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 UretimSuresiMs = 0, // Ölçülebilir
                 OlusturmaTarihi = DateTime.UtcNow

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VideoOzet.Data.Entities;
 
@@ -23,7 +23,7 @@ public class VideoChunkDocumentConfiguration : IEntityTypeConfiguration<VideoChu
         // 1536 boyutlu embedding s�tunu (OpenAI text-embedding-3-small)
         builder.Property(x => x.Embedding)
                .HasColumnName("embedding")
-               .HasColumnType("vector(1536)");
+               .HasColumnType("vector(1024)");
 
         // HNSW index ile cosine similarity aramas�
         builder.HasIndex(x => x.Embedding)

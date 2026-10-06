@@ -313,6 +313,12 @@ public class SeriesController : ControllerBase
                 r.BaglamJson,
                 r.KullanilanKaynaklar,
                 r.GuvenSkorYuzde,
+                r.ToplamIddiaSayisi,
+                r.DesteklenenSayisi,
+                r.BelirsizSayisi,
+                r.DesteklenmeyenSayisi,
+                DetayliRapor = r.DetayliRapor,
+                QcDurumu = r.QcDurumu.ToString(),
                 r.LlmModel,
                 Durum = r.Durum.ToString()
             }).ToList()

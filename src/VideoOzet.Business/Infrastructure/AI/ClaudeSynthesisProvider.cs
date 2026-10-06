@@ -35,7 +35,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 return _configuration["CLAUDE_MODEL"] ?? "claude-3-5-sonnet-20240620";
 
             if (!string.IsNullOrWhiteSpace(_configuration["GEMINI_API_KEY"]))
-                return _configuration["GEMINI_MODEL"] ?? "gemini-1.5-flash";
+                return _configuration["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered";
 
             if (!string.IsNullOrWhiteSpace(_configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"]))
                 return _configuration["OPENAI_MODEL"] ?? "gpt-4o";
@@ -71,7 +71,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var geminiKey = _configuration["GEMINI_API_KEY"];
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
-            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-1.5-flash";
+            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered";
             var apiKeys = geminiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                    .Select(k => k.Trim())
                                    .ToArray();

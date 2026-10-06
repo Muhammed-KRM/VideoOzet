@@ -36,6 +36,32 @@
           </div>
         </div>
         
+        <!-- Canlı İlerleme Çubuğu ve Durum Kartı -->
+        <div *ngIf="totalVideosCount > 0" class="mb-4 p-4 rounded-xl bg-slate-900/80 border border-slate-700/60 shadow-lg">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-white">Genel İşlem İlerlemesi</span>
+              <span *ngIf="hasActiveProcessing" class="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/30 animate-pulse">
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></span>
+                Canlı İşleniyor
+              </span>
+              <span *ngIf="!hasActiveProcessing && completedVideosCount === totalVideosCount" class="px-2 py-0.5 text-[10px] font-medium bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-500/30">
+                ✅ Tümü Hazır
+              </span>
+            </div>
+            <div class="text-xs font-semibold text-slate-300">
+              <span class="text-emerald-400 font-bold text-sm">{{ completedVideosCount }}</span> / {{ totalVideosCount }} Dosya Hazır 
+              <span class="text-slate-500 ml-1">(%{{ completionPercentage }})</span>
+            </div>
+          </div>
+
+          <!-- İlerleme Çubuğu -->
+          <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden p-0.5 border border-slate-700">
+            <div class="h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400"
+                 [style.width.%]="completionPercentage"></div>
+          </div>
+        </div>
+        
         <!-- Yükleme Komponenti -->
         <app-video-upload [egitimId]="egitimId" (uploadComplete)="onUploadComplete()"></app-video-upload>
         
@@ -53,19 +79,44 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <div class="min-w-0">
-                <h4 class="text-white font-medium text-sm truncate max-w-sm" [title]="v.baslik">{{ v.baslik }}</h4>
-                <p class="text-xs text-slate-500">{{ v.islemDurumu === 'Tamamlandi' ? '✅ İndekslendi' : 'İşleniyor...' }}</p>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <h4 class="text-white font-medium text-sm truncate max-w-sm" [title]="v.baslik">{{ v.baslik }}</h4>
+                  <span *ngIf="v.islemDurumu !== 'Tamamlandi' && v.durum !== 'Tamamlandi' && v.islemDurumu !== 8 && v.islemDurumu !== 'Hata' && v.islemDurumu !== 9" 
+                        class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/50">
+                    {{ getVideoProgressText(v) }}
+                  </span>
+                </div>
+                <p class="text-xs font-medium mt-0.5" [ngClass]="{
+                  'text-emerald-400': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8,
+                  'text-rose-400': v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9,
+                  'text-cyan-400': v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3,
+                  'text-amber-400': v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5,
+                  'text-purple-400': v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7,
+                  'text-slate-400': !v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0
+                }">{{ getVideoDetailSubtitle(v) }}</p>
+
+                <!-- Her Videoya Özel Canlı İlerleme Çubuğu -->
+                <div *ngIf="v.islemDurumu !== 'Tamamlandi' && v.durum !== 'Tamamlandi' && v.islemDurumu !== 8 && v.islemDurumu !== 'Hata' && v.islemDurumu !== 9" 
+                     class="mt-2 w-full max-w-md">
+                  <div class="w-full bg-slate-950/80 rounded-full h-1.5 overflow-hidden border border-slate-700/60 p-0.5">
+                    <div class="h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-400 animate-pulse"
+                         [style.width.%]="getVideoPercentage(v)"></div>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="flex items-center gap-3">
               <div class="text-right">
                 <span [ngClass]="{
-                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi',
-                  'bg-rose-500/20 text-rose-400 border-rose-500/30': v.islemDurumu === 'Hata' || v.durum === 'Hata',
-                  'bg-blue-500/20 text-blue-400 border-blue-500/30': v.islemDurumu === 'Isleniyor' && v.durum !== 'Hata' && v.durum !== 'Tamamlandi'
+                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8,
+                  'bg-rose-500/20 text-rose-400 border-rose-500/30': v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9,
+                  'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse': v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3,
+                  'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse': v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5,
+                  'bg-purple-500/20 text-purple-300 border-purple-500/30 animate-pulse': v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7,
+                  'bg-slate-800 text-slate-400 border-slate-700': !v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0
                 }" class="px-3 py-1 text-xs font-medium rounded-full border">
-                  {{ v.durum === 'Hata' ? 'Hata' : (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' ? 'Tamamlandı' : (v.sonAsama || 'Bekliyor')) }}
+                  {{ getVideoStatusText(v) }}
                 </span>
                 <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
               </div>

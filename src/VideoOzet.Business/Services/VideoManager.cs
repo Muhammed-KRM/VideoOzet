@@ -23,6 +23,7 @@ public class VideoManager : IVideoService
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly IMapper _mapper;
     private readonly ILogger<VideoManager> _logger;
+    private readonly ICacheService? _cacheService;
 
     public VideoManager(
         IRepository<Video> videoRepository,
@@ -31,7 +32,8 @@ public class VideoManager : IVideoService
         IFileStorageService fileStorageService,
         IPublishEndpoint publishEndpoint,
         IMapper mapper,
-        ILogger<VideoManager> logger)
+        ILogger<VideoManager> logger,
+        ICacheService? cacheService = null)
     {
         _videoRepository = videoRepository;
         _egitimRepository = egitimRepository;
@@ -40,6 +42,7 @@ public class VideoManager : IVideoService
         _publishEndpoint = publishEndpoint;
         _mapper = mapper;
         _logger = logger;
+        _cacheService = cacheService;
     }
 
     public async Task<VideoListDto> UploadVideoAsync(VideoUploadDto dto)
@@ -130,6 +133,11 @@ public class VideoManager : IVideoService
         var transcripts = await _transcriptRepository.FindAsync(t => t.VideoId == id);
         var transcript = System.Linq.Enumerable.FirstOrDefault(transcripts);
 
+        if (_cacheService != null)
+        {
+            await _cacheService.RemoveAsync($"lock:stt:{id}");
+        }
+
         if (transcript != null)
         {
             video.IslemDurumu = VideoIslemDurumu.Bekliyor; // Arayüzde tekrar bekliyor görünsün
@@ -169,6 +177,11 @@ public class VideoManager : IVideoService
         
         foreach (var video in videos)
         {
+            if (_cacheService != null)
+            {
+                await _cacheService.RemoveAsync($"lock:stt:{video.Id}");
+            }
+
             var transcripts = await _transcriptRepository.FindAsync(t => t.VideoId == video.Id);
             var transcript = System.Linq.Enumerable.FirstOrDefault(transcripts);
 

@@ -44,6 +44,16 @@ public class SourceTopicMapper : ISourceTopicMapper
         _logger = logger;
     }
 
+    private static bool IsPlaceholder(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        if (text.Contains("Bu eğitim videosunda temel kavramlar, metodoloji ve uygulama örnekleri", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (text.Contains("temel kavramlar, metodoloji ve uygulama örnekleri ele alınmakta", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
     public async Task<string> BuildTopicDigestAsync(Guid egitimId, CancellationToken ct = default)
     {
         var videolar = await _dbContext.Videolar
@@ -67,10 +77,15 @@ public class SourceTopicMapper : ISourceTopicMapper
 
         var digestBuilder = new StringBuilder();
 
-        // 1. Videoları MAP et
+        // 1. Videoları MAP et (Sadece mock/placeholder olmayan gerçek videolar)
         foreach (var video in videolar)
         {
             var videoText = (video.Summary!.OzetMetni ?? "").Trim();
+            if (IsPlaceholder(videoText))
+            {
+                _logger.LogInformation("Video {Baslik} placeholder/mock içerik içerdiği için konu çıkarımına dahil edilmedi.", video.Baslik);
+                continue;
+            }
             if (!string.IsNullOrWhiteSpace(video.Summary.KonuBasliklari) && video.Summary.KonuBasliklari != "[]")
             {
                 videoText += "\nKonu Başlıkları:\n" + video.Summary.KonuBasliklari;

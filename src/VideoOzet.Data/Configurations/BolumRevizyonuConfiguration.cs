@@ -14,6 +14,9 @@ public class BolumRevizyonuConfiguration : IEntityTypeConfiguration<BolumRevizyo
 
         builder.HasIndex(x => new { x.SeriBolumId, x.RevizyonNo }).IsUnique();
         
+        builder.Property(x => x.GuvenSkorYuzde).HasPrecision(5, 2);
+        builder.Property(x => x.DetayliRapor).HasColumnType("text").HasDefaultValue("[]");
+        
         builder.HasOne(x => x.SeriBolum)
             .WithMany(x => x.Revizyonlar)
             .HasForeignKey(x => x.SeriBolumId)

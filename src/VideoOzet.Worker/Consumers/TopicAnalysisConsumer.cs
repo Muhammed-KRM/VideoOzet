@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Helpers;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -20,6 +21,7 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
     private readonly ISourceTopicMapper _topicMapper;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
     private readonly ILogService _logService;
     private readonly ILogger<TopicAnalysisConsumer> _logger;
 
@@ -28,13 +30,15 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
         ISynthesisProvider synthesisProvider,
         ISourceTopicMapper topicMapper,
         ILogService logService,
-        ILogger<TopicAnalysisConsumer> logger)
+        ILogger<TopicAnalysisConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _topicMapper = topicMapper;
         _logService = logService;
         _logger = logger;
+        _sourceContextBuilder = sourceContextBuilder;
     }
 
     public async Task Consume(ConsumeContext<TopicAnalysisRequestedEvent> context)
@@ -84,8 +88,23 @@ public class TopicAnalysisConsumer : IConsumer<TopicAnalysisRequestedEvent>
             // 2. Map-Reduce: Kaynak başına konu çıkarımı ve özet haritası (Önbellekli)
             var allSourcesData = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
 
+            var combinedSources = allSourcesData;
+            if (_sourceContextBuilder != null)
+            {
+                var sourceContext = await _sourceContextBuilder.BuildContextAsync(
+                    message.EgitimId,
+                    new[] { request.Konu },
+                    maxChars: 60000,
+                    ct: context.CancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(sourceContext.ContextText))
+                {
+                    combinedSources = $"--- GERÇEK KAYNAK METİNLERİ ---\n{sourceContext.ContextText}\n\n--- KONU VE BAŞLIK DÖKÜMÜ ---\n{allSourcesData}";
+                }
+            }
+
             // 3. AI ile Analiz (Reduce)
-            var analizJsonStr = await _synthesisProvider.AnalyzeTopicAsync(request.Konu, allSourcesData, context.CancellationToken);
+            var analizJsonStr = await _synthesisProvider.AnalyzeTopicAsync(request.Konu, combinedSources, context.CancellationToken);
             var analizData = LlmJson.Deserialize<System.Text.Json.JsonElement>(analizJsonStr);
             if (analizData.ValueKind != System.Text.Json.JsonValueKind.Object)
             {

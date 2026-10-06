@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Helpers;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -25,6 +26,8 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
     private readonly ISynthesisProvider _synthesisProvider;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly ISourceTopicMapper _topicMapper;
+    private readonly ISourceContextBuilder _sourceContextBuilder;
+    private readonly IQualityCheckService _qcService;
     private readonly ILogService _logService;
     private readonly ILogger<SeriesVideoGenerationConsumer> _logger;
 
@@ -34,12 +37,16 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
         IEmbeddingProvider embeddingProvider,
         ISourceTopicMapper topicMapper,
         ILogService logService,
-        ILogger<SeriesVideoGenerationConsumer> logger)
+        ILogger<SeriesVideoGenerationConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null,
+        IQualityCheckService? qcService = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _embeddingProvider = embeddingProvider;
         _topicMapper = topicMapper;
+        _sourceContextBuilder = sourceContextBuilder ?? new SourceContextBuilder(dbContext, embeddingProvider, Microsoft.Extensions.Logging.Abstractions.NullLogger<SourceContextBuilder>.Instance);
+        _qcService = qcService ?? new QualityCheckService(synthesisProvider, Microsoft.Extensions.Logging.Abstractions.NullLogger<QualityCheckService>.Instance);
         _logService = logService;
         _logger = logger;
     }
@@ -122,53 +129,21 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 topicsList.Add(bolum.CalismaBasligi);
             }
 
-            // Bölüm başına pgvector RAG: Konu başına top-5 chunk, max 20 chunk
-            var allRetrievedChunks = new List<VideoChunkDocument>();
-            const int chunksPerTopic = 5;
-            const int maxTotalChunks = 20;
+            // Kaynak bağlamını SourceContextBuilder ile gerçek doküman ve videolardan oluştur
+            var searchQueries = new List<string> { bolum.CalismaBasligi, bolum.AnaFikir };
+            searchQueries.AddRange(topicsList);
 
-            var titleQuery = $"{bolum.CalismaBasligi} {bolum.AnaFikir}".Trim();
-            if (!string.IsNullOrWhiteSpace(titleQuery))
+            var sourceContext = await _sourceContextBuilder.BuildContextAsync(
+                message.EgitimId,
+                searchQueries,
+                maxChars: 80000,
+                ct: context.CancellationToken);
+
+            var allSourcesData = sourceContext.ContextText;
+            if (string.IsNullOrWhiteSpace(allSourcesData))
             {
-                var titleEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(titleQuery);
-                var chunks = await GetRelevantChunksAsync(message.EgitimId, new Pgvector.Vector(titleEmbedding), chunksPerTopic, context.CancellationToken);
-                allRetrievedChunks.AddRange(chunks);
+                allSourcesData = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
             }
-
-            foreach (var topic in topicsList)
-            {
-                if (allRetrievedChunks.Select(c => c.Id).Distinct().Count() >= maxTotalChunks) break;
-
-                var topicEmbedding = await _embeddingProvider.GenerateEmbeddingAsync(topic);
-                var chunks = await GetRelevantChunksAsync(message.EgitimId, new Pgvector.Vector(topicEmbedding), chunksPerTopic, context.CancellationToken);
-                allRetrievedChunks.AddRange(chunks);
-            }
-
-            var topChunks = allRetrievedChunks
-                .GroupBy(c => c.Id)
-                .Select(g => g.First())
-                .Take(maxTotalChunks)
-                .ToList();
-
-            var contextBuilder = new StringBuilder();
-            if (topChunks.Any())
-            {
-                foreach (var chunk in topChunks)
-                {
-                    contextBuilder.AppendLine($"[Kaynak: VideoId={chunk.VideoId}, Zaman={chunk.StartTimeMs / 1000.0:F1}-{chunk.EndTimeMs / 1000.0:F1}s]");
-                    contextBuilder.AppendLine(chunk.Text);
-                    contextBuilder.AppendLine("---");
-                }
-            }
-            else
-            {
-                // Fallback: chunk yoksa önbellekli konu özeti kullanılır (ham doküman metinleri
-                // yüz binlerce karakter olabilir ve tek prompt'a sığmaz).
-                var digest = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
-                contextBuilder.AppendLine(digest);
-            }
-
-            var allSourcesData = contextBuilder.ToString();
 
             // Önceki bölümün devir notunu bul
             string devirNotu = "";
@@ -196,10 +171,38 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
             }
 
+            var usedChunkIds = new List<Guid>(sourceContext.UsedChunkIds);
+            if (!usedChunkIds.Any())
+            {
+                try
+                {
+                    var queryEmbedding = await _embeddingProvider.GenerateEmbeddingAsync($"{bolum.CalismaBasligi} {bolum.AnaFikir}");
+                    var queryVector = new Pgvector.Vector(queryEmbedding);
+                    var fallbackChunks = await GetRelevantChunksAsync(message.EgitimId, queryVector, 15, context.CancellationToken);
+                    if (fallbackChunks != null && fallbackChunks.Any())
+                    {
+                        usedChunkIds.AddRange(fallbackChunks.Select(c => c.Id));
+                        if (string.IsNullOrWhiteSpace(allSourcesData))
+                        {
+                            var sb = new StringBuilder();
+                            foreach (var c in fallbackChunks)
+                            {
+                                sb.AppendLine(c.Text);
+                            }
+                            allSourcesData = sb.ToString();
+                        }
+                    }
+                }
+                catch { }
+            }
+
             var yeniVersiyonNo = (bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault()?.RevizyonNo ?? 0) + 1;
-            var kullanilanKaynaklar = topChunks.Any()
-                ? JsonSerializer.Serialize(topChunks.Select(c => c.Id))
-                : "[]";
+            var kullanilanKaynaklar = usedChunkIds.Any()
+                ? JsonSerializer.Serialize(usedChunkIds)
+                : (sourceContext.UsedSourceTitles.Any() ? JsonSerializer.Serialize(sourceContext.UsedSourceTitles) : "[]");
+
+            var arastirmaOzeti = contentData.TryGetProperty("ArastirmaOzeti", out var ao) ? ao.GetString() ?? "" : "";
+            var videoPlani = contentData.TryGetProperty("VideoPlani", out var vp) ? vp.GetString() ?? "" : "";
 
             var revizyon = new BolumRevizyonu
             {
@@ -207,13 +210,38 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 RevizyonNo = yeniVersiyonNo,
                 Tip = yeniVersiyonNo == 1 ? RevizyonTipi.IlkUretim : RevizyonTipi.KullaniciRevizyonu,
                 Talimat = yeniVersiyonNo == 1 ? "Sistem tarafından ilk üretim" : "",
-                ArastirmaOzeti = contentData.TryGetProperty("ArastirmaOzeti", out var ao) ? ao.GetString() ?? "" : "",
-                VideoPlani = contentData.TryGetProperty("VideoPlani", out var vp) ? vp.GetString() ?? "" : "",
+                ArastirmaOzeti = arastirmaOzeti,
+                VideoPlani = videoPlani,
                 DevirNotuJson = contentData.TryGetProperty("DevirNotu", out var dn) ? dn.GetString() ?? "" : "",
                 KullanilanKaynaklar = kullanilanKaynaklar,
                 LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 Durum = BolumDurumu.Tamamlandi
             };
+
+            // ─── Kalite Kontrol (QC) Değerlendirmesi ───
+            _logger.LogInformation("Bölüm {BolumNo} için Kalite Kontrol (QC) çalıştırılıyor...", bolum.BolumNo);
+            try
+            {
+                var qcResult = await _qcService.EvaluateAsync(
+                    arastirmaOzeti,
+                    allSourcesData,
+                    claimCount: 8,
+                    previousReportJson: null,
+                    ct: context.CancellationToken);
+
+                revizyon.GuvenSkorYuzde = qcResult.GuvenSkorYuzde;
+                revizyon.ToplamIddiaSayisi = qcResult.ToplamIddiaSayisi;
+                revizyon.DesteklenenSayisi = qcResult.DesteklenenSayisi;
+                revizyon.BelirsizSayisi = qcResult.BelirsizSayisi;
+                revizyon.DesteklenmeyenSayisi = qcResult.DesteklenmeyenSayisi;
+                revizyon.DetayliRapor = qcResult.DetayliRaporJson;
+                revizyon.QcDurumu = qcResult.Durum;
+            }
+            catch (Exception qcEx)
+            {
+                _logger.LogWarning(qcEx, "Bölüm {BolumNo} QC değerlendirmesinde hata oluştu, işlem devam ettiriliyor.", bolum.BolumNo);
+                revizyon.QcDurumu = BolumDurumu.Hata;
+            }
 
             // Açık DbSet.Add: SeriBolumId FK'si sayesinde bolum.Revizyonlar navigation'ı da otomatik güncellenir.
             _dbContext.BolumRevizyonlari.Add(revizyon);

@@ -17,6 +17,12 @@ public class BolumRevizyonu
     public string BaglamJson { get; set; } = string.Empty;
     public string KullanilanKaynaklar { get; set; } = string.Empty;
     public decimal GuvenSkorYuzde { get; set; }
+    public int ToplamIddiaSayisi { get; set; }
+    public int DesteklenenSayisi { get; set; }
+    public int BelirsizSayisi { get; set; }
+    public int DesteklenmeyenSayisi { get; set; }
+    public string DetayliRapor { get; set; } = "[]";
+    public BolumDurumu QcDurumu { get; set; } = BolumDurumu.Bekliyor;
     public string LlmModel { get; set; } = string.Empty;
     public BolumDurumu Durum { get; set; }
 

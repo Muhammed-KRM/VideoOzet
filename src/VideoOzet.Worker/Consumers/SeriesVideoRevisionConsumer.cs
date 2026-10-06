@@ -2,6 +2,7 @@ using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
@@ -9,6 +10,7 @@ using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
 using Microsoft.Extensions.Logging;
+using VideoOzet.Business.Services;
 using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
@@ -17,6 +19,8 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
 {
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
+    private readonly IQualityCheckService _qcService;
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly ILogger<SeriesVideoRevisionConsumer> _logger;
 
@@ -24,10 +28,14 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
         IPublishEndpoint publishEndpoint,
-        ILogger<SeriesVideoRevisionConsumer> logger)
+        ILogger<SeriesVideoRevisionConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null,
+        IQualityCheckService? qcService = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
+        _sourceContextBuilder = sourceContextBuilder;
+        _qcService = qcService ?? new QualityCheckService(synthesisProvider, Microsoft.Extensions.Logging.Abstractions.NullLogger<QualityCheckService>.Instance);
         _publishEndpoint = publishEndpoint;
         _logger = logger;
     }
@@ -66,6 +74,24 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             string currentOzet = sonRevizyon?.ArastirmaOzeti ?? "";
             string currentPlan = sonRevizyon?.VideoPlani ?? "";
 
+            // Kaynak bağlamını yükle
+            List<Guid> previousChunkIds = new();
+            if (!string.IsNullOrWhiteSpace(sonRevizyon?.KullanilanKaynaklar))
+            {
+                try
+                {
+                    previousChunkIds = JsonSerializer.Deserialize<List<Guid>>(sonRevizyon.KullanilanKaynaklar) ?? new();
+                }
+                catch { }
+            }
+
+            string contextData = "";
+            if (_sourceContextBuilder != null)
+            {
+                var sourceContext = await _sourceContextBuilder.BuildFromChunkIdsAsync(msg.EgitimId, previousChunkIds, context.CancellationToken);
+                contextData = sourceContext.ContextText;
+            }
+
             // Revizyon işlemini AI ile gerçekleştir
             string yeniOzet = currentOzet;
             if (string.IsNullOrEmpty(msg.HedefAlan) || msg.HedefAlan == "Hepsi" || msg.HedefAlan == "ArastirmaOzeti")
@@ -75,7 +101,7 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                     msg.Talimat,
                     "Araştırma Özeti",
                     bolum.CalismaBasligi,
-                    "",
+                    contextData,
                     context.CancellationToken);
             }
 
@@ -87,7 +113,7 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                     msg.Talimat,
                     "Video Planı",
                     bolum.CalismaBasligi,
-                    "",
+                    contextData,
                     context.CancellationToken);
             }
 
@@ -99,10 +125,36 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 ArastirmaOzeti = yeniOzet,
                 VideoPlani = yeniPlan,
                 DevirNotuJson = sonRevizyon?.DevirNotuJson ?? "",
+                KullanilanKaynaklar = sonRevizyon?.KullanilanKaynaklar ?? "[]",
                 LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 Tip = RevizyonTipi.KullaniciRevizyonu,
                 Durum = BolumDurumu.Tamamlandi
             };
+
+            // ─── Kalite Kontrol (QC) Yeniden Değerlendirme ───
+            _logger.LogInformation("Revize edilen bölüm {BolumNo} (Rev {RevNo}) için Kalite Kontrol (ReQC) çalıştırılıyor...", bolum.BolumNo, yeniRevizyonNo);
+            try
+            {
+                var qcResult = await _qcService.EvaluateAsync(
+                    yeniOzet,
+                    contextData,
+                    claimCount: 8,
+                    previousReportJson: sonRevizyon?.DetayliRapor,
+                    ct: context.CancellationToken);
+
+                yeniRevizyon.GuvenSkorYuzde = qcResult.GuvenSkorYuzde;
+                yeniRevizyon.ToplamIddiaSayisi = qcResult.ToplamIddiaSayisi;
+                yeniRevizyon.DesteklenenSayisi = qcResult.DesteklenenSayisi;
+                yeniRevizyon.BelirsizSayisi = qcResult.BelirsizSayisi;
+                yeniRevizyon.DesteklenmeyenSayisi = qcResult.DesteklenmeyenSayisi;
+                yeniRevizyon.DetayliRapor = qcResult.DetayliRaporJson;
+                yeniRevizyon.QcDurumu = qcResult.Durum;
+            }
+            catch (Exception qcEx)
+            {
+                _logger.LogWarning(qcEx, "Bölüm {BolumNo} revizyon QC değerlendirmesinde hata oluştu.", bolum.BolumNo);
+                yeniRevizyon.QcDurumu = BolumDurumu.Hata;
+            }
 
             _dbContext.BolumRevizyonlari.Add(yeniRevizyon);
             

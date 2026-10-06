@@ -52,6 +52,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   
   private subs: any[] = [];
 
+  private pollIntervalId: any;
+  videoProgressMap: { [videoId: string]: { yuzde?: number, mevcutAdim?: number, toplamAdim?: number, mesaj?: string, sonAsama?: string, durum?: string } } = {};
+
   ngOnInit() {
     this.egitimId = this.route.snapshot.paramMap.get('id') || '';
 
@@ -67,16 +70,42 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       
       this.subs.push(
         this.signalRService.pipelineStageChanged$.subscribe(data => {
-          if (this.egitim && this.egitim.videos) {
-            const video = this.egitim.videos.find((v: any) => v.id === data.videoId);
-            if (video) {
-              video.sonAsama = data.asama;
-              video.durum = data.durum;
-              video.hataMesaji = data.mesaj;
+          if (data && data.videoId) {
+            const existing = this.videoProgressMap[data.videoId] || {};
+            const isError = data.durum === 'Hata' || data.asama === 'Hata';
+
+            this.videoProgressMap[data.videoId] = {
+              ...existing,
+              sonAsama: data.asama || existing.sonAsama,
+              durum: data.durum || existing.durum,
+              mesaj: data.mesaj || existing.mesaj,
+              yuzde: (data.yuzde !== undefined && data.yuzde !== null) ? data.yuzde : existing.yuzde,
+              mevcutAdim: (data.mevcutAdim !== undefined && data.mevcutAdim !== null) ? data.mevcutAdim : existing.mevcutAdim,
+              toplamAdim: (data.toplamAdim !== undefined && data.toplamAdim !== null) ? data.toplamAdim : existing.toplamAdim
+            };
+
+            if (this.egitim && this.egitim.videos) {
+              const video = this.egitim.videos.find((v: any) => v.id === data.videoId);
+              if (video) {
+                video.sonAsama = this.videoProgressMap[data.videoId].sonAsama;
+                video.durum = this.videoProgressMap[data.videoId].durum;
+                video.mesaj = this.videoProgressMap[data.videoId].mesaj;
+                video.hataMesaji = isError ? data.mesaj : null;
+                video.yuzde = this.videoProgressMap[data.videoId].yuzde;
+                video.mevcutAdim = this.videoProgressMap[data.videoId].mevcutAdim;
+                video.toplamAdim = this.videoProgressMap[data.videoId].toplamAdim;
+              }
             }
           }
         })
       );
+
+      // İşlem gören videolar varken her 3 saniyede bir otomatik senkronize et
+      this.pollIntervalId = setInterval(() => {
+        if (this.egitimId && this.hasActiveProcessing) {
+          this.loadEgitim(true);
+        }
+      }, 3000);
       
       // Klasik mod SignalR bildirimleri
       this.subs.push(
@@ -126,13 +155,93 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
     this.contentTimeoutId = setTimeout(() => {
       if (this.isRequestingContent) {
-        this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir. Lütfen işlemi iptal edip uygulamanızı yeniden başlatmayı deneyin.';
+        this.contentError = 'İçerik üretim işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.';
         this.isRequestingContent = false;
       }
-    }, 5 * 60 * 1000);
+    }, 180000);
   }
 
-  loadEgitim() {
+  ngOnDestroy() {
+    if (this.pollIntervalId) clearInterval(this.pollIntervalId);
+    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+    this.subs.forEach(s => s?.unsubscribe?.());
+  }
+
+  get completedVideosCount(): number {
+    if (!this.egitim || !this.egitim.videos) return 0;
+    return this.egitim.videos.filter((v: any) => v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8).length;
+  }
+
+  get totalVideosCount(): number {
+    return this.egitim?.videos?.length || 0;
+  }
+
+  get completionPercentage(): number {
+    if (!this.totalVideosCount) return 0;
+    return Math.round((this.completedVideosCount / this.totalVideosCount) * 100);
+  }
+
+  get hasActiveProcessing(): boolean {
+    if (!this.egitim || !this.egitim.videos) return false;
+    return this.egitim.videos.some((v: any) => 
+      v.islemDurumu !== 'Tamamlandi' && v.islemDurumu !== 'Hata' && v.islemDurumu !== 8 && v.islemDurumu !== 9 &&
+      v.durum !== 'Tamamlandi' && v.durum !== 'Hata'
+    );
+  }
+
+  getVideoStatusText(v: any): string {
+    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return 'Tamamlandı';
+    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return 'Hata';
+    if (v.sonAsama) return v.sonAsama;
+    if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return 'Ses Çözümleniyor (STT)';
+    if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4) return 'STT Bitti';
+    if (v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return 'Özet Çıkarılıyor';
+    if (v.islemDurumu === 'OzetlemeTamamlandi' || v.islemDurumu === 6) return 'Özet Bitti';
+    if (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7) return 'Vektör İndeksleniyor';
+    return 'Bekliyor';
+  }
+
+  getVideoDetailSubtitle(v: any): string {
+    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return '✅ İndekslendi (RAG Hazır)';
+    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return '❌ İşlem Başarısız';
+    const cached = this.videoProgressMap[v.id];
+    if (v.mesaj) return v.mesaj;
+    if (cached?.mesaj) return cached.mesaj;
+    if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return '🎙️ Ses metne dökülüyor (STT)...';
+    if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return '📝 Özet ve kavramlar çıkarılıyor...';
+    if (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7) return '🧠 Vektör veritabanına indeksleniyor...';
+    return '⏳ Kuyrukta işleniyor...';
+  }
+
+  getVideoPercentage(v: any): number {
+    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return 100;
+    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return 0;
+    const cached = this.videoProgressMap[v.id];
+    const yuzde = v.yuzde ?? cached?.yuzde;
+    if (yuzde !== undefined && yuzde !== null && yuzde > 0) return yuzde;
+    
+    // Aşamaya göre standart ilerleme yüzdeleri
+    if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return 30;
+    if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4) return 60;
+    if (v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return 75;
+    if (v.islemDurumu === 'OzetlemeTamamlandi' || v.islemDurumu === 6) return 85;
+    if (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7) return 92;
+    return 10;
+  }
+
+  getVideoProgressText(v: any): string {
+    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return '100%';
+    const cached = this.videoProgressMap[v.id];
+    const mevcut = v.mevcutAdim ?? cached?.mevcutAdim;
+    const toplam = v.toplamAdim ?? cached?.toplamAdim;
+    if (mevcut && toplam) {
+      return `${mevcut}/${toplam} Parça (%${this.getVideoPercentage(v)})`;
+    }
+    return `%${this.getVideoPercentage(v)}`;
+  }
+
+  loadEgitim(silent: boolean = false) {
+    if (!silent) this.isLoading = true;
     forkJoin({
       egitim: this.apiService.getEgitim(this.egitimId),
       videos: this.apiService.getEgitimVideos(this.egitimId),
@@ -148,15 +257,31 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
           baslik: d.dosyaAdi
         }));
         
-        this.egitim.videos = [...vids, ...docs].sort((a, b) => {
+        const allItems = [...vids, ...docs].sort((a, b) => {
           return new Date(b.olusturmaTarihi).getTime() - new Date(a.olusturmaTarihi).getTime();
         });
+
+        // Per-video live progress retention
+        allItems.forEach((item: any) => {
+          const cached = this.videoProgressMap[item.id];
+          if (cached) {
+            if (cached.yuzde !== undefined) item.yuzde = cached.yuzde;
+            if (cached.mevcutAdim !== undefined) item.mevcutAdim = cached.mevcutAdim;
+            if (cached.toplamAdim !== undefined) item.toplamAdim = cached.toplamAdim;
+            if (cached.mesaj !== undefined) item.mesaj = cached.mesaj;
+            if (cached.sonAsama !== undefined) item.sonAsama = cached.sonAsama;
+          }
+        });
+
+        this.egitim.videos = allItems;
         
         this.isLoading = false;
-        this.loadPastRequests(true);
+        if (!silent) {
+          this.loadPastRequests(true);
+        }
       },
       error: () => {
-        this.router.navigate(['/dashboard']);
+        if (!silent) this.router.navigate(['/dashboard']);
       }
     });
   }
@@ -374,10 +499,5 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   goBack() {
     this.router.navigate(['/dashboard']);
-  }
-
-  ngOnDestroy() {
-    this.subs.forEach(s => s.unsubscribe());
-    if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
   }
 }

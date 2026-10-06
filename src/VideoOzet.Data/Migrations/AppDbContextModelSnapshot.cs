@@ -37,6 +37,21 @@ namespace VideoOzet.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("BelirsizSayisi")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DesteklenenSayisi")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DesteklenmeyenSayisi")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DetayliRapor")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
                     b.Property<string>("DevirNotuJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -45,7 +60,8 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("integer");
 
                     b.Property<decimal>("GuvenSkorYuzde")
-                        .HasColumnType("numeric");
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
 
                     b.Property<string>("HedefAlan")
                         .IsRequired()
@@ -59,6 +75,9 @@ namespace VideoOzet.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("QcDurumu")
+                        .HasColumnType("integer");
+
                     b.Property<int>("RevizyonNo")
                         .HasColumnType("integer");
 
@@ -70,6 +89,9 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Tip")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ToplamIddiaSayisi")
                         .HasColumnType("integer");
 
                     b.Property<string>("VideoPlani")
@@ -1040,7 +1062,7 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("egitim_id");
 
                     b.Property<Vector>("Embedding")
-                        .HasColumnType("vector(1536)")
+                        .HasColumnType("vector(1024)")
                         .HasColumnName("embedding");
 
                     b.Property<int>("EndTimeMs")

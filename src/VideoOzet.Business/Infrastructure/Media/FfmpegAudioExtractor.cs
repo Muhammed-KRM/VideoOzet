@@ -43,10 +43,10 @@ public class FfmpegAudioExtractor : IAudioExtractor
 
             var result = await FFMpegArguments
                 .FromFileInput(videoFilePath)
-                .OutputToFile(outputAudioPath, false, options => options
+                .OutputToFile(outputAudioPath, true, options => options
                     .WithAudioCodec(AudioCodec.LibMp3Lame)
-                    .WithAudioBitrate(128)
-                    .WithCustomArgument("-vn")) // -vn: no video
+                    .WithAudioBitrate(32)
+                    .WithCustomArgument("-ac 1 -ar 16000 -vn")) // -vn: no video, -ac 1: mono, -ar 16000: speech sampling
                 .CancellableThrough(cancellationToken)
                 .ProcessAsynchronously();
 

@@ -32,13 +32,36 @@ public static class ServiceRegistration
         services.AddScoped<IVideoService, VideoManager>();
         services.AddScoped<IDokumanService, DokumanService>();
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
-        services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>()
-            .AddStandardResilienceHandler();
         services.AddScoped<IGeminiProvider, VideoOzet.Business.Infrastructure.AI.GeminiSummarizer>();
         services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
-        services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OpenAIEmbeddingProvider>();
+        services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GroqWhisperSttProvider>(client =>
+        {
+            client.Timeout = TimeSpan.FromMinutes(5);
+        });
+        services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GeminiAudioSttProvider>(client =>
+        {
+            client.Timeout = TimeSpan.FromMinutes(10);
+        });
+
+        var openAiKey = configuration["OPENAI_API_KEY"] ?? configuration["OpenAI:ApiKey"];
+        if (!string.IsNullOrWhiteSpace(openAiKey))
+        {
+            services.AddHttpClient<ISttProvider, VideoOzet.Business.Infrastructure.AI.OpenAIWhisperProvider>(client =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(10);
+            });
+            services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OpenAIEmbeddingProvider>();
+        }
+        else
+        {
+            services.AddScoped<ISttProvider, VideoOzet.Business.Infrastructure.AI.CompositeSttProvider>();
+            services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OllamaEmbeddingProvider>();
+        }
+
         services.AddScoped<ISynthesisProvider, VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider>();
         services.AddScoped<ISourceTopicMapper, SourceTopicMapper>();
+        services.AddScoped<ISourceContextBuilder, SourceContextBuilder>();
+        services.AddScoped<IQualityCheckService, QualityCheckService>();
         services.AddScoped<ILogService, LogManager>();
 
         // Redis Registration

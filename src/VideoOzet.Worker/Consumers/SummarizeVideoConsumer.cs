@@ -98,18 +98,34 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     _logger.LogWarning(ex, "LLM json parse failed. Using raw response as summary. Raw: {Raw}", jsonResponse);
                 }
 
-                var summary = new VideoSummary
-                {
-                    VideoId = evt.VideoId,
-                    OzetMetni = ozetMetni,
-                    KonuBasliklari = konuBasliklariJson, 
-                    KonuEtiketleri = konuEtiketleriJson,
-                    LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "bilinmiyor" : _geminiProvider.ActiveModelName,
-                    OlusturmaTarihi = DateTime.UtcNow
-                };
+                var existingSummary = await _context.VideoSummaries
+                    .FirstOrDefaultAsync(s => s.VideoId == evt.VideoId, context.CancellationToken);
 
-                _context.VideoSummaries.Add(summary);
-                await _context.SaveChangesAsync();
+                VideoSummary summary;
+                if (existingSummary != null)
+                {
+                    existingSummary.OzetMetni = ozetMetni;
+                    existingSummary.KonuBasliklari = konuBasliklariJson;
+                    existingSummary.KonuEtiketleri = konuEtiketleriJson;
+                    existingSummary.LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "gemini-3.8-flash-tiered" : _geminiProvider.ActiveModelName;
+                    existingSummary.OlusturmaTarihi = DateTime.UtcNow;
+                    summary = existingSummary;
+                }
+                else
+                {
+                    summary = new VideoSummary
+                    {
+                        VideoId = evt.VideoId,
+                        OzetMetni = ozetMetni,
+                        KonuBasliklari = konuBasliklariJson, 
+                        KonuEtiketleri = konuEtiketleriJson,
+                        LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "gemini-3.8-flash-tiered" : _geminiProvider.ActiveModelName,
+                        OlusturmaTarihi = DateTime.UtcNow
+                    };
+                    _context.VideoSummaries.Add(summary);
+                }
+
+                await _context.SaveChangesAsync(context.CancellationToken);
 
                 _logger.LogInformation("Summary completed and saved for Video: {VideoId}", evt.VideoId);
 

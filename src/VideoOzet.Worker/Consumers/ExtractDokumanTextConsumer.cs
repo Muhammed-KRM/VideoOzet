@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using UglyToad.PdfPig;
 using VideoOzet.Business.Events;
+using VideoOzet.Business.Helpers;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
@@ -91,6 +92,8 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
                 _logger.LogWarning("Desteklenmeyen döküman formatı: {Uzanti}", evt.Uzanti);
                 throw new NotSupportedException($"Format desteklenmiyor: {evt.Uzanti}");
             }
+
+            extractedText = TextNormalizer.NormalizeTurkishText(extractedText);
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {

@@ -80,12 +80,20 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             }
         }
 
+        var existingChunks = await _context.VideoChunkDocuments
+            .Where(d => d.VideoId == evt.VideoId)
+            .ToListAsync(context.CancellationToken);
+        if (existingChunks.Count > 0)
+        {
+            _context.VideoChunkDocuments.RemoveRange(existingChunks);
+        }
+
         _context.VideoChunkDocuments.AddRange(documents);
         
         // Video durumunu Tamamlandi olarak güncelle
         if (_context.Videolar != null)
         {
-            var video = await _context.Videolar.FindAsync(evt.VideoId);
+            var video = await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken);
             if (video != null)
             {
                 video.IslemDurumu = VideoOzet.Data.Enums.VideoIslemDurumu.Tamamlandi;
@@ -93,13 +101,15 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             }
         }
 
-        // Eğitimdeki işlenmiş video sayısını artır
+        // Eğitimdeki işlenmiş video sayısını doğru hesapla
         if (_context.Egitimler != null)
         {
-            var egitim = await _context.Egitimler.FindAsync(evt.EgitimId);
+            var egitim = await _context.Egitimler.FindAsync(new object[] { evt.EgitimId }, context.CancellationToken);
             if (egitim != null)
             {
-                egitim.IslenmiVideoSayisi++;
+                var islenenSayi = await _context.Videolar
+                    .CountAsync(v => v.EgitimId == evt.EgitimId && (v.IslemDurumu == VideoOzet.Data.Enums.VideoIslemDurumu.Tamamlandi || v.Id == evt.VideoId), context.CancellationToken);
+                egitim.IslenmiVideoSayisi = islenenSayi;
                 if (egitim.ToplamVideoSayisi > 0 && egitim.IslenmiVideoSayisi >= egitim.ToplamVideoSayisi)
                 {
                     egitim.Durum = VideoOzet.Data.Enums.EgitimDurumu.Tamamlandi;
@@ -107,7 +117,7 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             }
         }
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(context.CancellationToken);
 
         _logger.LogInformation("Indexed {ChunkCount} chunks for Video: {VideoId}", documents.Count, evt.VideoId);
 

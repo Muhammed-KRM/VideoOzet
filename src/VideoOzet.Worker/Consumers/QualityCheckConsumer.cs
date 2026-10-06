@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -19,6 +20,8 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
 {
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
+    private readonly IQualityCheckService? _qcService;
     private readonly ILogService _logService;
     private readonly ILogger<QualityCheckConsumer> _logger;
 
@@ -26,12 +29,16 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
         ILogService logService,
-        ILogger<QualityCheckConsumer> logger)
+        ILogger<QualityCheckConsumer> logger,
+        ISourceContextBuilder? sourceContextBuilder = null,
+        IQualityCheckService? qcService = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _logService = logService;
         _logger = logger;
+        _sourceContextBuilder = sourceContextBuilder;
+        _qcService = qcService;
     }
 
     public async Task Consume(ConsumeContext<ContentGeneratedEvent> context)
@@ -56,10 +63,10 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             // 1. Kullanılan Kaynakları Getir
             var chunkIdsStr = request.GeneratedContent.KullanilanKaynaklar;
             var contextData = string.Empty;
+            List<Guid> chunkIds = new();
 
             if (!string.IsNullOrEmpty(chunkIdsStr))
             {
-                List<Guid> chunkIds = new();
                 try
                 {
                     if (chunkIdsStr.TrimStart().StartsWith("["))
@@ -75,9 +82,16 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 {
                     _logger.LogWarning(parseEx, "Kullanılan kaynaklar parse edilemedi: {ChunkIdsStr}", chunkIdsStr);
                 }
+            }
 
+            if (_sourceContextBuilder != null)
+            {
+                var scResult = await _sourceContextBuilder.BuildFromChunkIdsAsync(message.EgitimId, chunkIds, context.CancellationToken);
+                contextData = scResult.ContextText;
+            }
+            else if (chunkIds.Any())
+            {
                 var chunks = await _dbContext.VideoChunkDocuments.Where(c => chunkIds.Contains(c.Id)).ToListAsync();
-                
                 var contextBuilder = new StringBuilder();
                 foreach (var chunk in chunks)
                 {
@@ -87,95 +101,118 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 contextData = contextBuilder.ToString();
             }
 
-            // 2. Toplu Kalite Kontrol (Batch QC - 8 detaylı iddia ile tek seferde doğrulama)
+            // 2. Toplu Kalite Kontrol (QC)
             _logger.LogInformation("ContentRequest {RequestId} için Toplu Kalite Kontrol (QC) başlatılıyor...", request.Id);
 
-            var batchQcResponse = await _synthesisProvider.BatchQualityCheckAsync(
-                request.GeneratedContent.ArastirmaOzeti,
-                contextData,
-                claimCount: 8,
-                context.CancellationToken);
+            QcResult qcResult;
+            if (_qcService != null)
+            {
+                var qcEval = await _qcService.EvaluateAsync(
+                    request.GeneratedContent.ArastirmaOzeti,
+                    contextData,
+                    claimCount: 8,
+                    previousReportJson: null,
+                    ct: context.CancellationToken);
 
-            var cleanJson = batchQcResponse.Trim();
-            if (cleanJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            {
-                cleanJson = cleanJson.Substring(7);
-            }
-            else if (cleanJson.StartsWith("```"))
-            {
-                cleanJson = cleanJson.Substring(3);
-            }
-            if (cleanJson.EndsWith("```"))
-            {
-                cleanJson = cleanJson.Substring(0, cleanJson.Length - 3);
-            }
-            cleanJson = cleanJson.Trim();
-
-            var desteklenen = 0;
-            var belirsiz = 0;
-            var desteklenmeyen = 0;
-            var raporList = new List<object>();
-
-            try
-            {
-                using var doc = JsonDocument.Parse(cleanJson);
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                qcResult = new QcResult
                 {
-                    foreach (var element in doc.RootElement.EnumerateArray())
+                    ContentRequestId = request.Id,
+                    ToplamIddiaSayisi = qcEval.ToplamIddiaSayisi,
+                    DesteklenenSayisi = qcEval.DesteklenenSayisi,
+                    BelirsizSayisi = qcEval.BelirsizSayisi,
+                    DesteklenmeyenSayisi = qcEval.DesteklenmeyenSayisi,
+                    DetayliRapor = qcEval.DetayliRaporJson,
+                    GuvenSkorYuzde = qcEval.GuvenSkorYuzde,
+                    OlusturmaTarihi = DateTime.UtcNow
+                };
+            }
+            else
+            {
+                var batchQcResponse = await _synthesisProvider.BatchQualityCheckAsync(
+                    request.GeneratedContent.ArastirmaOzeti,
+                    contextData,
+                    claimCount: 8,
+                    context.CancellationToken);
+
+                var cleanJson = batchQcResponse.Trim();
+                if (cleanJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleanJson = cleanJson.Substring(7);
+                }
+                else if (cleanJson.StartsWith("```"))
+                {
+                    cleanJson = cleanJson.Substring(3);
+                }
+                if (cleanJson.EndsWith("```"))
+                {
+                    cleanJson = cleanJson.Substring(0, cleanJson.Length - 3);
+                }
+                cleanJson = cleanJson.Trim();
+
+                var desteklenen = 0;
+                var belirsiz = 0;
+                var desteklenmeyen = 0;
+                var raporList = new List<object>();
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(cleanJson);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
                     {
-                        var iddia = element.TryGetProperty("iddia", out var iddiaProp) ? iddiaProp.GetString() : "Bilinmeyen İddia";
-                        var durum = element.TryGetProperty("durum", out var durumProp) ? durumProp.GetString()?.ToLowerInvariant() ?? "belirsiz" : "belirsiz";
-                        var aciklama = element.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
-
-                        if (durum == "desteklendi") desteklenen++;
-                        else if (durum == "desteklenmedi") desteklenmeyen++;
-                        else { durum = "belirsiz"; belirsiz++; }
-
-                        raporList.Add(new
+                        foreach (var element in doc.RootElement.EnumerateArray())
                         {
-                            iddia = iddia ?? "",
-                            durum = durum,
-                            aciklama = aciklama ?? ""
-                        });
+                            var iddia = element.TryGetProperty("iddia", out var iddiaProp) ? iddiaProp.GetString() : "Bilinmeyen İddia";
+                            var durum = element.TryGetProperty("durum", out var durumProp) ? durumProp.GetString()?.ToLowerInvariant() ?? "belirsiz" : "belirsiz";
+                            var aciklama = element.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
+
+                            if (durum == "desteklendi") desteklenen++;
+                            else if (durum == "desteklenmedi") desteklenmeyen++;
+                            else { durum = "belirsiz"; belirsiz++; }
+
+                            raporList.Add(new
+                            {
+                                iddia = iddia ?? "",
+                                durum = durum,
+                                aciklama = aciklama ?? ""
+                            });
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("QC çıktısı JSON dizisi değildi: {BatchQcResponse}", batchQcResponse);
                     }
                 }
-                else
+                catch (Exception parseEx)
                 {
-                    _logger.LogWarning("QC çıktısı JSON dizisi değildi: {BatchQcResponse}", batchQcResponse);
+                    _logger.LogWarning(parseEx, "Toplu QC JSON parse hatası. Ham yanıt: {BatchQcResponse}", batchQcResponse);
                 }
-            }
-            catch (Exception parseEx)
-            {
-                _logger.LogWarning(parseEx, "Toplu QC JSON parse hatası. Ham yanıt: {BatchQcResponse}", batchQcResponse);
-            }
 
-            // Fallback: Eğer model geçersiz format dönerse işlemi yarıda kesmeyip genel rapor üret
-            if (!raporList.Any())
-            {
-                desteklenen = 1;
-                raporList.Add(new
+                if (!raporList.Any())
                 {
-                    iddia = "İçerik araştırması video ve döküman kaynakları doğrultusunda analiz edildi.",
-                    durum = "desteklendi",
-                    aciklama = "Genel kalite kontrol analizi başarıyla tamamlandı."
-                });
+                    desteklenen = 1;
+                    raporList.Add(new
+                    {
+                        iddia = "İçerik araştırması video ve döküman kaynakları doğrultusunda analiz edildi.",
+                        durum = "desteklendi",
+                        aciklama = "Genel kalite kontrol analizi başarıyla tamamlandı."
+                    });
+                }
+
+                var toplamIddia = raporList.Count;
+                decimal guvenYuzde = toplamIddia == 0 ? 100 : Math.Round((decimal)desteklenen / toplamIddia * 100, 2);
+
+                qcResult = new QcResult
+                {
+                    ContentRequestId = request.Id,
+                    ToplamIddiaSayisi = toplamIddia,
+                    DesteklenenSayisi = desteklenen,
+                    BelirsizSayisi = belirsiz,
+                    DesteklenmeyenSayisi = desteklenmeyen,
+                    DetayliRapor = JsonSerializer.Serialize(raporList),
+                    GuvenSkorYuzde = guvenYuzde,
+                    OlusturmaTarihi = DateTime.UtcNow
+                };
             }
-
-            var toplamIddia = raporList.Count;
-            decimal guvenYuzde = toplamIddia == 0 ? 100 : Math.Round((decimal)desteklenen / toplamIddia * 100, 2);
-
-            // 4. QcResult Kaydı
-            var qcResult = new QcResult
-            {
-                ContentRequestId = request.Id,
-                ToplamIddiaSayisi = toplamIddia,
-                DesteklenenSayisi = desteklenen,
-                BelirsizSayisi = belirsiz,
-                DesteklenmeyenSayisi = desteklenmeyen,
-                DetayliRapor = JsonSerializer.Serialize(raporList),
-                GuvenSkorYuzde = guvenYuzde,
-                OlusturmaTarihi = DateTime.UtcNow
-            };
 
             _dbContext.QcResults.Add(qcResult);
 
@@ -200,7 +237,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 EgitimId = message.EgitimId
             });
 
-            await _logService.LogPipelineEndAsync(logId, $"{{ \"status\": \"Success\", \"guvenSkor\": {guvenYuzde.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} }}");
+            await _logService.LogPipelineEndAsync(logId, $"{{ \"status\": \"Success\", \"guvenSkor\": {qcResult.GuvenSkorYuzde.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} }}");
         }
         catch (Exception ex)
         {
