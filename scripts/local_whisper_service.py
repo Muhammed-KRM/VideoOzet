@@ -38,12 +38,17 @@ def init_model(model_name="large-v3"):
     try:
         print("[*] Attempting to load on CUDA (GPU)...")
         t0 = time.time()
-        GLOBAL_MODEL = WhisperModel(model_name, device="cuda", compute_type="int8_float16")
+        m = WhisperModel(model_name, device="cuda", compute_type="int8_float16")
+        # Warmup verification: CTranslate2 only loads cublas64_12.dll during actual inference
+        import numpy as np
+        warmup_audio = np.zeros(16000, dtype=np.float32)
+        _ = list(m.transcribe(warmup_audio)[0])
+        GLOBAL_MODEL = m
         DEVICE_USED = "cuda"
-        print(f"[+] Loaded successfully on CUDA in {time.time()-t0:.2f}s!")
+        print(f"[+] Loaded and verified successfully on CUDA in {time.time()-t0:.2f}s!")
         return
     except Exception as e:
-        print(f"[-] CUDA initialization failed: {e}")
+        print(f"[-] CUDA verification failed ({e}).")
         print("[*] Falling back to high-performance CPU (8 threads, int8)...")
 
     # 2. Fallback to 8-core CPU
