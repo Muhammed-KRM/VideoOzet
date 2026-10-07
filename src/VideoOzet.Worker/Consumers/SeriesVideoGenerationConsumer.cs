@@ -157,12 +157,15 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 }
             }
 
+            string userInstructions = seriPlani?.KullaniciKisitlariJson ?? "";
+
             var contentJsonStr = await _synthesisProvider.GenerateSeriesVideoContentAsync(
                 bolum.CalismaBasligi,
                 bolum.KonularJson,
                 devirNotu,
                 request.HedefKitle ?? "Genel",
                 allSourcesData,
+                userInstructions,
                 context.CancellationToken);
 
             var contentData = LlmJson.Deserialize<JsonElement>(contentJsonStr);

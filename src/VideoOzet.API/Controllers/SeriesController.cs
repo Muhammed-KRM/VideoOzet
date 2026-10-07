@@ -173,7 +173,7 @@ public class SeriesController : ControllerBase
     /// Planı onaylar ve 1. videonun üretimini tetikler.
     /// </summary>
     [HttpPost("api/series-requests/{id:guid}/plans/{planNo:int}/approve")]
-    public async Task<IActionResult> ApprovePlan(Guid id, int planNo)
+    public async Task<IActionResult> ApprovePlan(Guid id, int planNo, [FromBody] ApprovePlanDto? dto = null)
     {
         var plan = await _dbContext.SeriPlanlari
             .Include(p => p.SeriBolumler)
@@ -187,6 +187,19 @@ public class SeriesController : ControllerBase
 
         plan.Onaylandi = true;
         plan.Durum = SeriPlanDurumu.Onaylandi;
+
+        if (!string.IsNullOrWhiteSpace(dto?.Talimat))
+        {
+            var talimat = dto.Talimat.Trim();
+            if (string.IsNullOrWhiteSpace(plan.KullaniciKisitlariJson))
+            {
+                plan.KullaniciKisitlariJson = talimat;
+            }
+            else
+            {
+                plan.KullaniciKisitlariJson += "\n" + talimat;
+            }
+        }
 
         var request = await _dbContext.ContentRequests.FindAsync(id);
         if (request != null)

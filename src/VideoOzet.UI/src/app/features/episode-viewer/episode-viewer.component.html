@@ -53,22 +53,61 @@
 
       <!-- Revizyon Paneli -->
       <div class="bg-slate-800 rounded-xl p-5 border border-slate-700/50 shadow-xl" *ngIf="episode.durum === 'Tamamlandi' || episode.durum === 'Isleniyor' || episode.durum === 'Hata'">
-        <h3 class="text-base font-semibold text-white mb-2">Videoyu Revize Et</h3>
-        <p class="text-xs text-slate-400 mb-4">Bu video için metin, ton veya içerikte değişiklik isteyin.</p>
+        <h3 class="text-base font-semibold text-white mb-1.5 flex items-center gap-1.5">
+          <span>✍️</span> Videoyu Revize Et
+        </h3>
+        <p class="text-xs text-slate-400 mb-3">Bu video için metin, ton veya kurgu içeriğinde değişiklik isteyin.</p>
         
-        <form (ngSubmit)="requestRevision()" class="space-y-4">
-          <textarea 
-            [(ngModel)]="revizyonTalimati" 
-            name="revizyon" 
-            rows="4" 
-            placeholder="Örn: Giriş çok sıkıcı olmuş, daha heyecanlı bir dille yeniden yaz..." 
-            class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm"
-            [disabled]="episode.durum === 'Isleniyor'">
-          </textarea>
+        <form (ngSubmit)="requestRevision()" class="space-y-3">
+          <!-- Revizyon Hedefi Seçimi -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Revize Edilecek Alan</label>
+            <div class="grid grid-cols-3 gap-1 p-1 bg-slate-900 rounded-lg border border-slate-700 text-xs">
+              <button 
+                type="button"
+                (click)="hedefAlan = 'VideoPlani'" 
+                [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'VideoPlani', 'text-slate-400 hover:text-white': hedefAlan !== 'VideoPlani'}"
+                class="py-1.5 px-1 rounded transition-all text-center">
+                Video Planı
+              </button>
+              <button 
+                type="button"
+                (click)="hedefAlan = 'ArastirmaOzeti'" 
+                [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'ArastirmaOzeti', 'text-slate-400 hover:text-white': hedefAlan !== 'ArastirmaOzeti'}"
+                class="py-1.5 px-1 rounded transition-all text-center">
+                Araştırma Özeti
+              </button>
+              <button 
+                type="button"
+                (click)="hedefAlan = 'Hepsi'" 
+                [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'Hepsi', 'text-slate-400 hover:text-white': hedefAlan !== 'Hepsi'}"
+                class="py-1.5 px-1 rounded transition-all text-center">
+                İkisi Birden
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1.5 leading-snug">
+              <span *ngIf="hedefAlan === 'VideoPlani'" class="text-indigo-300">💡 Yalnızca kurgu yönergeleri ve prompter metni yenilenir, araştırma özeti aynen korunur.</span>
+              <span *ngIf="hedefAlan === 'ArastirmaOzeti'" class="text-indigo-300">💡 Yalnızca akademik araştırma özeti yenilenir, video planı aynen korunur.</span>
+              <span *ngIf="hedefAlan === 'Hepsi'" class="text-indigo-300">💡 Hem araştırma özeti hem video planı baştan revize edilir.</span>
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Revizyon Talimatı</label>
+            <textarea 
+              [(ngModel)]="revizyonTalimati" 
+              name="revizyon" 
+              rows="4" 
+              [placeholder]="hedefAlan === 'VideoPlani' ? 'Örn: Prompter metni daha samimi olsun, görsel yönergelerde B-roll ve alt yazı grafiklerini artır...' : (hedefAlan === 'ArastirmaOzeti' ? 'Örn: Kaynaktaki 2. konuyu daha detaylı açıkla, ek kavramsal analiz ekle...' : 'Örn: Giriş çok sıkıcı olmuş, daha heyecanlı bir dille yeniden yaz...')" 
+              class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:border-indigo-500 focus:outline-none placeholder:text-slate-500"
+              [disabled]="episode.durum === 'Isleniyor'">
+            </textarea>
+          </div>
+
           <button 
             type="submit" 
             [disabled]="!revizyonTalimati || episode.durum === 'Isleniyor' || isRevising" 
-            class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg shadow-lg transition-all disabled:opacity-50 flex justify-center items-center gap-2 text-sm">
+            class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50 flex justify-center items-center gap-2 text-sm">
             <span *ngIf="episode.durum === 'Isleniyor' || isRevising" class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
             {{ episode.durum === 'Isleniyor' || isRevising ? 'Revize Ediliyor...' : 'Revizyon İste' }}
           </button>
@@ -77,15 +116,30 @@
 
       <!-- Versiyon Geçmişi -->
       <div class="bg-slate-800 rounded-xl p-5 border border-slate-700/50 shadow-xl" *ngIf="episode.revizyonlar?.length > 1">
-        <h3 class="text-base font-semibold text-white mb-3">Sürümler</h3>
-        <div class="space-y-2">
-          <div *ngFor="let rev of episode.revizyonlar" class="flex items-center justify-between p-2 rounded-lg"
-               [ngClass]="{'bg-indigo-500/20 border border-indigo-500/30': rev.id === getAktifRevizyon()?.id, 'hover:bg-slate-700 cursor-pointer': rev.id !== getAktifRevizyon()?.id}">
-            <div>
-              <p class="text-sm font-medium text-white">Revizyon {{ rev.revizyonNo }}</p>
-              <p class="text-xs text-slate-400 truncate w-32" title="{{ rev.talimat }}">{{ rev.talimat || rev.tip }}</p>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-base font-semibold text-white flex items-center gap-1.5">
+            <span>⏱️</span> Sürümler
+          </h3>
+          <span class="text-xs text-slate-400">{{ episode.revizyonlar.length }} sürüm</span>
+        </div>
+        <p class="text-[11px] text-slate-400 mb-2">Görüntülemek istediğiniz sürüme tıklayın:</p>
+        <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+          <div *ngFor="let rev of episode.revizyonlar" 
+               (click)="selectRevision(rev)"
+               class="flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all border"
+               [ngClass]="{
+                 'bg-indigo-600/25 border-indigo-500/60 shadow-sm': rev.id === getAktifRevizyon()?.id,
+                 'bg-slate-900/40 border-slate-700/50 hover:bg-slate-700/50 hover:border-slate-600': rev.id !== getAktifRevizyon()?.id
+               }">
+            <div class="flex-1 min-w-0 pr-2">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <p class="text-sm font-semibold text-white">Revizyon {{ rev.revizyonNo }}</p>
+                <span *ngIf="rev.id === episode.aktifRevizyonId" class="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded font-semibold uppercase">En Son</span>
+                <span *ngIf="rev.hedefAlan && rev.hedefAlan !== 'Hepsi'" class="text-[9px] bg-slate-700 text-slate-300 px-1 py-0.2 rounded">{{ rev.hedefAlan === 'VideoPlani' ? 'Video' : 'Özet' }}</span>
+              </div>
+              <p class="text-xs text-slate-400 truncate" title="{{ rev.talimat }}">{{ rev.talimat || (rev.tip === 'IlkUretim' ? 'İlk Sistem Üretimi' : rev.tip) }}</p>
             </div>
-            <span *ngIf="rev.id === getAktifRevizyon()?.id" class="text-[10px] bg-indigo-500 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">Aktif</span>
+            <span *ngIf="rev.id === getAktifRevizyon()?.id" class="text-[10px] bg-indigo-500 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wider shrink-0">Aktif</span>
           </div>
         </div>
       </div>
@@ -124,6 +178,21 @@
       </div>
 
       <div *ngIf="episode.durum === 'Tamamlandi' && getAktifRevizyon()" class="h-full">
+        <!-- Eski Sürüm Görüntüleme Bildirimi -->
+        <div *ngIf="getAktifRevizyon()?.id !== episode.aktifRevizyonId" class="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p class="text-xs text-amber-200">
+              Şu anda <strong>Revizyon {{ getAktifRevizyon()?.revizyonNo }}</strong> (eski sürüm) inceleniyor.
+            </p>
+          </div>
+          <button (click)="resetToLatestRevision()" class="text-xs px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg transition-colors shadow">
+            En Son Sürüme Dön
+          </button>
+        </div>
+
         <!-- Burada plan-viewer componentini kullanıyoruz -->
         <app-plan-viewer [revision]="getAktifRevizyon()" [title]="episode?.calismaBasligi || ''" [bolumNo]="bolumNo"></app-plan-viewer>
       </div>

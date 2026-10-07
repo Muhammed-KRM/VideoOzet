@@ -109,8 +109,8 @@ export class ApiService {
     return this.http.put<any>(`${this.baseUrl}/content-plans/${id}/plans/${planNo}`, updates);
   }
 
-  approvePlan(id: string, planNo: number): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/plans/${planNo}/approve`, {});
+  approvePlan(id: string, planNo: number, talimat?: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/plans/${planNo}/approve`, { talimat: talimat || '' });
   }
 
   getEpisodeDetails(id: string, planNo: number, bolumNo: number): Observable<any> {

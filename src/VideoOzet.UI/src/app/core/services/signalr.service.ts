@@ -13,6 +13,10 @@ export class SignalRService {
   public contentGenerated$ = new Subject<any>();
   public contentProgress$ = new Subject<any>();
   public contentError$ = new Subject<any>();
+  public seriesPlanGenerated$ = new Subject<any>();
+  public seriesVideoGenerated$ = new Subject<any>();
+  public topicAnalysisCompleted$ = new Subject<any>();
+  public seriesPlanCompleted$ = new Subject<any>();
 
   public startConnection() {
     // Aynı anda birden fazla bağlantı olmasını engellemek için
@@ -50,6 +54,22 @@ export class SignalRService {
 
     this.hubConnection.on('ContentError', (data) => {
       this.contentError$.next(data);
+    });
+
+    this.hubConnection.on('SeriesPlanGenerated', (data) => {
+      this.seriesPlanGenerated$.next(data);
+    });
+
+    this.hubConnection.on('SeriesVideoGenerated', (data) => {
+      this.seriesVideoGenerated$.next(data);
+    });
+
+    this.hubConnection.on('TopicAnalysisCompleted', (data) => {
+      this.topicAnalysisCompleted$.next(data);
+    });
+
+    this.hubConnection.on('SeriesPlanCompleted', (data) => {
+      this.seriesPlanCompleted$.next(data);
     });
   }
 }

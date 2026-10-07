@@ -24,6 +24,7 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
   isLoading = true;
   isPolling = false;
   pollInterval: any;
+  currentStatusMessage: string = '';
 
   // Taslak Form
   draftOptions = {
@@ -32,8 +33,10 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     talimat: ''
   };
   isDrafting = false;
+  onayTalimati = '';
+  isApproving = false;
 
-  private signalRSub?: Subscription;
+  private subs: Subscription[] = [];
 
   ngOnInit() {
     this.contentRequestId = this.route.snapshot.paramMap.get('id') || '';
@@ -43,18 +46,76 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     }
 
     this.signalRService.startConnection();
+    this.setupSignalRSubscriptions();
     this.loadData();
     this.startPolling();
+  }
 
-    // Listen to real-time updates if needed, though polling might be enough for now.
-    // In a real app, you would rely on signalR events to avoid polling.
+  private setupSignalRSubscriptions() {
+    this.subs.push(
+      this.signalRService.pipelineStageChanged$.subscribe((data: any) => {
+        if (!data) return;
+        if (data.mesaj) {
+          this.currentStatusMessage = data.mesaj;
+        }
+        if (!data.contentRequestId || data.contentRequestId === this.contentRequestId || (this.data && data.egitimId === this.data.egitimId)) {
+          this.loadData();
+        }
+      })
+    );
+
+    this.subs.push(
+      this.signalRService.seriesPlanGenerated$.subscribe((data: any) => {
+        if (!data || data.contentRequestId === this.contentRequestId) {
+          this.currentStatusMessage = 'Plan hazır!';
+          this.isDrafting = false;
+          this.loadData();
+        }
+      })
+    );
+
+    this.subs.push(
+      this.signalRService.seriesVideoGenerated$.subscribe((data: any) => {
+        if (!data || data.contentRequestId === this.contentRequestId) {
+          this.loadData();
+        }
+      })
+    );
+
+    this.subs.push(
+      this.signalRService.topicAnalysisCompleted$.subscribe((data: any) => {
+        if (!data || data.contentRequestId === this.contentRequestId) {
+          this.currentStatusMessage = 'Konu analizi tamamlandı. Plan taslağı üretiliyor...';
+          this.loadData();
+        }
+      })
+    );
+
+    this.subs.push(
+      this.signalRService.contentProgress$.subscribe((data: any) => {
+        if (!data || data.contentRequestId === this.contentRequestId) {
+          if (data.asama) {
+            this.currentStatusMessage = `${data.asama} (${data.yuzde || 0}%)`;
+          }
+          this.loadData();
+        }
+      })
+    );
+
+    this.subs.push(
+      this.signalRService.contentError$.subscribe((data: any) => {
+        if (data && data.contentRequestId === this.contentRequestId) {
+          console.warn('SignalR içerik hatası:', data.hataMesaji);
+          this.loadData();
+        }
+      })
+    );
   }
 
   ngOnDestroy() {
     this.stopPolling();
-    if (this.signalRSub) {
-      this.signalRSub.unsubscribe();
-    }
+    this.subs.forEach(s => s.unsubscribe());
+    this.subs = [];
   }
 
   loadData() {
@@ -81,9 +142,10 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
         }
       },
       error: (err) => {
-        console.error('Plan yüklenemedi', err);
+        console.warn('Plan yükleme hatası (arka planda periyodik olarak tekrar denenecek):', err);
         this.isLoading = false;
-        this.stopPolling();
+        // Polling'i ASLA durdurmuyoruz! Geçici ağ veya sunucu yanıt gecikmelerinde
+        // polling kesilirse kullanıcı ekranda takılı kalır.
       }
     });
   }
@@ -93,31 +155,78 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     const d = this.data;
     if (!d) return true;
 
+    // Kullanıcı yeni bir taslak talep ettiyse
+    if (this.isDrafting) return true;
+
+    // Genel istek durumu devam ediyorsa
+    if (d.durum === 'Bekliyor' || d.durum === 'IcerikUretiliyor' || d.durum === 'QcYapiliyor') {
+      return true;
+    }
+
     const analiz = d.konuAnalizi;
-    if (!analiz) return d.durum !== 'Hata';                       // Analiz henüz kaydedilmedi
-    if (analiz.durum === 'Hata') return false;                    // Analiz başarısız → dur
+    if (!analiz) {
+      return d.durum !== 'Hata';
+    }
+    if (analiz.durum === 'Isleniyor' || analiz.durum === 'Bekliyor') {
+      return true;
+    }
 
     const plan = d.guncelPlan;
-    if (!plan) return true;                                       // Analiz bitti, plan bekleniyor
-    if (plan.durum === 'Olusturuluyor' || plan.durum === 'Taslak') return true;
-    if (plan.durum === 'Hata' || plan.durum === 'Iptal') return false;
+    if (!plan) {
+      // Analiz tamamlanmışsa plan oluşturulması bekleniyor demektir
+      return analiz.durum !== 'Hata';
+    }
+
+    if (plan.durum === 'Olusturuluyor' || plan.durum === 'Taslak') {
+      return true;
+    }
 
     // Plan onaylandıysa bölüm üretimi sürüyor olabilir
     if (plan.onaylandi) {
-      return (plan.seriBolumler || []).some((b: any) => b.durum === 'Isleniyor');
+      const bolumler = plan.seriBolumler || [];
+      const anyPendingOrProcessing = bolumler.some(
+        (b: any) => b.durum === 'Isleniyor' || b.durum === 'Bekliyor'
+      );
+      return anyPendingOrProcessing;
     }
-    return false;                                                 // OnayBekliyor → kullanıcı aksiyonu bekleniyor
+
+    // Plan OnayBekliyor durumunda ve kullanıcı aksiyonu bekleniyor
+    return false;
   }
 
   get isPlanGenerating(): boolean {
     const d = this.data;
-    if (!d?.konuAnalizi || d.konuAnalizi.durum === 'Hata') return false;
-    return !d.guncelPlan || d.guncelPlan.durum === 'Olusturuluyor' || d.guncelPlan.durum === 'Taslak';
+    if (!d) return true;
+    if (this.isDrafting) return true;
+
+    // Konu analizi henüz tamamlanmadıysa
+    if (!d.konuAnalizi || d.konuAnalizi.durum === 'Isleniyor' || d.konuAnalizi.durum === 'Bekliyor') {
+      return true;
+    }
+
+    // Analiz başarısız olduysa ve plan da yoksa
+    if (d.konuAnalizi.durum === 'Hata' && !d.guncelPlan) return false;
+
+    // Plan henüz kaydedilmediyse veya oluşturuluyorsa / hiç bölüm yoksa
+    return !d.guncelPlan || d.guncelPlan.durum === 'Olusturuluyor' || d.guncelPlan.durum === 'Taslak' || (d.guncelPlan.seriBolumler?.length ?? 0) === 0;
   }
 
   get hasError(): boolean {
     const d = this.data;
-    return d?.durum === 'Hata' || d?.konuAnalizi?.durum === 'Hata' || d?.guncelPlan?.durum === 'Hata';
+    if (!d) return false;
+
+    // Eğer güncel planda en az 1 bölüm başarıyla üretilmişse KESİNLİKLE planlama hatası değildir!
+    if (d.guncelPlan && (d.guncelPlan.seriBolumler?.length ?? 0) > 0) {
+      return false;
+    }
+
+    // Eğer bir işlem aktif olarak sürüyorsa hata ekranı açma
+    if (this.isDrafting || this.isPlanGenerating || this.isStillProcessing()) {
+      return false;
+    }
+
+    // Sadece hiçbir geçerli plan yokken ve işlem kalıcı hataya düştüğünde
+    return d.durum === 'Hata' || d.konuAnalizi?.durum === 'Hata' || d.guncelPlan?.durum === 'Hata';
   }
 
   get canApprove(): boolean {
@@ -130,7 +239,7 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     this.isPolling = true;
     this.pollInterval = setInterval(() => {
       this.loadData();
-    }, 5000);
+    }, 4000);
   }
 
   stopPolling() {
@@ -142,32 +251,38 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
   }
 
   requestNewDraft() {
-    if (!this.data) return;
+    if (!this.data || this.isDrafting) return;
     this.isDrafting = true;
+    this.currentStatusMessage = 'Yeni plan taslağı isteniyor...';
     this.apiService.generatePlanDraft(this.contentRequestId, this.draftOptions).subscribe({
       next: () => {
         this.startPolling();
+        this.loadData();
       },
       error: (err) => {
         console.error('Taslak isteği başarısız', err);
         this.isDrafting = false;
-        alert('Yeni taslak isteği başarısız oldu.');
+        alert('Yeni taslak isteği başarısız oldu: ' + (err.error?.mesaj || err.message));
       }
     });
   }
 
   approvePlan() {
-    if (!this.data?.guncelPlan) return;
-    if (!confirm('Bu planı onaylıyor musunuz? Onayladıktan sonra planlama aşaması kapanır ve ilk videonun üretimi başlar.')) return;
+    if (!this.data?.guncelPlan || this.isApproving) return;
+    if (!confirm('Bu planı onaylıyor musunuz? Onayladıktan sonra planlama aşaması kapanır ve bölümlerin üretimi başlar.')) return;
 
-    this.apiService.approvePlan(this.contentRequestId, this.data.guncelPlan.planNo).subscribe({
+    this.isApproving = true;
+    this.apiService.approvePlan(this.contentRequestId, this.data.guncelPlan.planNo, this.onayTalimati).subscribe({
       next: () => {
+        this.isApproving = false;
         alert('Plan onaylandı, üretim başladı!');
-        // Bölüm izleme sayfasına yönlendir veya burada kal
+        this.startPolling();
         this.loadData();
       },
       error: (err) => {
-        alert('Plan onaylanırken hata oluştu.');
+        this.isApproving = false;
+        console.error('Plan onaylama hatası', err);
+        alert('Plan onaylanırken hata oluştu: ' + (err.error?.mesaj || err.message));
       }
     });
   }

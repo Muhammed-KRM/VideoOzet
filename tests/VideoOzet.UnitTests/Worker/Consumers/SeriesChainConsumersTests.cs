@@ -268,7 +268,7 @@ public class SeriesChainConsumersTests
 
         var mockSynthesis = new Mock<ISynthesisProvider>();
         mockSynthesis.Setup(s => s.GenerateSeriesVideoContentAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"{
                 ""ArastirmaOzeti"": ""Temiz kod araştırma özeti"",
                 ""VideoPlani"": ""1. Giriş\n2. İsimlendirme"",

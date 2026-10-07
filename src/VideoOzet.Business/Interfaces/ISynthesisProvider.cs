@@ -61,7 +61,7 @@ public interface ISynthesisProvider
     /// Çoklu video serisindeki belirli bir bölümün içeriğini ve sonraki videoya devir notunu üretir.
     /// JSON formatında döner.
     /// </summary>
-    Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, CancellationToken ct = default);
+    Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, string userInstructions = "", CancellationToken ct = default);
 
     /// <summary>
     /// Kaynak metninden (video veya doküman) anlatılan temel konuları ve tahmini süreleri çıkarır (Map adımı).

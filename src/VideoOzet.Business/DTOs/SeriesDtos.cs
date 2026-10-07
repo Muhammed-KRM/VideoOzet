@@ -26,3 +26,9 @@ public class EpisodeRevisionDto
     public string Talimat { get; set; } = string.Empty;
     public string HedefAlan { get; set; } = string.Empty;
 }
+
+public class ApprovePlanDto
+{
+    public string? Talimat { get; set; }
+}
+

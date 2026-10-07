@@ -217,9 +217,13 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         return await CallLlmAsync(prompt, ct);
     }
 
-    public async Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, CancellationToken ct = default)
+    public async Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, string userInstructions = "", CancellationToken ct = default)
     {
-        var prompt = string.Format(PromptTemplates.SeriesVideoGenerationPrompt, bolumBasligi, bolumKonulariJson, oncekiVideoDevirNotuJson, targetAudience, contextData);
+        var instructions = string.IsNullOrWhiteSpace(userInstructions)
+            ? "Özel bir talimat belirtilmedi. Standart format ve kurallara tam sadık kalarak üret."
+            : userInstructions;
+
+        var prompt = string.Format(PromptTemplates.SeriesVideoGenerationPrompt, bolumBasligi, bolumKonulariJson, oncekiVideoDevirNotuJson, targetAudience, contextData, instructions);
         return await CallLlmAsync(prompt, ct);
     }
 

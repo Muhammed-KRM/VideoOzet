@@ -86,10 +86,13 @@ public static class PromptTemplates
         {4}
         
         ÇOK KRİTİK VE KESİN KURALLAR:
-        1. HEDEF ODAKLI DÜZENLEME: Yalnızca ve sadece kullanıcının revize talimatında açıkça belirttiği kısımları (ekleme, çıkarma, ayrıntılandırma, kısaltma, örnek verme vb.) güncelle.
-        2. DEĞİNİLMEYEN KISIMLARA KESİNLİKLE DOKUNMA: Kullanıcının değiştirilmesini istemediği hiçbir bölümün başlıklarını, maddelerini, tonunu veya metnini BOZMA, SİLME veya KEYFİ OLARAK DEĞİŞTİRME. O kısımları aynen koru.
-        3. AKICILIK VE TUTARLILIK: Yapılan ekleme/değişiklikler dokümanın genel akışına, diline ve Markdown formatına kusursuz şekilde uyum sağlamalıdır.
-        4. EKSİKSİZ ÇIKTI: Yanıtında sadece değişen parçayı değil; değişmeyen kısımları aynen muhafaza ederek revize edilmiş TÜM DOKÜMANI baştan sona eksiksiz Markdown formatında döndür.
+        1. HEDEF ODAKLI DÜZENLEME: Yalnızca ve sadece kullanıcının revize talimatında açıkça belirttiği kısımları (ekleme, çıkarma, ayrıntılandırma, kısaltma, örnek verme, ton vb.) güncelle.
+        2. DOKÜMAN TÜRÜNE VE AMACINA KESİNLİKLE SADIK KAL:
+           - Eğer revize edilen doküman "Video Planı" ise: Sahne bazlı [Görsel & Edit Yönergesi] (kamera, B-roll, ekran grafikleri, ses) ve [Prompter Metni (Aynen Okunacak)] (sunucunun kelimesi kelimesine okuyacağı tam konuşma metni; ASLA özet veya taslak değil!) yapısını koru ve talimata göre geliştir.
+           - Eğer revize edilen doküman "Araştırma Özeti" ise: Bu doküman bir video planı veya prompter konuşma metni DEĞİLDİR; konunun derinlemesine akademik ve kavramsal araştırma özetidir. Sakın araştırma özetini prompter veya sahne planına dönüştürme!
+        3. DEĞİNİLMEYEN KISIMLARA KESİNLİKLE DOKUNMA: Kullanıcının değiştirilmesini istemediği hiçbir bölümün başlıklarını, maddelerini, tonunu veya metnini BOZMA, SİLME veya KEYFİ OLARAK DEĞİŞTİRME. O kısımları aynen koru.
+        4. AKICILIK VE TUTARLILIK: Yapılan ekleme/değişiklikler dokümanın genel akışına, diline ve Markdown formatına kusursuz şekilde uyum sağlamalıdır.
+        5. EKSİKSİZ ÇIKTI: Yanıtında sadece değişen parçayı değil; değişmeyen kısımları aynen muhafaza ederek revize edilmiş TÜM DOKÜMANI baştan sona eksiksiz Markdown formatında döndür.
         """;
 
     public const string ReQcVerificationPrompt = """
@@ -187,6 +190,9 @@ public static class PromptTemplates
         HEDEF KİTLE:
         {3}
         
+        KULLANICI TALİMATLARI / ÖZEL DİREKTİFLER:
+        {5}
+
         KAYNAKLAR:
         {4}
 
@@ -194,13 +200,37 @@ public static class PromptTemplates
         1. SADECE VE SADECE verilen KAYNAKLARDAKİ bilgileri, kavramları, argümanları ve analizleri kullan.
         2. Kaynaklarda yer almayan harici/genel teorileri veya konuları uydurma ya da ekleme.
         3. Kaynak metinlerde geçen özel kavramları, tanımları, yazar/hoca atıflarını ve örnekleri aynen ve detaylıca aktar.
-        4. Araştırma özeti ve video planı doğrudan kaynakların içeriğini öğretici ve yapılandırılmış şekilde sunmalıdır.
+
+        İÇERİK YAPISI VE FORMAT ZORUNLULUKLARI:
+        
+        A) "ArastirmaOzeti" (Markdown):
+           - Bölüm konusunun arka planındaki akademik, felsefi, kavramsal ve analitik bilgileri eksiksiz içeren kaynak tabanlı kapsamlı bir araştırma özetidir.
+           - Kesinlikle kamera yönergesi, sahne planı veya prompter konuşma metni İÇERMEMELİ; konunun derinlemesine referans dokümanı olmalıdır.
+        
+        B) "VideoPlani" (Markdown) - EN KRİTİK BÖLÜM:
+           Bu plan, sunucu ve video kurgucusunun doğrudan stüdyoda/montajda kullanacağı profesyonel bir çekim ve kurgu planıdır. Girişten sonuca kadar sahneler halinde (zaman aralıklarıyla) yapılandırılmalıdır.
+           Her sahne/bölüm KESİNLİKLE şu İKİ AYRI BÖLÜMDEN oluşmalıdır:
+           
+           1. [Görsel & Edit Yönergesi] (Kurgu ve Görsel Yönetmeni İçin):
+              - Zaman Aralığı: (Örn: 00:00 - 02:30)
+              - Kamera Açısı & Kadraj: (Örn: Sunucu merkezde, göğüs planı / Medium Close-Up, loş derinlikli fon)
+              - Görsel, B-Roll ve Kurgu: (Ekrana gelecek arşiv görüntüleri, fotoğraflar, simülasyonlar, animasyonlar, borsa/metropol görüntüleri, split-screen vb.)
+              - Metin Grafiği (On-Screen Text): (Ekranda belirecek alt yazı / Lower Third, kavram başlıkları, infografik maddeleri veya alıntılar)
+              - Müzik & Ses Efekti: (Müziğin tonu, tempo, geçiş ses efektleri (whoosh, daktilo, bas vuruş vb.))
+           
+           2. [Prompter Metni (Aynen Okunacak)] (Sunucu İçin):
+              - Sunucunun kameraya karşı KELİMESİ KELİMESİNE / AYNEN OKUYACAĞI tam konuşma metni.
+              - KESİNLİKLE özet, madde işaretli not, taslak veya "burada şundan bahsedilir" şeklinde özetleme OLMAYACAK!
+              - Tıpkı profesyonel bir sunucunun prompter cihazından doğrudan okuduğu gibi akıcı, etkileyici, doğal konuşma diliyle ve eksiksiz tam metin olarak yazılmalıdır.
+
+        C) "DevirNotu":
+           - Bir sonraki bölüme aktarılması gereken kilit kavram veya geçiş notu.
 
         Lütfen SADECE geçerli bir JSON objesi döndür:
         {{
-            "ArastirmaOzeti": "Bu bölümün detaylı araştırma özeti (Markdown destekli)",
-            "VideoPlani": "Bu bölümün video yapısı/planı (Markdown destekli)",
-            "DevirNotu": "Eğer varsa bir sonraki videoda bahsedilmesi veya atıfta bulunulması gereken kısa not (yoksa boş bırak)"
+            "ArastirmaOzeti": "Detaylı akademik araştırma özeti markdown metni",
+            "VideoPlani": "Detaylı görsel edit yönergeleri ve aynen okunacak tam prompter metinlerini içeren video planı markdown metni",
+            "DevirNotu": "Varsa sonraki bölüme devir notu"
         }}
         """;
 

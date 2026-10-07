@@ -122,6 +122,7 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 SeriBolumId = bolum.Id,
                 RevizyonNo = yeniRevizyonNo,
                 Talimat = msg.Talimat,
+                HedefAlan = msg.HedefAlan,
                 ArastirmaOzeti = yeniOzet,
                 VideoPlani = yeniPlan,
                 DevirNotuJson = sonRevizyon?.DevirNotuJson ?? "",
