@@ -31,16 +31,17 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
+        var baseUrl = _configuration["LocalWhisper:BaseUrl"] ?? "http://127.0.0.1:5005";
         try
         {
-            var baseUrl = _configuration["LocalWhisper:BaseUrl"] ?? "http://127.0.0.1:5005";
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(2));
             var resp = await _httpClient.GetAsync($"{baseUrl}/health", cts.Token);
             return resp.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning("Local Faster-Whisper health check failed ({Message}) at {BaseUrl}", ex.Message, baseUrl);
             return false;
         }
     }
@@ -79,7 +80,8 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
             {
                 file_path = tempFile,
                 language = "tr",
-                beam_size = 5
+                beam_size = 1,
+                stream = true
             };
 
             var jsonContent = new StringContent(
@@ -88,35 +90,77 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                 "application/json"
             );
 
-            // Large audio transcription can take up to several minutes
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromMinutes(10));
+            cts.CancelAfter(TimeSpan.FromMinutes(30));
 
-            var response = await _httpClient.PostAsync($"{baseUrl}/transcribe", jsonContent, cts.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/transcribe")
+            {
+                Content = jsonContent
+            };
+
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             response.EnsureSuccessStatusCode();
 
-            progressCallback?.Invoke(3, 4);
-            var responseJson = await response.Content.ReadAsStringAsync(cts.Token);
-            using var doc = JsonDocument.Parse(responseJson);
+            using var responseStream = await response.Content.ReadAsStreamAsync(cts.Token);
+            using var reader = new StreamReader(responseStream, Encoding.UTF8);
 
-            if (doc.RootElement.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
+            string? finalText = null;
+            double finalDuration = 0;
+            double finalElapsed = 0;
+            string finalDevice = "unknown";
+
+            string? line;
+            while ((line = await reader.ReadLineAsync(cts.Token)) != null)
             {
-                var text = doc.RootElement.GetProperty("text").GetString() ?? string.Empty;
-                var duration = doc.RootElement.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
-                var elapsed = doc.RootElement.TryGetProperty("elapsed_seconds", out var elProp) ? elProp.GetDouble() : 0;
-                var device = doc.RootElement.TryGetProperty("device", out var devProp) ? devProp.GetString() : "unknown";
-
-                _logger.LogInformation(
-                    "Local Faster-Whisper succeeded: {Length} chars transcribed on [{Device}] in {Elapsed:F1}s (audio duration: {Duration:F1}s).",
-                    text.Length, device, elapsed, duration
-                );
-
-                progressCallback?.Invoke(4, 4);
-                return text;
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("type", out var typeProp))
+                    {
+                        var eventType = typeProp.GetString();
+                        if (eventType == "progress")
+                        {
+                            var curSec = root.GetProperty("current_sec").GetInt32();
+                            var totSec = root.GetProperty("total_sec").GetInt32();
+                            progressCallback?.Invoke(curSec, totSec);
+                        }
+                        else if (eventType == "done")
+                        {
+                            if (root.TryGetProperty("success", out var succ) && succ.GetBoolean())
+                            {
+                                finalText = root.GetProperty("text").GetString() ?? string.Empty;
+                                finalDuration = root.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
+                                finalElapsed = root.TryGetProperty("elapsed_seconds", out var elProp) ? elProp.GetDouble() : 0;
+                                finalDevice = root.TryGetProperty("device", out var devProp) ? devProp.GetString() ?? "unknown" : "unknown";
+                            }
+                            else
+                            {
+                                var errMsg = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : "Unknown error";
+                                throw new InvalidOperationException($"Local Faster-Whisper reported error: {errMsg}");
+                            }
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore malformed partial lines
+                }
             }
 
-            var errMsg = doc.RootElement.TryGetProperty("error", out var errProp) ? errProp.GetString() : "Unknown error";
-            throw new InvalidOperationException($"Local Faster-Whisper reported error: {errMsg}");
+            if (finalText != null)
+            {
+                _logger.LogInformation(
+                    "Local Faster-Whisper succeeded: {Length} chars transcribed on [{Device}] in {Elapsed:F1}s (audio duration: {Duration:F1}s).",
+                    finalText.Length, finalDevice, finalElapsed, finalDuration
+                );
+
+                progressCallback?.Invoke((int)Math.Round(finalDuration), (int)Math.Round(finalDuration));
+                return finalText;
+            }
+
+            throw new InvalidOperationException("Local Faster-Whisper closed connection without a completed transcription result.");
         }
         finally
         {

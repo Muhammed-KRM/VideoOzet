@@ -234,7 +234,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     const cached = this.videoProgressMap[v.id];
     const mevcut = v.mevcutAdim ?? cached?.mevcutAdim;
     const toplam = v.toplamAdim ?? cached?.toplamAdim;
-    if (mevcut && toplam) {
+    if (mevcut !== undefined && toplam !== undefined && toplam > 0) {
       return `${mevcut}/${toplam} Parça (%${this.getVideoPercentage(v)})`;
     }
     return `%${this.getVideoPercentage(v)}`;

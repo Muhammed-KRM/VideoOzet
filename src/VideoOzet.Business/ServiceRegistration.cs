@@ -40,7 +40,7 @@ public static class ServiceRegistration
         });
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.LocalFasterWhisperSttProvider>(client =>
         {
-            client.Timeout = TimeSpan.FromMinutes(15);
+            client.Timeout = TimeSpan.FromMinutes(30);
         });
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GeminiAudioSttProvider>(client =>
         {

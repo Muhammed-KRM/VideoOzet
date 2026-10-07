@@ -13,6 +13,7 @@ echo.
 echo Calisan konsol pencereleri kapatiliyor...
 taskkill /FI "WINDOWTITLE eq VideoOzet-API*" /F /T > nul 2>&1
 taskkill /FI "WINDOWTITLE eq VideoOzet-Worker*" /F /T > nul 2>&1
+taskkill /FI "WINDOWTITLE eq VideoOzet-Whisper*" /F /T > nul 2>&1
 taskkill /FI "WINDOWTITLE eq VideoOzet-UI*" /F /T > nul 2>&1
 
 echo.

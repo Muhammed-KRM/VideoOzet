@@ -120,13 +120,15 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 progressiveProvider.OnProgress = (done, total) =>
                 {
                     var percent = total > 0 ? (int)Math.Round((double)done / total * 100) : 0;
+                    string progressMsg = $"Transkript çıkarılıyor: {done}/{total} parça (%{percent})";
+
                     _ = _publishEndpoint.Publish(new PipelineProgressEvent
                     {
                         VideoId = message.VideoId,
                         EgitimId = video.EgitimId,
                         Asama = "STT",
                         Durum = VideoIslemDurumu.SttBasladi.ToString(),
-                        Mesaj = $"Transkript çıkarılıyor: {done}/{total} parça (%{percent})",
+                        Mesaj = progressMsg,
                         Yuzde = percent,
                         MevcutAdim = done,
                         ToplamAdim = total

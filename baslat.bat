@@ -41,8 +41,9 @@ echo [3.8/4] Veritabani migrationlari uygulaniyor...
 dotnet ef database update --project "%~dp0src\VideoOzet.Data" --startup-project "%~dp0src\VideoOzet.API" --no-build
 
 echo.
-echo [4/4] API, Worker ve Frontend pencereleri aciliyor...
+echo [4/4] API, Worker, Whisper ve Frontend pencereleri aciliyor...
 
+start "VideoOzet-Whisper" cmd /k "cd /d "%~dp0" && python -u scripts/local_whisper_service.py --port 5005"
 start "VideoOzet-API" cmd /k "cd /d "%~dp0src\VideoOzet.API" && dotnet run --no-build"
 start "VideoOzet-Worker" cmd /k "cd /d "%~dp0src\VideoOzet.Worker" && dotnet run --no-build"
 start "VideoOzet-UI" cmd /k "cd /d "%~dp0src\VideoOzet.UI" && npm start"
@@ -58,6 +59,7 @@ echo ========================================================
 echo Sistem Basariyla Baslatildi!
 echo Arayuz:    http://localhost:4201
 echo Swagger:   http://localhost:5002/swagger
+echo Whisper:   http://localhost:5005/health
 echo MinIO:     http://localhost:9003 (minioadmin / minioadmin)
 echo RabbitMQ:  http://localhost:15673 (guest / guest)
 echo API Key:   SUPER_SECRET_API_KEY_123!
