@@ -21,8 +21,16 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
     public ClaudeSynthesisProvider(
         ILogger<ClaudeSynthesisProvider> logger,
+        IConfiguration configuration)
+        : this(logger, configuration, null)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public ClaudeSynthesisProvider(
+        ILogger<ClaudeSynthesisProvider> logger,
         IConfiguration configuration,
-        IAiProviderSettingsService? settingsService = null)
+        IAiProviderSettingsService? settingsService)
     {
         _logger = logger;
         _configuration = configuration;

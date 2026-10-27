@@ -16,7 +16,7 @@ public record AiProviderSettingsDto
     public string OpenRouterBaseUrl { get; init; } = "https://openrouter.ai/api/v1";
 
     /// <summary>OpenRouter Modeli</summary>
-    public string OpenRouterModel { get; init; } = "google/gemini-2.5-flash";
+    public string OpenRouterModel { get; set; } = "google/gemini-2.5-flash";
 
     /// <summary>Antigravity Proxy URL</summary>
     public string AntigravityProxyUrl { get; init; } = "http://localhost:8045/v1";

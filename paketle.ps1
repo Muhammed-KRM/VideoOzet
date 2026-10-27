@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Path $AppDir | Out-Null
 # 2. Angular UI Production Build
 Write-Host "[2/5] Angular Arayuzu (VideoOzet.UI) derleniyor..." -ForegroundColor Yellow
 & npm.cmd --prefix (Join-Path $RootDir "src\VideoOzet.UI") run build
+if ($LASTEXITCODE -ne 0) { throw "Angular UI derlemesi basarisiz oldu!" }
 
 # 3. Derlenen Angular dosyalarını API'nin wwwroot klasörüne kopyala
 Write-Host "[3/5] Arayuz dosyalari API icine gomuluyor (wwwroot)..." -ForegroundColor Yellow
@@ -40,6 +41,7 @@ dotnet publish (Join-Path $RootDir "src\VideoOzet.API\VideoOzet.API.csproj") `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $AppDir
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish basarisiz oldu!" }
 
 # Geliştirme ayarlarını sil ve bağımsız masaüstü (Standalone) appsettings.json oluştur
 $DevConfig = Join-Path $AppDir "appsettings.Development.json"

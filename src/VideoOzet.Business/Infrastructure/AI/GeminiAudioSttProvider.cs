@@ -30,8 +30,17 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
     public GeminiAudioSttProvider(
         HttpClient httpClient,
         IConfiguration configuration,
+        ILogger<GeminiAudioSttProvider> logger)
+        : this(httpClient, configuration, logger, null)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public GeminiAudioSttProvider(
+        HttpClient httpClient,
+        IConfiguration configuration,
         ILogger<GeminiAudioSttProvider> logger,
-        IAiProviderSettingsService? settingsService = null)
+        IAiProviderSettingsService? settingsService)
     {
         _httpClient = httpClient;
         _configuration = configuration;
@@ -170,8 +179,10 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
 
             var transcriptParts = new string[chunkFiles.Count];
             using var semaphore = new SemaphoreSlim(6, 6);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var tasks = new List<Task>();
             var completedChunks = 0;
+            Exception? firstFatalError = null;
 
             for (int i = 0; i < chunkFiles.Count; i++)
             {
@@ -180,21 +191,47 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
 
                 tasks.Add(Task.Run(async () =>
                 {
-                    await semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        var chunkBytes = await File.ReadAllBytesAsync(chunkFile, cancellationToken);
+                        await semaphore.WaitAsync(linkedCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        if (linkedCts.IsCancellationRequested)
+                            return;
+
+                        var chunkBytes = await File.ReadAllBytesAsync(chunkFile, linkedCts.Token);
                         _logger.LogInformation("Transcribing chunk {Index}/{Total} ({SizeKb} KB)...", index + 1, chunkFiles.Count, chunkBytes.Length / 1024);
 
-                        var chunkText = await TranscribeChunkWithRetryAsync(chunkBytes, "mp3", apiKeys, cancellationToken);
+                        var chunkText = await TranscribeChunkWithRetryAsync(chunkBytes, "mp3", apiKeys, linkedCts.Token);
                         if (!string.IsNullOrWhiteSpace(chunkText))
                         {
                             transcriptParts[index] = chunkText.Trim();
                         }
                     }
+                    catch (OperationCanceledException) when (firstFatalError != null)
+                    {
+                        // Cancelled due to fatal error on another chunk
+                    }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to transcribe chunk {Index}/{Total}. Continuing with next chunk.", index + 1, chunkFiles.Count);
+                        Interlocked.CompareExchange(ref firstFatalError, ex, null);
+                        _logger.LogWarning(ex, "Failed to transcribe chunk {Index}/{Total}.", index + 1, chunkFiles.Count);
+
+                        // Bağlantı reddedildi veya 401/403 yetki hatası varsa diğer parçaları boşuna deneme, hemen durdur
+                        if (ex is HttpRequestException ||
+                            ex.Message.Contains("401") ||
+                            ex.Message.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase) ||
+                            ex.Message.Contains("403") ||
+                            ex.Message.Contains("402"))
+                        {
+                            try { linkedCts.Cancel(); } catch { }
+                        }
                     }
                     finally
                     {
@@ -208,6 +245,11 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
             await Task.WhenAll(tasks);
 
             var fullTranscript = string.Join(" ", transcriptParts.Where(p => !string.IsNullOrWhiteSpace(p))).Trim();
+            if (string.IsNullOrWhiteSpace(fullTranscript) && firstFatalError != null)
+            {
+                throw new Exception($"Ses deşifre (STT) hatası: {firstFatalError.Message}", firstFatalError);
+            }
+
             _logger.LogInformation("Chunked transcription completed. Total chunks: {Total}, Result characters: {Length}", chunkFiles.Count, fullTranscript.Length);
             return fullTranscript;
         }
@@ -245,7 +287,7 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
 
         var effectiveModel = isOpenRouter
             ? (settings!.OpenRouterModel.Contains("gemini", StringComparison.OrdinalIgnoreCase)
-                ? settings.OpenRouterModel
+                ? settings.OpenRouterModel.Replace(":batch", "", StringComparison.OrdinalIgnoreCase).TrimStart('~')
                 : "google/gemini-2.5-flash")
             : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
                 ? settings.AntigravityProxyModel
@@ -256,6 +298,9 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
             : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
                 ? settings.AntigravityProxyUrl.TrimEnd('/')
                 : "http://localhost:8045/v1");
+
+        _logger.LogInformation("STT Request -> Provider: {Provider}, Endpoint: {BaseUrl}/chat/completions, Model: {Model}",
+            isOpenRouter ? "OpenRouter" : "AntigravityProxy", baseUrl, effectiveModel);
 
         var audioBase64 = Convert.ToBase64String(audioBytes);
         var promptText = "Aşağıdaki ses kaydını dikkatle dinle ve içindeki tüm konuşmaları eksiksiz, kelimesi kelimesine Türkçe olarak yazıya dök (deşifre et). " +

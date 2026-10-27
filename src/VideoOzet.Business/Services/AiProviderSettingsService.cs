@@ -49,6 +49,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                 var cached = JsonSerializer.Deserialize<AiProviderSettingsDto>(json);
                 if (cached is not null)
                 {
+                    cached.OpenRouterModel = NormalizeModelId(cached.OpenRouterModel);
                     _memoryFallback = cached;
                     return cached;
                 }
@@ -70,6 +71,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                     var fromFile = JsonSerializer.Deserialize<AiProviderSettingsDto>(fileJson);
                     if (fromFile is not null)
                     {
+                        fromFile.OpenRouterModel = NormalizeModelId(fromFile.OpenRouterModel);
                         _memoryFallback = fromFile;
                         return fromFile;
                     }
@@ -306,7 +308,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                     foreach (var item in dataArr.EnumerateArray())
                     {
                         var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
-                        if (string.IsNullOrWhiteSpace(id)) continue;
+                        if (string.IsNullOrWhiteSpace(id) || id.EndsWith(":batch", StringComparison.OrdinalIgnoreCase) || id.StartsWith("~")) continue;
 
                         var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? id : id;
                         var contextLen = item.TryGetProperty("context_length", out var ctxProp) && ctxProp.ValueKind == JsonValueKind.Number
@@ -354,7 +356,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
     private static string NormalizeModelId(string rawModel)
     {
-        var trimmed = rawModel.Trim();
+        var trimmed = rawModel.Trim().TrimStart('~').Replace(":batch", "", StringComparison.OrdinalIgnoreCase);
         if (trimmed.StartsWith("https://openrouter.ai/", StringComparison.OrdinalIgnoreCase))
         {
             var uri = new Uri(trimmed);
@@ -362,7 +364,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             if (path.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
                 path = path.Substring("models/".Length);
             if (!string.IsNullOrWhiteSpace(path))
-                return path;
+                return path.Replace(":batch", "", StringComparison.OrdinalIgnoreCase);
         }
         return trimmed;
     }

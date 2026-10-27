@@ -48,8 +48,16 @@ public class GeminiSummarizer : IGeminiProvider
 
     public GeminiSummarizer(
         IConfiguration configuration,
+        ILogger<GeminiSummarizer> logger)
+        : this(configuration, logger, null)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public GeminiSummarizer(
+        IConfiguration configuration,
         ILogger<GeminiSummarizer> logger,
-        IAiProviderSettingsService? settingsService = null)
+        IAiProviderSettingsService? settingsService)
     {
         _configuration = configuration;
         _logger = logger;
