@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VideoOzet.Business\VideoOzet.Business.csproj" />
+    <ProjectReference Include="..\VideoOzet.Worker\VideoOzet.Worker.csproj" />
   </ItemGroup>
 
 </Project>

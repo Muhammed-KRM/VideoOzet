@@ -79,8 +79,31 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Ollama embedding hatası (Model: {Model}): {Message}", model, ex.Message);
-            throw;
+            _logger.LogWarning(ex, "Ollama servisine ulaşılamadı (Model: {Model}), yerel metin vektör yedeği kullanılıyor: {Message}", model, ex.Message);
+            return texts.Select(CreateLocalFallbackEmbedding).ToList();
         }
+    }
+
+    private static float[] CreateLocalFallbackEmbedding(string text)
+    {
+        var vec = new float[1024];
+        if (string.IsNullOrWhiteSpace(text)) return vec;
+
+        var tokens = text.ToLowerInvariant()
+            .Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ';', ':', '!', '?', '(', ')', '[', ']', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var token in tokens)
+        {
+            int hash = Math.Abs(token.GetHashCode());
+            vec[hash % 1024] += 1f;
+        }
+
+        double norm = Math.Sqrt(vec.Sum(v => (double)v * v));
+        if (norm > 0)
+        {
+            for (int i = 0; i < vec.Length; i++)
+                vec[i] = (float)(vec[i] / norm);
+        }
+        return vec;
     }
 }

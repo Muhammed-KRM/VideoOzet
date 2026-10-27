@@ -52,6 +52,58 @@ public class AppDbContext : DbContext
         {
             modelBuilder.Ignore<VideoChunkDocument>();
         }
+        else if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            ConfigureSqliteCompatibility(modelBuilder);
+        }
+    }
+
+    private static void ConfigureSqliteCompatibility(ModelBuilder modelBuilder)
+    {
+        var chunkEntity = modelBuilder.Entity<VideoChunkDocument>();
+        chunkEntity.Property(x => x.Embedding)
+            .HasColumnType("TEXT")
+            .HasConversion(
+                v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v.ToArray(), (System.Text.Json.JsonSerializerOptions?)null),
+                s => string.IsNullOrWhiteSpace(s) ? null : new Pgvector.Vector(System.Text.Json.JsonSerializer.Deserialize<float[]>(s) ?? Array.Empty<float>()));
+
+        var chunkType = modelBuilder.Model.FindEntityType(typeof(VideoChunkDocument));
+        if (chunkType != null)
+        {
+            var embProp = chunkType.FindProperty(nameof(VideoChunkDocument.Embedding));
+            if (embProp != null)
+            {
+                var indexesToRemove = chunkType.GetIndexes().Where(ix => ix.Properties.Contains(embProp)).ToList();
+                foreach (var ix in indexesToRemove)
+                {
+                    chunkType.RemoveIndex(ix);
+                }
+            }
+        }
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                var colType = property.GetColumnType();
+                if (!string.IsNullOrEmpty(colType) &&
+                    (colType.Contains("jsonb", StringComparison.OrdinalIgnoreCase) ||
+                     colType.Contains("timestamptz", StringComparison.OrdinalIgnoreCase) ||
+                     colType.Contains("interval", StringComparison.OrdinalIgnoreCase) ||
+                     colType.Contains("vector", StringComparison.OrdinalIgnoreCase)))
+                {
+                    property.SetColumnType(null);
+                }
+
+                var defaultSql = property.GetDefaultValueSql();
+                if (!string.IsNullOrEmpty(defaultSql) &&
+                    (defaultSql.Contains("gen_random_uuid", StringComparison.OrdinalIgnoreCase) ||
+                     defaultSql.Contains("now()", StringComparison.OrdinalIgnoreCase)))
+                {
+                    property.SetDefaultValueSql(null);
+                }
+            }
+        }
     }
 
     /// <summary>

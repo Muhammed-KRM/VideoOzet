@@ -138,11 +138,25 @@ public class SourceContextBuilder : ISourceContextBuilder
                     if (emb != null && emb.Length > 0 && emb.Any(v => v != 0))
                     {
                         var vec = new Pgvector.Vector(emb);
-                        var chunks = await _dbContext.VideoChunkDocuments
-                            .Where(c => c.EgitimId == egitimId)
-                            .OrderBy(c => c.Embedding!.CosineDistance(vec))
-                            .Take(10)
-                            .ToListAsync(ct);
+                        List<VideoChunkDocument> chunks;
+                        if (_dbContext.Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
+                        {
+                            chunks = await _dbContext.VideoChunkDocuments
+                                .Where(c => c.EgitimId == egitimId)
+                                .OrderBy(c => c.Embedding!.CosineDistance(vec))
+                                .Take(10)
+                                .ToListAsync(ct);
+                        }
+                        else
+                        {
+                            var allChunks = await _dbContext.VideoChunkDocuments
+                                .Where(c => c.EgitimId == egitimId)
+                                .ToListAsync(ct);
+                            chunks = allChunks
+                                .OrderBy(c => ComputeCosineDistance(c.Embedding?.ToArray(), emb))
+                                .Take(10)
+                                .ToList();
+                        }
 
                         // Mock içerik içermeyenleri filtrele
                         validChunks.AddRange(chunks.Where(c => !IsPlaceholder(c.Text)));
@@ -250,5 +264,20 @@ public class SourceContextBuilder : ISourceContextBuilder
 
         // Eğer verilen chunk ID'ler boş veya placeholder ise, tüm eğitime ait bağlamı yeniden oluştur
         return await BuildContextAsync(egitimId, new[] { "" }, 80000, ct);
+    }
+
+    private static double ComputeCosineDistance(float[]? a, float[]? b)
+    {
+        if (a == null || b == null || a.Length == 0 || b.Length == 0) return 1.0;
+        int len = Math.Min(a.Length, b.Length);
+        double dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < len; i++)
+        {
+            dot += (double)a[i] * b[i];
+            normA += (double)a[i] * a[i];
+            normB += (double)b[i] * b[i];
+        }
+        if (normA <= 0 || normB <= 0) return 1.0;
+        return 1.0 - (dot / (Math.Sqrt(normA) * Math.Sqrt(normB)));
     }
 }

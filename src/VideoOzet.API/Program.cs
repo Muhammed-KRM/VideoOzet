@@ -58,10 +58,32 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(optio
 });
 
 // Register Data and Business layers
-builder.Services.AddDataLayer(builder.Configuration.GetConnectionString("DefaultConnection")!);
+var isStandalone = builder.Configuration.GetValue<bool>("StandaloneMode");
+var connStr = isStandalone
+    ? $"Data Source={Path.Combine(AppContext.BaseDirectory, "videoozet.db")}"
+    : builder.Configuration.GetConnectionString("DefaultConnection")!;
+
+builder.Services.AddDataLayer(connStr);
 builder.Services.AddBusinessLayer(builder.Configuration, x => 
 {
     x.AddConsumer<VideoOzet.API.Consumers.PipelineProgressConsumer>();
+
+    if (isStandalone)
+    {
+        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractTranscriptConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.SummarizeVideoConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.IndexSummaryConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.GenerateContentConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.QualityCheckConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractDokumanTextConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.IndexDokumanConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.TopicAnalysisConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.TopicAnalysisCompletedConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.SeriesPlanConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.SeriesVideoGenerationConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.SeriesVideoGeneratedConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.SeriesVideoRevisionConsumer>();
+    }
 });
 
 // CORS Configuration
@@ -78,13 +100,20 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Otomatik veritabanı migration'ları
+// Otomatik veritabanı oluşturma / migration
 using (var scope = app.Services.CreateScope())
 {
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<VideoOzet.Data.Context.AppDbContext>();
-        db.Database.Migrate();
+        if (db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            db.Database.EnsureCreated();
+        }
+        else
+        {
+            db.Database.Migrate();
+        }
     }
     catch (Exception ex)
     {
@@ -114,6 +143,23 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<VideoOzet.API.Hubs.PipelineHub>("/hubs/pipeline");
 app.MapFallbackToFile("index.html");
+
+if (builder.Configuration.GetValue<bool>("AutoOpenBrowser"))
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        try
+        {
+            var url = app.Urls.FirstOrDefault() ?? "http://localhost:5002";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    });
+}
 
 app.Run();
 

@@ -18,14 +18,23 @@ public static class ServiceRegistration
         
         services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
 
-        // Minio Registration
-        services.AddMinio(configureClient => configureClient
-            .WithEndpoint(configuration["Minio:Endpoint"])
-            .WithCredentials(configuration["Minio:AccessKey"], configuration["Minio:SecretKey"])
-            .WithSSL(configuration.GetValue<bool>("Minio:UseSSL"))
-            .Build());
+        bool isStandalone = configuration.GetValue<bool>("StandaloneMode");
 
-        services.AddScoped<IFileStorageService, MinioFileService>();
+        if (isStandalone)
+        {
+            services.AddScoped<IFileStorageService, LocalFileStorageService>();
+        }
+        else
+        {
+            // Minio Registration
+            services.AddMinio(configureClient => configureClient
+                .WithEndpoint(configuration["Minio:Endpoint"])
+                .WithCredentials(configuration["Minio:AccessKey"], configuration["Minio:SecretKey"])
+                .WithSSL(configuration.GetValue<bool>("Minio:UseSSL"))
+                .Build());
+
+            services.AddScoped<IFileStorageService, MinioFileService>();
+        }
 
         // Services Registration
         services.AddScoped<IEgitimService, EgitimManager>();
@@ -70,42 +79,62 @@ public static class ServiceRegistration
         services.AddHttpClient();
         services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
 
-        // Redis Registration
-        var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6380";
-        var redisOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConn);
-        redisOptions.AbortOnConnectFail = false;
-        services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(StackExchange.Redis.ConnectionMultiplexer.Connect(redisOptions));
-        services.AddSingleton<ICacheService, VideoOzet.Business.Infrastructure.Cache.RedisCacheService>();
+        if (isStandalone)
+        {
+            services.AddSingleton<ICacheService, VideoOzet.Business.Infrastructure.Cache.MemoryCacheService>();
+        }
+        else
+        {
+            // Redis Registration
+            var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6380";
+            var redisOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConn);
+            redisOptions.AbortOnConnectFail = false;
+            services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(StackExchange.Redis.ConnectionMultiplexer.Connect(redisOptions));
+            services.AddSingleton<ICacheService, VideoOzet.Business.Infrastructure.Cache.RedisCacheService>();
+        }
 
-        // MassTransit (RabbitMQ) Registration
+        // MassTransit Registration (InMemory for Standalone Desktop, RabbitMQ for Distributed)
         services.AddMassTransit(x =>
         {
-            configureMassTransit?.Invoke(x); // Allows Worker to add consumers
-            
-            x.UsingRabbitMq((context, cfg) =>
+            configureMassTransit?.Invoke(x); // Allows Worker/API to add consumers
+
+            if (isStandalone)
             {
-                var host = configuration["RabbitMQ:Host"] ?? "localhost";
-                var portStr = configuration["RabbitMQ:Port"];
-                ushort port = ushort.TryParse(portStr, out var p) ? p : (ushort)5673;
-
-                cfg.Host(host, port, "/", h =>
+                x.UsingInMemory((context, cfg) =>
                 {
-                    h.Username(configuration["RabbitMQ:Username"] ?? "guest");
-                    h.Password(configuration["RabbitMQ:Password"] ?? "guest");
+                    cfg.UseMessageRetry(r =>
+                    {
+                        r.Exponential(3, TimeSpan.FromSeconds(3), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(3));
+                        r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>();
+                        r.Ignore<System.Text.Json.JsonException>();
+                    });
+                    cfg.ConfigureEndpoints(context);
                 });
-
-                // Resilience: Automatic exponential retry for TRANSIENT errors only.
-                // Deterministik hatalar (DB durum çakışması, bozuk JSON) tekrar denemeyle düzelmez;
-                // yeniden denemek sadece dakikalar süren LLM çağrılarını baştan çalıştırır.
-                cfg.UseMessageRetry(r =>
+            }
+            else
+            {
+                x.UsingRabbitMq((context, cfg) =>
                 {
-                    r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5));
-                    r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>(); // DbUpdateConcurrencyException dahil
-                    r.Ignore<System.Text.Json.JsonException>();
+                    var host = configuration["RabbitMQ:Host"] ?? "localhost";
+                    var portStr = configuration["RabbitMQ:Port"];
+                    ushort port = ushort.TryParse(portStr, out var p) ? p : (ushort)5673;
+
+                    cfg.Host(host, port, "/", h =>
+                    {
+                        h.Username(configuration["RabbitMQ:Username"] ?? "guest");
+                        h.Password(configuration["RabbitMQ:Password"] ?? "guest");
+                    });
+
+                    cfg.UseMessageRetry(r =>
+                    {
+                        r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5));
+                        r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>();
+                        r.Ignore<System.Text.Json.JsonException>();
+                    });
+                    
+                    cfg.ConfigureEndpoints(context);
                 });
-                
-                cfg.ConfigureEndpoints(context); // Auto-configures consumers
-            });
+            }
         });
 
         return services;

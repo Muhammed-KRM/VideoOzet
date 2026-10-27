@@ -1,3 +1,4 @@
+using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using VideoOzet.Data.Context;
@@ -9,16 +10,20 @@ public static class ServiceRegistration
 {
     public static IServiceCollection AddDataLayer(this IServiceCollection services, string connectionString)
     {
-        // Add DbContext
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString, o => o.UseVector()));
+        {
+            if (connectionString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase) ||
+                connectionString.EndsWith(".db", StringComparison.OrdinalIgnoreCase))
+            {
+                options.UseSqlite(connectionString);
+            }
+            else
+            {
+                options.UseNpgsql(connectionString, o => o.UseVector());
+            }
+        });
 
-        // Add Repositories
         services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
-
-        
-        // Diğer repositoryler eklenecek
-        // services.AddScoped<IMessageRepository, MessageRepository>();
 
         return services;
     }

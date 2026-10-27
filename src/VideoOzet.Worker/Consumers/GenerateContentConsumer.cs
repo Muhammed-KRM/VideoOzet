@@ -209,6 +209,14 @@ public class GenerateContentConsumer : IConsumer<ContentRequestedEvent>
         Pgvector.Vector queryVector, 
         CancellationToken cancellationToken)
     {
+        if (_dbContext.Database.ProviderName != "Npgsql.EntityFrameworkCore.PostgreSQL")
+        {
+            var all = await _dbContext.VideoChunkDocuments
+                .Where(c => c.EgitimId == egitimId)
+                .ToListAsync(cancellationToken);
+            return all.Take(15).ToList();
+        }
+
         return await _dbContext.VideoChunkDocuments
             .Where(c => c.EgitimId == egitimId)
             .OrderBy(c => c.Embedding!.CosineDistance(queryVector))
