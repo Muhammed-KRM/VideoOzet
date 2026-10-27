@@ -14,23 +14,73 @@ public class GeminiSummarizer : IGeminiProvider
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<GeminiSummarizer> _logger;
+    private readonly IAiProviderSettingsService? _settingsService;
     private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     private static int _currentKeyIndex = 0;
 
     // Proxy'ye gönderilen model; kayıtlardaki LlmModel alanı da buradan beslenir.
     private const string ModelName = "gemini-3.8-flash-tiered";
 
-    public string ActiveModelName => ModelName;
+    public string ActiveModelName
+    {
+        get
+        {
+            if (_settingsService != null)
+            {
+                try
+                {
+                    var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
+                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+                    {
+                        return settings.OpenRouterModel;
+                    }
+                    if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyModel))
+                    {
+                        return settings.AntigravityProxyModel;
+                    }
+                }
+                catch { }
+            }
+            return ModelName;
+        }
+    }
 
-    public GeminiSummarizer(IConfiguration configuration, ILogger<GeminiSummarizer> logger)
+    public GeminiSummarizer(
+        IConfiguration configuration,
+        ILogger<GeminiSummarizer> logger,
+        IAiProviderSettingsService? settingsService = null)
     {
         _configuration = configuration;
         _logger = logger;
+        _settingsService = settingsService;
     }
 
     public async Task<string> SummarizeAsync(string transcript, string modelName = "gemini-1.5-flash")
     {
-        var apiKeyStr = _configuration["GEMINI_API_KEY"];
+        AiProviderSettingsDto? settings = null;
+        if (_settingsService != null)
+        {
+            try
+            {
+                settings = await _settingsService.GetSettingsAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI Provider ayarları okunamadı, varsayılan yapılandırma kullanılacak.");
+            }
+        }
+
+        bool isOpenRouter = settings != null &&
+                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
+
+        var apiKeyStr = isOpenRouter
+            ? settings!.OpenRouterApiKey
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+                ? settings.AntigravityProxyKey
+                : _configuration["GEMINI_API_KEY"]);
+
         if (string.IsNullOrEmpty(apiKeyStr))
         {
             _logger.LogWarning("GEMINI_API_KEY is not set. Using mock summary for development.");
@@ -40,6 +90,18 @@ public class GeminiSummarizer : IGeminiProvider
         var apiKeys = apiKeyStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                .Select(k => k.Trim())
                                .ToArray();
+
+        var effectiveModel = isOpenRouter
+            ? (string.IsNullOrWhiteSpace(settings!.OpenRouterModel) ? "google/gemini-2.5-flash" : settings.OpenRouterModel)
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
+                ? settings.AntigravityProxyModel
+                : ModelName);
+
+        var baseUrl = isOpenRouter
+            ? settings!.OpenRouterBaseUrl.TrimEnd('/')
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
+                ? settings.AntigravityProxyUrl.TrimEnd('/')
+                : "http://localhost:8045/v1");
 
         var prompt = $@"
         Sen bir bilgi çıkarma ve rafinasyon uzmanısın. Görevin aşağıdaki metni klasik anlamda 'özetlemek' değil, 'damıtmak'tır. Aşağıdaki kurallara kesinlikle uy: 
@@ -62,7 +124,7 @@ public class GeminiSummarizer : IGeminiProvider
 
         var requestBody = new
         {
-            model = ModelName,
+            model = effectiveModel,
             messages = new[]
             {
                 new { role = "user", content = prompt }
@@ -77,9 +139,14 @@ public class GeminiSummarizer : IGeminiProvider
             var keyToUse = apiKeys[_currentKeyIndex % apiKeys.Length];
             try
             {
-                var requestUrl = "http://localhost:8045/v1/chat/completions";
+                var requestUrl = $"{baseUrl}/chat/completions";
                 using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
                 requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                if (isOpenRouter)
+                {
+                    requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
+                    requestMessage.Headers.Add("X-Title", "VideoOzet");
+                }
                 requestMessage.Content = jsonContent;
                 
                 var response = await _httpClient.SendAsync(requestMessage);

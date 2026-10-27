@@ -19,6 +19,8 @@ public class FfmpegAudioExtractor : IAudioExtractor
         
         var possiblePaths = new[]
         {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ffmpeg", "bin")),
+            Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg", "bin"),
             @"D:\Hoca\ffmpeg\bin",
             @"D:\Hoca\VideoOzet\ffmpeg\bin",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WinGet\Links")

@@ -67,6 +67,8 @@ public static class ServiceRegistration
         services.AddScoped<ISourceContextBuilder, SourceContextBuilder>();
         services.AddScoped<IQualityCheckService, QualityCheckService>();
         services.AddScoped<ILogService, LogManager>();
+        services.AddHttpClient();
+        services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
 
         // Redis Registration
         var redisConn = configuration["Redis:ConnectionString"] ?? "localhost:6380";

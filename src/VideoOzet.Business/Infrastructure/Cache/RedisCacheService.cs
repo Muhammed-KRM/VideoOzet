@@ -31,6 +31,19 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    public async Task SetAsync(string key, string value, TimeSpan expiration)
+    {
+        try
+        {
+            var db = _redis.GetDatabase();
+            await db.StringSetAsync(key, value, expiration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred while setting key {Key} in Redis.", key);
+        }
+    }
+
     public async Task<string?> GetAsync(string key)
     {
         try

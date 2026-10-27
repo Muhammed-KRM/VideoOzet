@@ -17,20 +17,43 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 {
     private readonly ILogger<ClaudeSynthesisProvider> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IAiProviderSettingsService? _settingsService;
 
-    public ClaudeSynthesisProvider(ILogger<ClaudeSynthesisProvider> logger, IConfiguration configuration)
+    public ClaudeSynthesisProvider(
+        ILogger<ClaudeSynthesisProvider> logger,
+        IConfiguration configuration,
+        IAiProviderSettingsService? settingsService = null)
     {
         _logger = logger;
         _configuration = configuration;
+        _settingsService = settingsService;
     }
 
     /// <summary>
-    /// CallLlmAsync ile aynı sağlayıcı seçim sırasını kullanır (Anthropic → Gemini → OpenAI).
+    /// CallLlmAsync ile aynı sağlayıcı seçim sırasını kullanır (Aktif Ayarlar → Anthropic → Gemini → OpenAI).
     /// </summary>
     public string ActiveModelName
     {
         get
         {
+            if (_settingsService != null)
+            {
+                try
+                {
+                    var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
+                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+                    {
+                        return settings.OpenRouterModel;
+                    }
+                    if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyKey))
+                    {
+                        return settings.AntigravityProxyModel;
+                    }
+                }
+                catch { }
+            }
+
             if (!string.IsNullOrWhiteSpace(_configuration["ANTHROPIC_API_KEY"]))
                 return _configuration["CLAUDE_MODEL"] ?? "claude-3-5-sonnet-20240620";
 
@@ -46,6 +69,98 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
     private async Task<string> CallLlmAsync(string prompt, CancellationToken ct)
     {
+        AiProviderSettingsDto? settings = null;
+        if (_settingsService != null)
+        {
+            try
+            {
+                settings = await _settingsService.GetSettingsAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI Provider ayarları okunamadı, varsayılan yapılandırmaya dönülüyor.");
+            }
+        }
+
+        // 1. OpenRouter seçiliyse OpenRouter API'ye gönder
+        if (settings != null &&
+            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+        {
+            var openRouterUrl = $"{settings.OpenRouterBaseUrl.TrimEnd('/')}/chat/completions";
+            var openRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-2.5-flash" : settings.OpenRouterModel;
+            var orKeys = settings.OpenRouterApiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                                  .Select(k => k.Trim())
+                                                  .ToArray();
+
+            Exception? lastOrEx = null;
+            int maxOrRetries = Math.Max(orKeys.Length, 3);
+
+            for (int tryCount = 0; tryCount < maxOrRetries; tryCount++)
+            {
+                var keyToUse = orKeys[tryCount % orKeys.Length];
+                try
+                {
+                    using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+                    var requestBody = new
+                    {
+                        model = openRouterModel,
+                        messages = new[] { new { role = "user", content = prompt } }
+                    };
+                    var jsonContent = new System.Net.Http.StringContent(
+                        System.Text.Json.JsonSerializer.Serialize(requestBody),
+                        System.Text.Encoding.UTF8,
+                        "application/json");
+
+                    using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, openRouterUrl);
+                    requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                    requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
+                    requestMessage.Headers.Add("X-Title", "VideoOzet");
+                    requestMessage.Content = jsonContent;
+
+                    var response = await httpClient.SendAsync(requestMessage, ct);
+                    var responseString = await response.Content.ReadAsStringAsync(ct);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        using var jsonDoc = System.Text.Json.JsonDocument.Parse(responseString);
+                        var root = jsonDoc.RootElement;
+                        if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                        {
+                            var firstChoice = choices[0];
+                            if (firstChoice.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content))
+                            {
+                                return content.GetString() ?? string.Empty;
+                            }
+                        }
+                    }
+
+                    if (responseString.Contains("503") || responseString.Contains("429") || responseString.Contains("rate") || responseString.Contains("exhausted"))
+                    {
+                        throw new Exception($"High Demand or Limit: {responseString}");
+                    }
+
+                    throw new Exception($"OpenRouter API error ({response.StatusCode}): {responseString}");
+                }
+                catch (Exception ex) when (ex.Message.Contains("High Demand") || ex.Message.Contains("Limit") || ex.Message.Contains("503") || ex.Message.Contains("429"))
+                {
+                    lastOrEx = ex;
+                    _logger.LogWarning("OpenRouter API call hit limit/demand on try {Try}. Error: {Error}", tryCount + 1, ex.Message);
+                    if (tryCount < maxOrRetries - 1)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2 * (tryCount + 1)), ct);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "OpenRouter modeli {Model} beklenmedik hata ile başarısız oldu", openRouterModel);
+                    throw new Exception($"[OPENROUTER_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}", ex);
+                }
+            }
+
+            throw new Exception("[OPENROUTER_API_ERROR]: Servis şu anda yoğun talep altında veya limit aşıldı.", lastOrEx);
+        }
+
         var anthropicKey = _configuration["ANTHROPIC_API_KEY"];
         if (!string.IsNullOrWhiteSpace(anthropicKey))
         {
@@ -68,10 +183,19 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             return (response.Content[0] as TextContent)?.Text ?? string.Empty;
         }
 
-        var geminiKey = _configuration["GEMINI_API_KEY"];
+        var geminiKey = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+            ? settings.AntigravityProxyKey
+            : _configuration["GEMINI_API_KEY"];
+
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
-            var geminiModel = _configuration["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered";
+            var geminiModel = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
+                ? settings.AntigravityProxyModel
+                : (_configuration["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered");
+            var proxyBaseUrl = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
+                ? settings.AntigravityProxyUrl.TrimEnd('/')
+                : "http://localhost:8045/v1";
+
             var apiKeys = geminiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                    .Select(k => k.Trim())
                                    .ToArray();
@@ -97,7 +221,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         }
                     };
                     var jsonContent = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
-                    var requestUrl = "http://localhost:8045/v1/chat/completions";
+                    var requestUrl = $"{proxyBaseUrl}/chat/completions";
                     
                     using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, requestUrl);
                     requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");

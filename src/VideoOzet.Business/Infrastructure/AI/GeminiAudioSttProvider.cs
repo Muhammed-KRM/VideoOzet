@@ -19,6 +19,7 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GeminiAudioSttProvider> _logger;
+    private readonly IAiProviderSettingsService? _settingsService;
     private static int _currentKeyIndex = 0;
 
     public Action<int, int>? OnProgress { get; set; }
@@ -26,11 +27,16 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
     private const string ModelName = "gemini-3.8-flash-tiered";
     private const int MaxDirectAudioBytes = 500 * 1024; // 500 KB threshold (base64 ~666 KB < 1MB limit)
 
-    public GeminiAudioSttProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GeminiAudioSttProvider> logger)
+    public GeminiAudioSttProvider(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<GeminiAudioSttProvider> logger,
+        IAiProviderSettingsService? settingsService = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _settingsService = settingsService;
     }
 
     public Task<string> TranscribeAsync(Stream audioStream, string fileName, CancellationToken cancellationToken = default)
@@ -41,7 +47,29 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
     public async Task<string> TranscribeAsync(Stream audioStream, string fileName, Action<int, int>? onProgress, CancellationToken cancellationToken = default)
     {
         var progressCallback = onProgress ?? OnProgress;
-        var apiKeyStr = _configuration["GEMINI_API_KEY"];
+        AiProviderSettingsDto? settings = null;
+        if (_settingsService != null)
+        {
+            try
+            {
+                settings = await _settingsService.GetSettingsAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI Provider ayarları STT için okunamadı, varsayılan yapılandırma kullanılacak.");
+            }
+        }
+
+        bool isOpenRouter = settings != null &&
+                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
+
+        var apiKeyStr = isOpenRouter
+            ? settings!.OpenRouterApiKey
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+                ? settings.AntigravityProxyKey
+                : _configuration["GEMINI_API_KEY"]);
+
         if (string.IsNullOrEmpty(apiKeyStr))
         {
             _logger.LogWarning("GEMINI_API_KEY is not configured for STT.");
@@ -201,13 +229,41 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
 
     private async Task<string> TranscribeChunkWithRetryAsync(byte[] audioBytes, string format, string[] apiKeys, CancellationToken cancellationToken)
     {
+        AiProviderSettingsDto? settings = null;
+        if (_settingsService != null)
+        {
+            try
+            {
+                settings = await _settingsService.GetSettingsAsync(cancellationToken);
+            }
+            catch { }
+        }
+
+        bool isOpenRouter = settings != null &&
+                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
+
+        var effectiveModel = isOpenRouter
+            ? (settings!.OpenRouterModel.Contains("gemini", StringComparison.OrdinalIgnoreCase)
+                ? settings.OpenRouterModel
+                : "google/gemini-2.5-flash")
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
+                ? settings.AntigravityProxyModel
+                : ModelName);
+
+        var baseUrl = isOpenRouter
+            ? settings!.OpenRouterBaseUrl.TrimEnd('/')
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
+                ? settings.AntigravityProxyUrl.TrimEnd('/')
+                : "http://localhost:8045/v1");
+
         var audioBase64 = Convert.ToBase64String(audioBytes);
         var promptText = "Aşağıdaki ses kaydını dikkatle dinle ve içindeki tüm konuşmaları eksiksiz, kelimesi kelimesine Türkçe olarak yazıya dök (deşifre et). " +
                          "Sadece ve sadece deşifre edilmiş konuşma metnini döndür. Başka hiçbir açıklama, giriş veya yorum ekleme.";
 
         var requestBody = new
         {
-            model = ModelName,
+            model = effectiveModel,
             messages = new object[]
             {
                 new
@@ -230,9 +286,14 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
             var keyToUse = apiKeys[_currentKeyIndex % apiKeys.Length];
             try
             {
-                var requestUrl = "http://localhost:8045/v1/chat/completions";
+                var requestUrl = $"{baseUrl}/chat/completions";
                 using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
                 requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                if (isOpenRouter)
+                {
+                    requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
+                    requestMessage.Headers.Add("X-Title", "VideoOzet");
+                }
                 requestMessage.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.SendAsync(requestMessage, cancellationToken);
@@ -288,6 +349,8 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
     {
         var possiblePaths = new[]
         {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ffmpeg", "bin", "ffmpeg.exe")),
+            Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg", "bin", "ffmpeg.exe"),
             @"D:\Hoca\ffmpeg\bin\ffmpeg.exe",
             @"D:\Hoca\VideoOzet\ffmpeg\bin\ffmpeg.exe",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WinGet\Links\ffmpeg.exe"),
