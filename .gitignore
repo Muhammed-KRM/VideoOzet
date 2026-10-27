@@ -1,4 +1,4 @@
-## .NET
+﻿## .NET
 bin/
 obj/
 *.user
@@ -24,20 +24,20 @@ logs/
 ## Docker
 docker-compose.override.yml
 
-## Secrets — Bu dosyalar GIT'E GÖNDERİLMEZ
+## Secrets â€” Bu dosyalar GIT'E GÃ–NDERÄ°LMEZ
 appsettings.Production.json
 appsettings.Development.json
 appsettings.Staging.json
-# appsettings.json kaynak kodda sadece CHANGE_ME placeholder'ları içermeli
-# Gerçek değerler sadece local Development.json veya environment variable'larda olmalı
+# appsettings.json kaynak kodda sadece CHANGE_ME placeholder'larÄ± iÃ§ermeli
+# GerÃ§ek deÄŸerler sadece local Development.json veya environment variable'larda olmalÄ±
 
-## Environment dosyaları
+## Environment dosyalarÄ±
 .env
-# .env.example git'e gönderilir (şablon olarak)
+# .env.example git'e gÃ¶nderilir (ÅŸablon olarak)
 
 /net-commander
 
-# Temp ve log dosyalar�
+# Temp ve log dosyaları
 *.log
 *.txt.log
 MauiErrorLogs.txt
@@ -45,9 +45,11 @@ docker-daemon-dns.json
 msbuild.binlog
 *.binlog
 
-# .NET build artifacts (zaten var ama emin olal�m)
+# .NET build artifacts (zaten var ama emin olalım)
 [Bb]in/
 [Oo]bj/
 
 TestResults/
 **/TestResults/
+DagitimPaketi/
+src/VideoOzet.API/wwwroot/

@@ -102,6 +102,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseCors("AllowFrontend");
 
 // Use Custom API Key Middleware for auth
@@ -110,6 +113,7 @@ app.UseMiddleware<ApiKeyMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<VideoOzet.API.Hubs.PipelineHub>("/hubs/pipeline");
+app.MapFallbackToFile("index.html");
 
 app.Run();
 

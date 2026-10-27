@@ -19,8 +19,9 @@ public class ApiKeyMiddleware
             return;
         }
 
-        // Swagger UI, health checks, and SignalR hubs
-        if (context.Request.Path.StartsWithSegments("/swagger") || 
+        // Swagger UI, health checks, SignalR hubs, and non-API static/SPA routes
+        if (!context.Request.Path.StartsWithSegments("/api") ||
+            context.Request.Path.StartsWithSegments("/swagger") || 
             context.Request.Path.StartsWithSegments("/health") ||
             context.Request.Path.StartsWithSegments("/hubs"))
         {
