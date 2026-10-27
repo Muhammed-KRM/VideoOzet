@@ -59,6 +59,28 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(optio
 
 // Register Data and Business layers
 var isStandalone = builder.Configuration.GetValue<bool>("StandaloneMode");
+if (isStandalone && builder.Configuration.GetValue<bool>("AutoOpenBrowser"))
+{
+    var targetUrl = builder.Configuration["Urls"] ?? "http://localhost:5050";
+    if (Uri.TryCreate(targetUrl, UriKind.Absolute, out var uri))
+    {
+        try
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            if (tcp.ConnectAsync("127.0.0.1", uri.Port).Wait(300))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = targetUrl,
+                    UseShellExecute = true
+                });
+                return;
+            }
+        }
+        catch { }
+    }
+}
+
 var connStr = isStandalone
     ? $"Data Source={Path.Combine(AppContext.BaseDirectory, "videoozet.db")}"
     : builder.Configuration.GetConnectionString("DefaultConnection")!;

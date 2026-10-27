@@ -51,7 +51,7 @@ $StandaloneAppSettings = @"
 {
   "StandaloneMode": true,
   "AutoOpenBrowser": true,
-  "Urls": "http://localhost:5002",
+  "Urls": "http://localhost:5050",
   "ConnectionStrings": {
     "DefaultConnection": "Data Source=videoozet.db"
   },
