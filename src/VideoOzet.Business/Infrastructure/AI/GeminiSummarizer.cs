@@ -30,10 +30,13 @@ public class GeminiSummarizer : IGeminiProvider
                 try
                 {
                     var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
-                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
-                        !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase))
                     {
-                        return settings.OpenRouterModel;
+                        return string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
+                    }
+                    if (settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return string.IsNullOrWhiteSpace(settings.GroqModel) ? "openai/gpt-oss-120b" : settings.GroqModel;
                     }
                     if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyModel))
                     {
@@ -79,38 +82,6 @@ public class GeminiSummarizer : IGeminiProvider
             }
         }
 
-        bool isOpenRouter = settings != null &&
-                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
-                            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
-
-        var apiKeyStr = isOpenRouter
-            ? settings!.OpenRouterApiKey
-            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
-                ? settings.AntigravityProxyKey
-                : _configuration["GEMINI_API_KEY"]);
-
-        if (string.IsNullOrEmpty(apiKeyStr))
-        {
-            _logger.LogWarning("GEMINI_API_KEY is not set. Using mock summary for development.");
-            return "{\"ozetMetni\":\"Mock Özet\", \"konuBasliklari\":[\"Mock Baslik\"], \"konuEtiketleri\":[\"mock\", \"test\"]}";
-        }
-
-        var apiKeys = apiKeyStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                               .Select(k => k.Trim())
-                               .ToArray();
-
-        var effectiveModel = isOpenRouter
-            ? (string.IsNullOrWhiteSpace(settings!.OpenRouterModel) ? "google/gemini-2.5-flash" : settings.OpenRouterModel)
-            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
-                ? settings.AntigravityProxyModel
-                : ModelName);
-
-        var baseUrl = isOpenRouter
-            ? settings!.OpenRouterBaseUrl.TrimEnd('/')
-            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
-                ? settings.AntigravityProxyUrl.TrimEnd('/')
-                : "http://localhost:8045/v1");
-
         var prompt = $@"
         Sen bir bilgi çıkarma ve rafinasyon uzmanısın. Görevin aşağıdaki metni klasik anlamda 'özetlemek' değil, 'damıtmak'tır. Aşağıdaki kurallara kesinlikle uy: 
         1) Konuyla ilgili verilen TÜM bilgileri, iddiaları, kuralları ve teknik detayları %100 oranında koru. Hiçbir bilgi kırıntısını atlama. 
@@ -130,13 +101,82 @@ public class GeminiSummarizer : IGeminiProvider
         {transcript}
         ";
 
+        // 1. Eğer aktif sağlayıcı "groq" ise doğrudan kullanıcının girdiği Groq API anahtarını ve modelini kullan
+        if (settings != null && settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
+        {
+            var groqDirectKey = !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+                ? settings.GroqApiKey
+                : (_configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"]);
+
+            if (string.IsNullOrWhiteSpace(groqDirectKey))
+            {
+                throw new Exception("Groq API seçili ancak Groq API Anahtarı girilmemiş. Lütfen API Ayarları menüsünden Groq anahtarınızı girin.");
+            }
+
+            var preferredModel = string.IsNullOrWhiteSpace(settings.GroqModel) ? "openai/gpt-oss-120b" : settings.GroqModel;
+            var candidateModels = new[] { preferredModel, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" }
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            return await CallGroqModelsAsync(groqDirectKey, candidateModels, prompt, null);
+        }
+
+        bool isOpenRouter = settings != null &&
+                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase);
+
+        var apiKeyStr = isOpenRouter
+            ? settings!.OpenRouterApiKey
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+                ? settings.AntigravityProxyKey
+                : _configuration["GEMINI_API_KEY"]);
+
+        if (string.IsNullOrWhiteSpace(apiKeyStr))
+        {
+            // Eğer OpenRouter anahtarı girilmemiş ama Groq anahtarı girilmişse kullanıcının Groq anahtarını kullan
+            var userGroqKey = settings != null && !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+                ? settings.GroqApiKey
+                : (_configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"]);
+
+            if (!string.IsNullOrWhiteSpace(userGroqKey))
+            {
+                var preferred = settings != null && !string.IsNullOrWhiteSpace(settings.GroqModel) ? settings.GroqModel : "openai/gpt-oss-120b";
+                return await CallGroqModelsAsync(userGroqKey, new[] { preferred, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" }.Distinct().ToArray(), prompt, null);
+            }
+
+            if (_settingsService == null)
+            {
+                _logger.LogWarning("GEMINI_API_KEY is not set. Using mock summary for development.");
+                return "{\"ozetMetni\":\"Mock Özet\", \"konuBasliklari\":[\"Mock Baslik\"], \"konuEtiketleri\":[\"mock\", \"test\"]}";
+            }
+
+            throw new Exception("Seçili yapay zeka sağlayıcısı için API anahtarı girilmemiş! Lütfen sağ üstteki 'API Ayarları' menüsünden API anahtarınızı girip kaydedin.");
+        }
+
+        var apiKeys = apiKeyStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                               .Select(k => k.Trim())
+                               .ToArray();
+
+        var effectiveModel = isOpenRouter
+            ? (string.IsNullOrWhiteSpace(settings!.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel)
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
+                ? settings.AntigravityProxyModel
+                : ModelName);
+
+        var baseUrl = isOpenRouter
+            ? settings!.OpenRouterBaseUrl.TrimEnd('/')
+            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
+                ? settings.AntigravityProxyUrl.TrimEnd('/')
+                : "http://localhost:8045/v1");
+
         var requestBody = new
         {
             model = effectiveModel,
             messages = new[]
             {
                 new { role = "user", content = prompt }
-            }
+            },
+            max_tokens = 16384,
+            temperature = 0.2
         };
 
         Exception? lastException = null;
@@ -197,12 +237,103 @@ public class GeminiSummarizer : IGeminiProvider
                 lastException = ex;
                 await Task.Delay(TimeSpan.FromSeconds(3));
             }
-            catch
+            catch (Exception ex)
             {
-                throw;
+                lastException = ex;
+                _logger.LogWarning("Primary LLM ({BaseUrl}) failed during SummarizeAsync: {Message}.", baseUrl, ex.Message);
+                break;
             }
         }
 
-        throw new Exception("Bütün yedek API anahtarlarının limiti dolmuş durumda veya kullanılamıyor! Lütfen yeni bir API anahtarı ekleyin.", lastException);
+        // Eğer kullanıcı arayüzden ayrıca bir Groq API Anahtarı girdiyse, yedek olarak kullanıcının Groq anahtarını kullan
+        var groqKey = settings != null && !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+            ? settings.GroqApiKey
+            : (_configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"]);
+
+        if (!string.IsNullOrWhiteSpace(groqKey))
+        {
+            var preferred = settings != null && !string.IsNullOrWhiteSpace(settings.GroqModel) ? settings.GroqModel : "openai/gpt-oss-120b";
+            var models = new[] { preferred, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" }.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            return await CallGroqModelsAsync(groqKey, models, prompt, lastException);
+        }
+
+        throw new Exception("Seçili API anahtarı hata verdi veya kullanılamıyor! Lütfen 'API Ayarları' menüsünden girdiğiniz API anahtarını kontrol edin.", lastException);
+    }
+
+    private async Task<string> CallGroqModelsAsync(string groqKey, string[] candidateModels, string prompt, Exception? lastException)
+    {
+        var allModels = candidateModels
+            .Concat(new[] { "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        int[] maxCharsPasses = { 9500, 7200 };
+        for (int pass = 0; pass < maxCharsPasses.Length; pass++)
+        {
+            if (pass > 0)
+            {
+                _logger.LogInformation("Groq TPM penceresi için 14 saniye beklenip sıkıştırılmış bağlamla tekrar deneniyor...");
+                await Task.Delay(14000);
+            }
+
+            var groqPrompt = CompactPromptForGroq(prompt, maxCharsPasses[pass]);
+            foreach (var groqModel in allModels)
+            {
+                try
+                {
+                    _logger.LogInformation("Groq Cloud LLM ({Model}) ile özetleme yapılıyor (Prompt: {Len} krk)...", groqModel, groqPrompt.Length);
+                    var groqBody = new
+                    {
+                        model = groqModel,
+                        messages = new[] { new { role = "user", content = groqPrompt } },
+                        max_tokens = 8192,
+                        temperature = 0.1
+                    };
+                    using var groqReq = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+                    groqReq.Headers.Add("Authorization", $"Bearer {groqKey.Trim()}");
+                    groqReq.Headers.Add("User-Agent", "VideoOzet/1.0");
+                    groqReq.Content = new StringContent(JsonSerializer.Serialize(groqBody), Encoding.UTF8, "application/json");
+
+                    var groqResp = await _httpClient.SendAsync(groqReq);
+                    var groqStr = await groqResp.Content.ReadAsStringAsync();
+                    if (groqResp.IsSuccessStatusCode)
+                    {
+                        using var doc = JsonDocument.Parse(groqStr);
+                        if (doc.RootElement.TryGetProperty("choices", out var ch) && ch.GetArrayLength() > 0 &&
+                            ch[0].TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var cnt))
+                        {
+                            var contentStr = cnt.GetString();
+                            if (!string.IsNullOrWhiteSpace(contentStr))
+                                return contentStr;
+                        }
+                    }
+                    else
+                    {
+                        lastException = new Exception($"Groq API error ({groqResp.StatusCode}): {groqStr}");
+                        _logger.LogWarning("Groq LLM ({Model}) returned {Status}: {Body}", groqModel, groqResp.StatusCode, groqStr);
+                    }
+                }
+                catch (Exception gEx)
+                {
+                    lastException = gEx;
+                    _logger.LogWarning(gEx, "Groq LLM ({Model}) çağrısı başarısız oldu.", groqModel);
+                }
+            }
+        }
+
+        throw new Exception("Groq API çağrısı başarısız oldu! Lütfen API Ayarları menüsünden girdiğiniz Groq API anahtarını kontrol edin.", lastException);
+    }
+
+    private static string CompactPromptForGroq(string prompt, int maxChars)
+    {
+        if (string.IsNullOrEmpty(prompt) || prompt.Length <= maxChars)
+            return prompt;
+
+        int headChars = (int)(maxChars * 0.60);
+        int tailChars = maxChars - headChars;
+
+        return prompt.Substring(0, headChars)
+             + "\n\n[... Uzun metin token limiti nedeniyle kısaltıldı ...]\n\n"
+             + prompt.Substring(prompt.Length - tailChars);
     }
 }

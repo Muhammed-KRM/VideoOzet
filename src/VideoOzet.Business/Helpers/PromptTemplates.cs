@@ -3,7 +3,7 @@ namespace VideoOzet.Business.Helpers;
 public static class PromptTemplates
 {
     public const string SynthesisResearchPrompt = """
-        Aşağıdaki video kaynaklarını kullanarak "{0}" konusunda kapsamlı bir araştırma özeti yaz.
+        Aşağıdaki video ve doküman kaynaklarını kullanarak "{0}" konusunda kapsamlı, derinlemesine ve eksiksiz bir akademik araştırma özeti yaz.
         
         Hedef Uzunluk: {1}
         Hedef Kitle: {2}
@@ -11,19 +11,138 @@ public static class PromptTemplates
         KAYNAKLAR:
         {3}
         
-        Kurallar:
-        - SADECE verilen kaynaklardaki bilgileri kullan
-        - Kaynakta olmayan bilgi ekleme
-        - Kaynak referanslarını belirt
-        - Akademik ve yapılandırılmış bir dil kullan
-        - Markdown formatında yaz
+        ÇOK KRİTİK KURALLAR VE BİREBİR MARKDOWN ŞABLONU:
+        1. SADECE verilen kaynaklardaki bilgileri, kavramları, delilleri ve örnekleri kullan; kaynakta olmayan bilgi ekleme.
+        2. KESİNLİKLE köşeli parantez (`[` veya `]`) içinde şablon yer tutucu ifadeler bırakma; tüm başlıkları ve alt madde etiketlerini konunun gerçek içeriğine göre adlandır.
+        3. Özeti kesinlikle 2-3 kısa başlıkla yarıda kesme! Kaynaklardaki tüm alt konuları, delilleri, örnekleri ve karşılaştırmaları eksiksiz kapsayacak şekilde EN AZ 4-5 ANA BÖLÜM (## 2., ## 3., ## 4., ## 5.) ve her ana bölüm altında EN AZ 2 ALT BAŞLIK (### 2.1., ### 2.2. vb.) oluştur ve en sonda mutlaka "## Sonuç ve Genel Değerlendirme" bölümüyle tamamla.
+        4. Yanıtını aşağıdaki Markdown yapısına birebir uyarak oluştur:
+
+        # {0}
+        **Kapsamlı Araştırma Özeti**
+        *(Kaynak: İlgili Kaynak Adları – KAYNAK #1, #2 vb.)*
+
+        ---
+
+        ## 1. Giriş
+        1. Konunun temel sorusu, önemi ve tanımlayıcı çerçevesi.
+        2. Araştırmanın kapsamı ve kaynaklardaki metodolojik yaklaşım.
+        3. Ele alınacak ana başlıklar:
+           - 2. (Birinci Ana Bölümün Gerçek Başlığı - köşeli parantez kullanma)
+           - 3. (İkinci Ana Bölümün Gerçek Başlığı)
+           - 4. (Üçüncü Ana Bölümün Gerçek Başlığı)
+           - 5. (Dördüncü Ana Bölümün Gerçek Başlığı)
+
+        ---
+
+        ## 2. (Birinci Ana Kavramsal / Akademik Başlık)
+        ### 2.1. (Birinci Alt Başlık)
+        > "(Kaynaktan doğrudan kilit alıntı veya temel ilke cümlesi)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. Boyut / Kavram Başlığı):** (Kaynaktaki kavramın detaylı açıklaması; DİKKAT: bu maddelerin başında KESİNLİKLE `>` işareti kullanma, alıntı kutusunun dışında normal madde olarak yaz)
+        - **(Konuya Özgü 2. Boyut / Metodolojik Analiz):** (Kaynaktaki delillerin, örneklerin ve analizlerin detaylı açıklaması)
+        - **(Konuya Özgü 3. Boyut / Somut Karşılaştırma veya Uygulama):** (Kaynaktaki somut örnekler, atıflar ve çıkarımlar)
+
+        ### 2.2. (İkinci Alt Başlık)
+        > "(Kaynaktan doğrudan ilgili ikinci kilit alıntı)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. İlke / Yapı Başlığı):** (Detaylı analiz ve açıklama)
+        - **(Konuya Özgü 2. Uygulama / Örnek Başlığı):** (Kaynaktaki somut örnekler ve çıkarımlar)
+
+        ---
+
+        ## 3. (İkinci Ana Kavramsal / Akademik Başlık)
+        ### 3.1. (Alt Başlık)
+        > "(Kaynaktan doğrudan ilgili kilit alıntı)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. Analitik Nokta):** (Detaylı analiz ve karşılaştırmalar)
+        - **(Konuya Özgü 2. Analitik Nokta):** (Kaynaktaki deliller ve değerlendirmeler)
+
+        ### 3.2. (İkinci Alt Başlık)
+        > "(Kaynaktan doğrudan ilgili kilit alıntı)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. Analitik Nokta):** (Detaylı analiz)
+        - **(Konuya Özgü 2. Analitik Nokta):** (Somut örnekler ve sonuçlar)
+
+        ---
+
+        ## 4. (Üçüncü Ana Kavramsal / Akademik Başlık)
+        ### 4.1. (Alt Başlık)
+        > "(Kaynaktan doğrudan ilgili kilit alıntı)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. Analitik Nokta):** (Detaylı analiz)
+        - **(Konuya Özgü 2. Analitik Nokta):** (Somut örnekler ve sonuçlar)
+
+        ### 4.2. (İkinci Alt Başlık)
+        > "(Kaynaktan doğrudan ilgili kilit alıntı)" — KAYNAK #1
+
+        - **(Konuya Özgü 1. Analitik Nokta):** (Detaylı analiz)
+        - **(Konuya Özgü 2. Analitik Nokta):** (Somut örnekler ve sonuçlar)
+
+        ---
+
+        ## 5. Sonuç ve Genel Değerlendirme
+        1. **(Temel Çıkarım 1):** ...
+        2. **(Temel Çıkarım 2):** ...
+        3. **(Genel Sentez):** (Tüm bulguların bütünsel değerlendirmesi)
         """;
 
     public const string SynthesisVideoPlanPrompt = """
-        Aşağıdaki video kaynaklarını kullanarak "{0}" konusunda yapılandırılmış bir video içerik planı yaz. Videonun süresi ortalama {1} dakika olacak.
+        Aşağıdaki video ve doküman kaynaklarını kullanarak "{0}" konusunda stüdyoda ve kurguda doğrudan kullanılacak profesyonel, baştan sona eksiksiz bir Çekim, Kurgu ve Prompter Video Planı oluştur.
+        Hedef Süre / Uzunluk: {1}
         
         KAYNAKLAR:
         {2}
+
+        ÇOK KRİTİK VE KESİN KURALLAR:
+        1. SADECE VE SADECE verilen KAYNAKLARDAKİ bilgileri, kavramları, argümanları ve analizleri kullan. Kaynaklarda yer almayan harici konuları uydurma.
+        2. Kaynak metinlerde geçen özel kavramları, tanımları, yazar/hoca atıflarını ve örnekleri aynen ve detaylıca aktar.
+        3. Her sahne için [Prompter Metni (Aynen Okunacak)] kısmı KESİNLİKLE 2-3 cümlelik kısa bir özet OLMAYACAK; sunucunun kameraya karşı kelimesi kelimesine okuyacağı EN AZ 3 DOLU PARAGRAF (180-250 kelime) uzunluğunda akıcı stüdyo konuşma metni olacaktır. Her paragrafın arasına mutlaka boş bir `>` satırı koy ki paragraflar birbirine yapışmasın.
+        4. Video planını KESİNLİKLE yarıda bırakma! Konunun tüm alt başlıklarını kapsayacak şekilde EN AZ 6 SAHNE (Sahne 1: Giriş, Sahne 2-5+: Gelişme Sahneleri ve son sahne olarak Kapanış / Sonuç Sahnesi) oluştur.
+        5. Yanıtını KESİNLİKLE aşağıdaki Markdown şablonuna birebir uyarak (JSON sarmalaması olmadan) döndür:
+
+        # {0}
+        **Video Tipi:** Uzun Formatlı Stüdyo Analizi / Ders
+        **Hedef Süre:** {1}
+        **Konu:** (Videonun ana fikri ve kapsamı)
+
+        ---
+
+        ## Sahne 1: Giriş – (Sahne Alt Başlığı)
+        **Zaman Aralığı:** 00:00 - 02:00
+
+        ### 1. [Görsel & Edit Yönergesi]
+        - **Kamera Açısı & Kadraj:** (Sunucu kadrajı, ışık ve atmosfer)
+        - **Görsel, B-Roll ve Kurgu:** (Ekrana gelecek arşiv görüntüleri, simülasyonlar, geçişler)
+        - **Metin Grafiği (On-Screen Text):** (Ekranda belirecek başlık, alt yazı / Lower Third ve kavramlar)
+        - **Müzik & Ses Efekti:** (Müziğin tonu, tempo ve geçiş ses efektleri)
+
+        ### 2. [Prompter Metni (Aynen Okunacak)]
+        > "(1. Paragraf: İzleyiciyi yakalayan güçlü giriş ve temel sorunun ortaya konulması...)"
+        >
+        > "(2. Paragraf: Kaynaktaki temel kavramların ve çerçevelerin detaylı anlatımı...)"
+        >
+        > "(3. Paragraf: Bir sonraki sahneye akıcı geçiş...)"
+
+        ---
+
+        ## Sahne 2: (Birinci Gelişme Sahnesi Başlığı)
+        **Zaman Aralığı:** 02:00 - 04:30
+
+        ### 1. [Görsel & Edit Yönergesi]
+        - **Kamera Açısı & Kadraj:** ...
+        - **Görsel, B-Roll ve Kurgu:** ...
+        - **Metin Grafiği (On-Screen Text):** ...
+        - **Müzik & Ses Efekti:** ...
+
+        ### 2. [Prompter Metni (Aynen Okunacak)]
+        > "(1. Paragraf: Bu sahnenin ana kavramının ve kaynaktaki ilkelerin detaylı anlatımı...)"
+        >
+        > "(2. Paragraf: Kaynaktaki somut örneklerin, delillerin ve karşılaştırmaların açıklanması...)"
+        >
+        > "(3. Paragraf: Sahne çıkarımı ve sonraki sahneye geçiş...)"
+
+        ---
+        (Konunun tüm alt başlıklarını kapsayacak şekilde Sahne 3, Sahne 4, Sahne 5... ve en sonda Kapanış/Sonuç sahnesi aynı şablonla eksiksiz devam etmelidir.)
         """;
 
     public const string ClaimExtractionPrompt = """
@@ -88,8 +207,8 @@ public static class PromptTemplates
         ÇOK KRİTİK VE KESİN KURALLAR:
         1. HEDEF ODAKLI DÜZENLEME: Yalnızca ve sadece kullanıcının revize talimatında açıkça belirttiği kısımları (ekleme, çıkarma, ayrıntılandırma, kısaltma, örnek verme, ton vb.) güncelle.
         2. DOKÜMAN TÜRÜNE VE AMACINA KESİNLİKLE SADIK KAL:
-           - Eğer revize edilen doküman "Video Planı" ise: Sahne bazlı [Görsel & Edit Yönergesi] (kamera, B-roll, ekran grafikleri, ses) ve [Prompter Metni (Aynen Okunacak)] (sunucunun kelimesi kelimesine okuyacağı tam konuşma metni; ASLA özet veya taslak değil!) yapısını koru ve talimata göre geliştir.
-           - Eğer revize edilen doküman "Araştırma Özeti" ise: Bu doküman bir video planı veya prompter konuşma metni DEĞİLDİR; konunun derinlemesine akademik ve kavramsal araştırma özetidir. Sakın araştırma özetini prompter veya sahne planına dönüştürme!
+           - Eğer revize edilen doküman "Video Planı" ise: Yalnızca sahne bazlı [Görsel & Edit Yönergesi] ve [Prompter Metni (Aynen Okunacak)] yapısını koru ve geliştir. Kullanıcı talimatında araştırma özetinden bahsedilse bile bu dokümanın içine KESİNLİKLE "Araştırma Özeti" başlığı veya bölümü ekleme!
+           - Eğer revize edilen doküman "Araştırma Özeti" ise: Bu doküman yalnızca akademik ve kavramsal araştırma özetidir. Kullanıcı talimatında video planından veya sahnelerden bahsedilse bile bu dokümanın içine KESİNLİKLE "Video Planı", "Sahne 1" veya prompter konuşma metni ekleme!
         3. DEĞİNİLMEYEN KISIMLARA KESİNLİKLE DOKUNMA: Kullanıcının değiştirilmesini istemediği hiçbir bölümün başlıklarını, maddelerini, tonunu veya metnini BOZMA, SİLME veya KEYFİ OLARAK DEĞİŞTİRME. O kısımları aynen koru.
         4. AKICILIK VE TUTARLILIK: Yapılan ekleme/değişiklikler dokümanın genel akışına, diline ve Markdown formatına kusursuz şekilde uyum sağlamalıdır.
         5. EKSİKSİZ ÇIKTI: Yanıtında sadece değişen parçayı değil; değişmeyen kısımları aynen muhafaza ederek revize edilmiş TÜM DOKÜMANI baştan sona eksiksiz Markdown formatında döndür.
@@ -220,18 +339,90 @@ public static class PromptTemplates
            
            2. [Prompter Metni (Aynen Okunacak)] (Sunucu İçin):
               - Sunucunun kameraya karşı KELİMESİ KELİMESİNE / AYNEN OKUYACAĞI tam konuşma metni.
-              - KESİNLİKLE özet, madde işaretli not, taslak veya "burada şundan bahsedilir" şeklinde özetleme OLMAYACAK!
-              - Tıpkı profesyonel bir sunucunun prompter cihazından doğrudan okuduğu gibi akıcı, etkileyici, doğal konuşma diliyle ve eksiksiz tam metin olarak yazılmalıdır.
+              - KESİNLİKLE 2-3 cümlelik kısa bir geçiş, özet, madde işaretli not veya taslak OLMAYACAK!
+              - Her sahne için en az 2-3 dolu paragraf uzunluğunda; kaynaktaki kavramları, delilleri, örnekleri ve hoca/yazar anlatımlarını izleyiciye detaylıca anlatan gerçek uzunlukta bir stüdyo konuşma metni yazılmalıdır.
+              - Giriş, gelişme ve kapanış sahneleri baştan sona eksiksiz tamamlanmalıdır.
 
         C) "DevirNotu":
            - Bir sonraki bölüme aktarılması gereken kilit kavram veya geçiş notu.
 
-        Lütfen SADECE geçerli bir JSON objesi döndür:
-        {{
-            "ArastirmaOzeti": "Detaylı akademik araştırma özeti markdown metni",
-            "VideoPlani": "Detaylı görsel edit yönergeleri ve aynen okunacak tam prompter metinlerini içeren video planı markdown metni",
-            "DevirNotu": "Varsa sonraki bölüme devir notu"
-        }}
+        Lütfen yanıtını JSON içine sıkıştırmadan, doğrudan aşağıdaki 3 bölüm başlığı (ayraç) ile ayırarak ve her bölümün altındaki Markdown şablonuna BİREBİR uyarak döndür:
+
+        ===ARASTIRMA_OZETI===
+        # {0}
+        **Kapsamlı Araştırma Özeti**
+        *(Kaynak: İlgili Kaynak Adları – KAYNAK #1, #2 vb.)*
+
+        ---
+
+        ## 1. Giriş
+        (Bölümün temel sorusu, kapsamı ve ele alınan ana başlıkların numaralı listesi)
+
+        ---
+
+        ## 2. [Birinci Ana Kavramsal / Akademik Başlık]
+        ### 2.1. [Alt Başlık]
+        > "[Kaynaktan doğrudan kilit alıntı veya temel ilke cümlesi]" — KAYNAK #1
+
+        (Kaynaktaki kavramların, delillerin ve analizlerin detaylı, yapılandırılmış açıklaması)
+
+        ### 2.2. [İkinci Alt Başlık]
+        (Detaylı analiz ve örnekler)
+
+        ---
+
+        ## 3. [İkinci Ana Kavramsal / Akademik Başlık]
+        ### 3.1. [Alt Başlık]
+        (Detaylı analiz, karşılaştırmalar ve örnekler)
+
+        ---
+
+        ## Sonuç ve Genel Değerlendirme
+        (Bölümdeki tüm bulguların bütünsel değerlendirmesi)
+
+        ===VIDEO_PLANI===
+        # {0}
+        **Video Tipi:** Uzun Formatlı Stüdyo Analizi / Ders
+        **Hedef Süre:** ~10-15 Dakika
+        **Konu:** (Bölümün ana fikri ve kapsamı)
+
+        ---
+
+        ## Sahne 1: Giriş – [Sahne Alt Başlığı]
+        **Zaman Aralığı:** 00:00 - 02:00
+
+        ### 1. [Görsel & Edit Yönergesi]
+        - **Kamera Açısı & Kadraj:** (Sunucu kadrajı, ışık ve atmosfer)
+        - **Görsel, B-Roll ve Kurgu:** (Ekrana gelecek arşiv görüntüleri, simülasyonlar, geçişler)
+        - **Metin Grafiği (On-Screen Text):** (Ekranda belirecek başlık, alt yazı / Lower Third ve kavramlar)
+        - **Müzik & Ses Efekti:** (Müziğin tonu, tempo ve geçiş ses efektleri)
+
+        ### 2. [Prompter Metni (Aynen Okunacak)]
+        > "(1. Paragraf: İzleyiciyi yakalayan güçlü giriş ve temel sorunun ortaya konulması...)"
+        >
+        > "(2. Paragraf: Kaynaktaki temel kavramların ve çerçevelerin detaylı anlatımı...)"
+        >
+        > "(3. Paragraf: Bir sonraki sahneye akıcı geçiş...)"
+
+        ---
+
+        ## Sahne 2: [Gelişme Sahnesi Başlığı]
+        **Zaman Aralığı:** 02:00 - 05:00
+
+        ### 1. [Görsel & Edit Yönergesi]
+        - **Kamera Açısı & Kadraj:** ...
+        - **Görsel, B-Roll ve Kurgu:** ...
+        - **Metin Grafiği (On-Screen Text):** ...
+        - **Müzik & Ses Efekti:** ...
+
+        ### 2. [Prompter Metni (Aynen Okunacak)]
+        > "(En az 2-3 dolu paragraf uzunluğunda, kaynaktaki örnekleri, delilleri ve analizleri sindire sindire anlatan tam stüdyo konuşma metni...)"
+
+        ---
+        (Bölümün tüm alt başlıklarını kapsayacak şekilde diğer gelişme sahneleri ve Kapanış/Sonuç sahnesi aynı şablonla eksiksiz devam etmelidir.)
+
+        ===DEVIR_NOTU===
+        (Varsa sonraki bölüme devir notu buraya)
         """;
 
     public const string SourceTopicExtractionPrompt = """

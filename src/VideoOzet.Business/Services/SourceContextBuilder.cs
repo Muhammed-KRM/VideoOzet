@@ -92,11 +92,24 @@ public class SourceContextBuilder : ISourceContextBuilder
 
             foreach (var vid in validVideolar)
             {
-                var text = (!string.IsNullOrWhiteSpace(vid.Transcript?.HamMetin) && !IsPlaceholder(vid.Transcript.HamMetin))
+                var summaryText = (!string.IsNullOrWhiteSpace(vid.Summary?.OzetMetni) && !IsPlaceholder(vid.Summary.OzetMetni))
+                    ? vid.Summary.OzetMetni.Trim()
+                    : "";
+                var transcriptText = (!string.IsNullOrWhiteSpace(vid.Transcript?.HamMetin) && !IsPlaceholder(vid.Transcript.HamMetin))
                     ? vid.Transcript.HamMetin.Trim()
-                    : vid.Summary?.OzetMetni?.Trim() ?? "";
+                    : "";
+
                 sb.AppendLine($"[KAYNAK #{idx++} · VİDEO: {vid.Baslik}]");
-                sb.AppendLine(text);
+                if (!string.IsNullOrWhiteSpace(summaryText))
+                {
+                    sb.AppendLine("[Damıtılmış Özet]:");
+                    sb.AppendLine(summaryText);
+                }
+                if (!string.IsNullOrWhiteSpace(transcriptText))
+                {
+                    sb.AppendLine("[Tam Transkript]:");
+                    sb.AppendLine(transcriptText);
+                }
                 sb.AppendLine("---");
                 result.UsedSourceTitles.Add(vid.Baslik);
             }
@@ -104,8 +117,11 @@ public class SourceContextBuilder : ISourceContextBuilder
             if (_dbContext.Database.ProviderName != "Microsoft.EntityFrameworkCore.InMemory")
             {
                 var docIds = dokumanlar.Select(d => d.Id).ToList();
+                var vidIds = validVideolar.Select(v => v.Id).ToList();
                 result.UsedChunkIds = await _dbContext.VideoChunkDocuments
-                    .Where(c => c.EgitimId == egitimId && c.DokumanId != null && docIds.Contains(c.DokumanId.Value))
+                    .Where(c => c.EgitimId == egitimId &&
+                        ((c.DokumanId != null && docIds.Contains(c.DokumanId.Value)) ||
+                         (c.VideoId != null && vidIds.Contains(c.VideoId.Value))))
                     .Select(c => c.Id)
                     .ToListAsync(ct);
             }
@@ -237,8 +253,15 @@ public class SourceContextBuilder : ISourceContextBuilder
         {
             return result;
         }
-        var idList = (chunkIds ?? Enumerable.Empty<Guid>()).Distinct().ToList();
 
+        // Önce eğitimin tam kaynak bağlamını oluştur (küçük/orta eğitimlerde tüm videoların özet + transkriptini içerir)
+        var fullContext = await BuildContextAsync(egitimId, new[] { "" }, 80000, ct);
+        if (!string.IsNullOrWhiteSpace(fullContext.ContextText))
+        {
+            return fullContext;
+        }
+
+        var idList = (chunkIds ?? Enumerable.Empty<Guid>()).Distinct().ToList();
         if (idList.Any())
         {
             var chunks = await _dbContext.VideoChunkDocuments
@@ -262,8 +285,7 @@ public class SourceContextBuilder : ISourceContextBuilder
             }
         }
 
-        // Eğer verilen chunk ID'ler boş veya placeholder ise, tüm eğitime ait bağlamı yeniden oluştur
-        return await BuildContextAsync(egitimId, new[] { "" }, 80000, ct);
+        return result;
     }
 
     private static double ComputeCosineDistance(float[]? a, float[]? b)

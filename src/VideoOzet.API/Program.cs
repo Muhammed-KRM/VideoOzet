@@ -59,6 +59,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(optio
 
 // Register Data and Business layers
 var isStandalone = builder.Configuration.GetValue<bool>("StandaloneMode");
+if (isStandalone && !VideoOzet.API.Security.HardwareLockGuard.EnsureHardwareAuthorized(args))
+{
+    return;
+}
 if (isStandalone && builder.Configuration.GetValue<bool>("AutoOpenBrowser"))
 {
     var targetUrl = builder.Configuration["Urls"] ?? "http://localhost:5050";
@@ -69,11 +73,7 @@ if (isStandalone && builder.Configuration.GetValue<bool>("AutoOpenBrowser"))
             using var tcp = new System.Net.Sockets.TcpClient();
             if (tcp.ConnectAsync("127.0.0.1", uri.Port).Wait(300))
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = targetUrl,
-                    UseShellExecute = true
-                });
+                OpenBrowserCrossPlatform(targetUrl);
                 return;
             }
         }
@@ -136,6 +136,68 @@ using (var scope = app.Services.CreateScope())
         {
             db.Database.Migrate();
         }
+
+        // Mevcut veritabanı kayıtlarındaki Markdown format farklarını (köşeli parantez kalıntıları, birleşik prompter paragrafları, vb.) idempotent olarak normalize et
+        bool dbChanged = false;
+        var orphanId = Guid.Parse("114b9821-bc85-4768-b9c4-8a93893fc0cf");
+        var orphanFailed = db.ContentRequests.Where(r => r.Id == orphanId).ToList();
+        if (orphanFailed.Count > 0)
+        {
+            db.ContentRequests.RemoveRange(orphanFailed);
+            dbChanged = true;
+        }
+
+        var allVersions = db.ContentVersions.ToList();
+        foreach (var gc in db.GeneratedContents.ToList())
+        {
+            var normOzet = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(gc.ArastirmaOzeti ?? string.Empty, isVideoPlan: false);
+            var normPlan = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(gc.VideoPlani ?? string.Empty, isVideoPlan: true);
+            if (normOzet != gc.ArastirmaOzeti || normPlan != gc.VideoPlani)
+            {
+                gc.ArastirmaOzeti = normOzet;
+                gc.VideoPlani = normPlan;
+                dbChanged = true;
+            }
+
+            var reqVersions = allVersions.Where(v => v.ContentRequestId == gc.ContentRequestId).ToList();
+            foreach (var ver in reqVersions)
+            {
+                if (ver.VersiyonNo == 1 && reqVersions.Count > 1 && normOzet.Length > (ver.ArastirmaOzeti?.Length ?? 0))
+                {
+                    ver.ArastirmaOzeti = normOzet;
+                    ver.VideoPlani = normPlan;
+                    dbChanged = true;
+                }
+                else
+                {
+                    var vOzet = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(ver.ArastirmaOzeti ?? string.Empty, isVideoPlan: false);
+                    var vPlan = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(ver.VideoPlani ?? string.Empty, isVideoPlan: true);
+                    if (vOzet != ver.ArastirmaOzeti || vPlan != ver.VideoPlani)
+                    {
+                        ver.ArastirmaOzeti = vOzet;
+                        ver.VideoPlani = vPlan;
+                        dbChanged = true;
+                    }
+                }
+            }
+        }
+
+        foreach (var rev in db.BolumRevizyonlari.ToList())
+        {
+            var rOzet = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(rev.ArastirmaOzeti ?? string.Empty, isVideoPlan: false);
+            var rPlan = VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider.NormalizeMarkdownOutput(rev.VideoPlani ?? string.Empty, isVideoPlan: true);
+            if (rOzet != rev.ArastirmaOzeti || rPlan != rev.VideoPlani)
+            {
+                rev.ArastirmaOzeti = rOzet;
+                rev.VideoPlani = rPlan;
+                dbChanged = true;
+            }
+        }
+
+        if (dbChanged)
+        {
+            db.SaveChanges();
+        }
     }
     catch (Exception ex)
     {
@@ -170,19 +232,35 @@ if (builder.Configuration.GetValue<bool>("AutoOpenBrowser"))
 {
     app.Lifetime.ApplicationStarted.Register(() =>
     {
-        try
+        var url = app.Urls.FirstOrDefault() ?? builder.Configuration["Urls"] ?? "http://localhost:5050";
+        OpenBrowserCrossPlatform(url);
+    });
+}
+
+app.Run();
+
+static void OpenBrowserCrossPlatform(string url)
+{
+    try
+    {
+        if (OperatingSystem.IsMacOS())
         {
-            var url = app.Urls.FirstOrDefault() ?? "http://localhost:5002";
+            System.Diagnostics.Process.Start("open", url);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            System.Diagnostics.Process.Start("xdg-open", url);
+        }
+        else
+        {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = url,
                 UseShellExecute = true
             });
         }
-        catch { }
-    });
+    }
+    catch { }
 }
-
-app.Run();
 
 public partial class Program { }

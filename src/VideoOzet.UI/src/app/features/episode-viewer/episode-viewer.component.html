@@ -174,10 +174,18 @@
       <div *ngIf="episode.durum === 'Hata'" class="bg-slate-800 rounded-xl p-10 border border-rose-500/30 shadow-xl h-full flex flex-col items-center justify-center text-center">
         <div class="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center mb-4 text-rose-400 text-3xl">!</div>
         <h3 class="text-xl font-bold text-rose-300 mb-2">Bu bölüm üretilemedi</h3>
-        <p class="text-slate-400 max-w-md">Soldaki panelden bir talimat yazarak bölümü yeniden üretmeyi deneyebilirsiniz.</p>
+        <p class="text-slate-400 max-w-md mb-6">Aşağıdaki butonla veya soldaki panelden bir talimat yazarak bölümü yeniden üretebilirsiniz.</p>
+        <button 
+          type="button"
+          (click)="retryEpisode()" 
+          [disabled]="isRevising" 
+          class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50 flex items-center gap-2 text-sm">
+          <span *ngIf="isRevising" class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+          <span>🔄 Bölümü Yeniden Üret</span>
+        </button>
       </div>
 
-      <div *ngIf="episode.durum === 'Tamamlandi' && getAktifRevizyon()" class="h-full">
+      <div *ngIf="episode.durum === 'Tamamlandi' && getAktifRevizyon()">
         <!-- Eski Sürüm Görüntüleme Bildirimi -->
         <div *ngIf="getAktifRevizyon()?.id !== episode.aktifRevizyonId" class="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
           <div class="flex items-center gap-2">

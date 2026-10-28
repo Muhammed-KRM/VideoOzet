@@ -4,10 +4,12 @@ import { Observable, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface AiProviderSettings {
-  activeProvider: 'openrouter' | 'antigravity';
+  activeProvider: 'openrouter' | 'groq' | 'antigravity';
   openRouterApiKey: string;
   openRouterBaseUrl: string;
   openRouterModel: string;
+  groqApiKey: string;
+  groqModel: string;
   antigravityProxyUrl: string;
   antigravityProxyKey: string;
   antigravityProxyModel: string;
@@ -34,16 +36,19 @@ export class SettingsService {
   private readonly apiUrl = `${environment.apiUrl}/settings/ai-provider`;
 
   readonly settings = signal<AiProviderSettings>({
-    activeProvider: 'antigravity',
+    activeProvider: 'openrouter',
     openRouterApiKey: '',
     openRouterBaseUrl: 'https://openrouter.ai/api/v1',
-    openRouterModel: 'google/gemini-2.5-flash',
+    openRouterModel: 'google/gemini-3.8-flash',
+    groqApiKey: '',
+    groqModel: 'openai/gpt-oss-120b',
     antigravityProxyUrl: 'http://localhost:8045/v1',
-    antigravityProxyKey: 'sk-ea6e0c519b12403784eb5cdf79ca2615',
+    antigravityProxyKey: '',
     antigravityProxyModel: 'gemini-3.8-flash-tiered'
   });
 
   readonly openRouterModels = signal<ModelOption[]>([]);
+  readonly groqModels = signal<ModelOption[]>([]);
   readonly antigravityModels = signal<ModelOption[]>([]);
   readonly isModalOpen = signal(false);
   readonly isLoading = signal(false);
@@ -55,6 +60,7 @@ export class SettingsService {
     this.testResult.set(null);
     this.loadSettings();
     this.loadModels('openrouter');
+    this.loadModels('groq');
     this.loadModels('antigravity');
   }
 
@@ -76,11 +82,13 @@ export class SettingsService {
     });
   }
 
-  loadModels(provider: 'openrouter' | 'antigravity'): void {
+  loadModels(provider: 'openrouter' | 'groq' | 'antigravity'): void {
     this.http.get<ModelOption[]>(`${this.apiUrl}/models?provider=${provider}`).subscribe({
       next: (models) => {
         if (provider === 'openrouter') {
           this.openRouterModels.set(models);
+        } else if (provider === 'groq') {
+          this.groqModels.set(models);
         } else {
           this.antigravityModels.set(models);
         }

@@ -142,6 +142,14 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                             }
                         }
                     }
+                    else if (root.TryGetProperty("success", out var directSucc) && directSucc.GetBoolean() &&
+                             root.TryGetProperty("text", out var directText))
+                    {
+                        finalText = directText.GetString() ?? string.Empty;
+                        finalDuration = root.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
+                        finalElapsed = root.TryGetProperty("elapsed_seconds", out var elProp) ? elProp.GetDouble() : 0;
+                        finalDevice = root.TryGetProperty("device", out var devProp) ? devProp.GetString() ?? "unknown" : "unknown";
+                    }
                 }
                 catch (JsonException)
                 {

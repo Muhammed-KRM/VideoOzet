@@ -70,18 +70,26 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
         }
 
         bool isOpenRouter = settings != null &&
-                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
-                            !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
+                            settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase);
+        bool isGroq = settings != null &&
+                      settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase);
 
         var apiKeyStr = isOpenRouter
             ? settings!.OpenRouterApiKey
-            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
-                ? settings.AntigravityProxyKey
-                : _configuration["GEMINI_API_KEY"]);
+            : isGroq
+                ? settings!.GroqApiKey
+                : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+                    ? settings.AntigravityProxyKey
+                    : _configuration["GEMINI_API_KEY"]);
+
+        if (string.IsNullOrWhiteSpace(apiKeyStr) && settings != null && !string.IsNullOrWhiteSpace(settings.GroqApiKey))
+        {
+            apiKeyStr = settings.GroqApiKey;
+        }
 
         if (string.IsNullOrEmpty(apiKeyStr))
         {
-            _logger.LogWarning("GEMINI_API_KEY is not configured for STT.");
+            _logger.LogWarning("Aktif sağlayıcı için STT API anahtarı tanımlanmamış.");
             return string.Empty;
         }
 
@@ -286,9 +294,9 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
                             !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey);
 
         var effectiveModel = isOpenRouter
-            ? (settings!.OpenRouterModel.Contains("gemini", StringComparison.OrdinalIgnoreCase)
+            ? (!string.IsNullOrWhiteSpace(settings!.OpenRouterModel)
                 ? settings.OpenRouterModel.Replace(":batch", "", StringComparison.OrdinalIgnoreCase).TrimStart('~')
-                : "google/gemini-2.5-flash")
+                : "google/gemini-3.8-flash")
             : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
                 ? settings.AntigravityProxyModel
                 : ModelName);
@@ -382,12 +390,55 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Gemini STT chunk failed ({SizeKb} KB)", audioBytes.Length / 1024);
-                throw;
+                lastException = ex;
+                _logger.LogWarning("Primary STT endpoint ({BaseUrl}) failed for chunk ({SizeKb} KB): {Message}. Trying OtoEdit Groq Whisper fallback...", baseUrl, audioBytes.Length / 1024, ex.Message);
+                break;
             }
         }
 
-        throw new Exception("Bütün Gemini API anahtarları tükendi veya STT çağrısı başarısız oldu.", lastException);
+        // Yalnızca arayüzden veya ortam değişkeninden girilmiş bir Groq API anahtarı varsa yedek olarak kullan
+        var groqKey = settings != null && !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+            ? settings.GroqApiKey
+            : (_configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"]);
+
+        if (!string.IsNullOrWhiteSpace(groqKey))
+        {
+            foreach (var groqModel in new[] { "whisper-large-v3-turbo", "whisper-large-v3" })
+            {
+                try
+                {
+                    using var content = new MultipartFormDataContent();
+                    var audioContent = new ByteArrayContent(audioBytes);
+                    audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(format == "wav" ? "audio/wav" : "audio/mpeg");
+                    content.Add(audioContent, "file", $"chunk.{format}");
+                    content.Add(new StringContent(groqModel), "model");
+                    content.Add(new StringContent("tr"), "language");
+                    content.Add(new StringContent("json"), "response_format");
+
+                    using var groqReq = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/audio/transcriptions");
+                    groqReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey.Trim());
+                    groqReq.Headers.Add("User-Agent", "VideoOzet/1.0");
+                    groqReq.Content = content;
+
+                    var groqResp = await _httpClient.SendAsync(groqReq, cancellationToken);
+                    var groqBody = await groqResp.Content.ReadAsStringAsync(cancellationToken);
+                    if (groqResp.IsSuccessStatusCode)
+                    {
+                        using var doc = JsonDocument.Parse(groqBody);
+                        if (doc.RootElement.TryGetProperty("text", out var textProp))
+                        {
+                            return textProp.GetString()?.Trim() ?? string.Empty;
+                        }
+                    }
+                }
+                catch (Exception gEx)
+                {
+                    _logger.LogWarning(gEx, "Groq Whisper fallback chunk error ({Model})", groqModel);
+                }
+            }
+        }
+
+        throw new Exception("Bütün Gemini / Bulut STT anahtarları tükendi veya STT çağrısı başarısız oldu.", lastException);
     }
 
     private static string? ResolveFfmpegPath()

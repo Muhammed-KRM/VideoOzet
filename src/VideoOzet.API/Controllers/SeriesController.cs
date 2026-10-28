@@ -135,23 +135,46 @@ public class SeriesController : ControllerBase
     public async Task<IActionResult> GeneratePlanDraft(Guid id, [FromBody] SeriesDraftDto draftDto)
     {
         var request = await _dbContext.ContentRequests
+            .Include(x => x.KonuAnalizi)
             .Include(x => x.SeriPlanlari)
             .FirstOrDefaultAsync(x => x.Id == id);
 
         if (request == null)
             return NotFound(new { Mesaj = "İçerik talebi bulunamadı." });
 
+        // Eğer konu analizi henüz tamamlanmamış veya hataya düşmüşse, konu analizinden itibaren yeniden başlat
+        if (request.KonuAnalizi == null || request.KonuAnalizi.Durum != AnalizDurumu.Tamamlandi)
+        {
+            if (request.KonuAnalizi != null)
+            {
+                request.KonuAnalizi.Durum = AnalizDurumu.Isleniyor;
+                await _dbContext.SaveChangesAsync();
+            }
+
+            await _publishEndpoint.Publish(new TopicAnalysisRequestedEvent
+            {
+                ContentRequestId = request.Id,
+                EgitimId = request.EgitimId
+            });
+
+            return Accepted(new { Mesaj = "Konu analizi ve seri planı yeniden oluşturuluyor." });
+        }
+
         var currentPlan = request.SeriPlanlari.OrderByDescending(x => x.PlanNo).FirstOrDefault();
         if (currentPlan == null)
-            return BadRequest(new { Mesaj = "Öncelikle analiz tamamlanmalı." });
-
-        if (currentPlan.Onaylandi)
         {
-            // Plan onaylanmışsa yeni taslak oluşturmak yeni bir plan numarası açar.
-            // Fakat v3 tasarımında, sayı değişmedikçe onaylı plan değişmez.
-            // Sayı değiştiyse yeni plan açılır, bu SeriesPlanConsumer'da halledilebilir.
+            currentPlan = new SeriPlani
+            {
+                ContentRequestId = request.Id,
+                PlanNo = 1,
+                KullaniciKisitlariJson = JsonSerializer.Serialize(draftDto),
+                Durum = SeriPlanDurumu.Olusturuluyor,
+                OneridenFarkli = false
+            };
+            _dbContext.SeriPlanlari.Add(currentPlan);
+            await _dbContext.SaveChangesAsync();
         }
-        else
+        else if (!currentPlan.Onaylandi)
         {
             // Onaylanmamışsa üzerine yazar.
             currentPlan.KullaniciKisitlariJson = JsonSerializer.Serialize(draftDto);
@@ -235,6 +258,7 @@ public class SeriesController : ControllerBase
     public async Task<IActionResult> ReviseEpisode(Guid id, int bolumNo, [FromBody] EpisodeRevisionDto dto)
     {
         var bolum = await _dbContext.SeriBolumler
+            .Include(b => b.Revizyonlar)
             .Include(b => b.SeriPlani)
                 .ThenInclude(p => p.ContentRequest)
             .FirstOrDefaultAsync(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
@@ -247,6 +271,21 @@ public class SeriesController : ControllerBase
 
         bolum.Durum = BolumDurumu.Isleniyor;
         await _dbContext.SaveChangesAsync();
+
+        // Eğer bölümün henüz hiç revizyonu yoksa veya boş talimatla yeniden üretim istenmişse, sıfırdan üretim komutunu tetikle
+        if (!bolum.Revizyonlar.Any() || string.IsNullOrWhiteSpace(dto.Talimat))
+        {
+            await _publishEndpoint.Publish(new SeriesVideoGenerationCommand
+            {
+                ContentRequestId = id,
+                EgitimId = bolum.SeriPlani.ContentRequest.EgitimId,
+                SeriPlaniId = bolum.SeriPlaniId,
+                SeriBolumId = bolum.Id,
+                BolumNo = bolum.BolumNo
+            });
+
+            return Accepted(new { Mesaj = "Bölüm üretimi yeniden başlatıldı." });
+        }
 
         await _publishEndpoint.Publish(new SeriesVideoRevisionRequestedEvent
         {

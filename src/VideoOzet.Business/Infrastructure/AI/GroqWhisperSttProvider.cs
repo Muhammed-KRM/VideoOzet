@@ -16,20 +16,41 @@ public class GroqWhisperSttProvider : ISttProvider
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GroqWhisperSttProvider> _logger;
+    private readonly IAiProviderSettingsService? _settingsService;
 
     private const string GroqEndpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
-    private static readonly string[] CandidateModels = new[] { "whisper-large-v3", "whisper-large-v3-turbo" };
+    private static readonly string[] CandidateModels = new[] { "whisper-large-v3-turbo", "whisper-large-v3" };
 
-    public GroqWhisperSttProvider(HttpClient httpClient, IConfiguration configuration, ILogger<GroqWhisperSttProvider> logger)
+    public GroqWhisperSttProvider(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<GroqWhisperSttProvider> logger,
+        IAiProviderSettingsService? settingsService = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _logger = logger;
+        _settingsService = settingsService;
     }
 
     public async Task<string> TranscribeAsync(Stream audioStream, string fileName, CancellationToken cancellationToken = default)
     {
-        var apiKey = _configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"];
+        string? apiKey = null;
+        if (_settingsService != null)
+        {
+            try
+            {
+                var settings = await _settingsService.GetSettingsAsync(cancellationToken);
+                apiKey = settings?.GroqApiKey;
+            }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            apiKey = _configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"];
+        }
+
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             _logger.LogWarning("GROQ_API_KEY is not configured.");

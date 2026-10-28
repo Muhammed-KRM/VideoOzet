@@ -15,6 +15,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
     private readonly GeminiAudioSttProvider _geminiProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<CompositeSttProvider> _logger;
+    private readonly IAiProviderSettingsService? _settingsService;
 
     public Action<int, int>? OnProgress { get; set; }
 
@@ -23,13 +24,15 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
         LocalFasterWhisperSttProvider localWhisperProvider,
         GeminiAudioSttProvider geminiProvider,
         IConfiguration configuration,
-        ILogger<CompositeSttProvider> logger)
+        ILogger<CompositeSttProvider> logger,
+        IAiProviderSettingsService? settingsService = null)
     {
         _groqProvider = groqProvider;
         _localWhisperProvider = localWhisperProvider;
         _geminiProvider = geminiProvider;
         _configuration = configuration;
         _logger = logger;
+        _settingsService = settingsService;
     }
 
     public Task<string> TranscribeAsync(Stream audioStream, string fileName, CancellationToken cancellationToken = default)
@@ -54,41 +57,64 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
             memoryStream.Position = 0;
         }
 
-        var providerPref = _configuration["STT_PROVIDER"] ?? _configuration["Stt:Provider"] ?? "Gemini";
+        var providerPref = _configuration["STT_PROVIDER"] ?? _configuration["Stt:Provider"] ?? "Auto";
 
-        // 1. Direct Gemini Mode (Default: Maximum speed, parallel cloud chunks, no hourly audio limit)
-        if (providerPref.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
+        string? groqKey = null;
+        if (_settingsService != null)
         {
-            _logger.LogInformation("Transcribing via Gemini Parallel STT Provider (Direct Gemini Mode)...");
-            return await _geminiProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
+            try
+            {
+                var settings = await _settingsService.GetSettingsAsync(cancellationToken);
+                groqKey = settings?.GroqApiKey;
+            }
+            catch { }
+        }
+        if (string.IsNullOrWhiteSpace(groqKey))
+        {
+            groqKey = _configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"];
         }
 
-        // 2. Groq-first mode (Auto): Try Groq ultra-fast LPU; if rate limited, fallback IMMEDIATELY to Gemini
-        if (providerPref.Equals("Groq", StringComparison.OrdinalIgnoreCase) || providerPref.Equals("Auto", StringComparison.OrdinalIgnoreCase))
+        // 1. Groq-first mode: Eğer arayüzden Groq API Anahtarı girilmişse öncelikle Groq Whisper kullan
+        if (!providerPref.Equals("Local", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(groqKey))
         {
-            var groqKey = _configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"];
-            if (!string.IsNullOrWhiteSpace(groqKey))
+            try
             {
-                try
+                _logger.LogInformation("Attempting primary transcription via Groq Cloud Whisper API (whisper-large-v3-turbo)...");
+                progressCallback?.Invoke(1, 2);
+                var result = await _groqProvider.TranscribeAsync(memoryStream, fileName, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(result))
                 {
-                    _logger.LogInformation("Attempting transcription via Groq Whisper API...");
-                    progressCallback?.Invoke(1, 2);
-                    var result = await _groqProvider.TranscribeAsync(memoryStream, fileName, cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(result))
-                    {
-                        _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars).", result.Length);
-                        progressCallback?.Invoke(2, 2);
-                        return result;
-                    }
+                    _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars).", result.Length);
+                    progressCallback?.Invoke(2, 2);
+                    return result;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Groq Whisper STT unavailable or rate limited. Falling back immediately to Gemini Parallel STT...");
-                }
-
-                memoryStream.Position = 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Groq Whisper STT unavailable or rate limited. Falling back to secondary STT providers...");
             }
 
+            memoryStream.Position = 0;
+
+            try
+            {
+                if (await _localWhisperProvider.IsAvailableAsync(cancellationToken))
+                {
+                    _logger.LogInformation("Attempting transcription via Local Faster-Whisper service...");
+                    var localRes = await _localWhisperProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(localRes))
+                    {
+                        _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars).", localRes.Length);
+                        return localRes;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Local Faster-Whisper unavailable. Falling back to Gemini Parallel STT...");
+            }
+
+            memoryStream.Position = 0;
             _logger.LogInformation("Transcribing via Gemini Parallel STT Provider...");
             return await _geminiProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
         }

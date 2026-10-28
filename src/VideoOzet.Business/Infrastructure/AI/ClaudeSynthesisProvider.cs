@@ -49,10 +49,13 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 try
                 {
                     var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
-                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
-                        !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase))
                     {
-                        return settings.OpenRouterModel;
+                        return string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
+                    }
+                    if (settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return string.IsNullOrWhiteSpace(settings.GroqModel) ? "openai/gpt-oss-120b" : settings.GroqModel;
                     }
                     if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyKey))
                     {
@@ -77,6 +80,138 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
     private async Task<string> CallLlmAsync(string prompt, CancellationToken ct)
     {
+        var (text, finishReason) = await CallLlmRawAsync(prompt, ct);
+        text = StripReasoningTags(text);
+
+        if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(finishReason, "max_tokens", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("LLM yanıtı token sınırına çarptı (finish_reason={FinishReason}, len={Len}). Kaldığı yerden devam ettirme (continuation) çağrısı yapılıyor...", finishReason, text.Length);
+            try
+            {
+                string tailSnippet = text.Length > 500 ? text.Substring(text.Length - 500) : text;
+                string continuationPrompt = $"""
+                    Ürettiğin doküman çıktı token sınırı nedeniyle aşağıdaki metnin sonunda yarım kaldı:
+
+                    --- YARIM KALAN SON KISIM ---
+                    {tailSnippet}
+                    --- SON ---
+
+                    GÖREV: Yukarıdaki son cümlenin kaldığı yerden HİÇBİR BAŞLIĞI VEYA PARAGRAFI TEKRARLAMADAN doğrudan devam et ve dokümanı Sonuç / Kapanış bölümüne kadar aynı Markdown formatıyla eksiksiz tamamla.
+                    """;
+                var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct);
+                contText = StripReasoningTags(contText);
+                if (!string.IsNullOrWhiteSpace(contText))
+                {
+                    text = text.TrimEnd() + "\n" + contText.TrimStart();
+                }
+            }
+            catch (Exception contEx)
+            {
+                _logger.LogWarning(contEx, "Continuation çağrısı başarısız oldu, mevcut metin korunuyor.");
+            }
+        }
+
+        return text;
+    }
+
+    public static string NormalizeMarkdownOutput(string text, bool isVideoPlan = false)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var cleaned = StripReasoningTags(text);
+
+        // Eğer JSON çıktısıysa dokunma
+        if (cleaned.StartsWith("{") || cleaned.StartsWith("["))
+            return cleaned;
+
+        // Başlık veya içindekiler listesindeki köşeli parantez kalıntılarını temizle: "## 2. [Başlık]" -> "## 2. Başlık", "- 2. [Başlık]" -> "- 2. Başlık"
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?m)^(\s*(?:#{1,4}|[-*])\s*(?:\d+(?:\.\d+)*\.?\s*)?)\[([^\]\r\n]+)\]\s*$",
+            "$1$2");
+
+        // Sahne başlığındaki köşeli parantezleri temizle: "## Sahne 1: [Başlık]" -> "## Sahne 1: Başlık"
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?m)^(\s*#{1,4}\s*Sahne\s*\d+\s*[:–-]\s*)\[([^\]\r\n]+)\]",
+            "$1$2");
+
+        // Hedef süre normalize: "**Hedef Süre:** uzun" -> "**Hedef Süre:** ~15-20 Dakika (Uzun ve Detaylı)"
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?mi)^(\*\*Hedef Süre:\*\*\s*)uzun\s*$",
+            "$1~15-20 Dakika (Uzun ve Detaylı)");
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?mi)^(\*\*Hedef Süre:\*\*\s*)orta\s*$",
+            "$1~10-12 Dakika (Orta)");
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?mi)^(\*\*Hedef Süre:\*\*\s*)k[ıi]sa\s*$",
+            "$1~5-8 Dakika (Kısa)");
+
+        // Prompter blockquote paragrafları arasına boş '>' satırı ekle
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"(?m)^(>\s*\S.*)\r?\n(?=>\s*[""“”])",
+            "$1\n>\n");
+
+        if (isVideoPlan)
+        {
+            // Eğer Video Planı'nın başına yanlışlıkla Araştırma Özeti eklenmişse kırp
+            int idxPlan = cleaned.IndexOf("# Video Planı", StringComparison.OrdinalIgnoreCase);
+            if (idxPlan < 0) idxPlan = cleaned.IndexOf("## Sahne 1", StringComparison.OrdinalIgnoreCase);
+            if (idxPlan > 0 && cleaned.Substring(0, idxPlan).Contains("Araştırma Özeti", StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned.Substring(idxPlan).TrimStart();
+            }
+        }
+        else
+        {
+            // Eğer Araştırma Özeti'nin sonuna yanlışlıkla Video Planı eklenmişse kırp
+            int idxVp = cleaned.IndexOf("# Video Planı", StringComparison.OrdinalIgnoreCase);
+            if (idxVp < 0) idxVp = cleaned.IndexOf("## Video Planı", StringComparison.OrdinalIgnoreCase);
+            if (idxVp > 0)
+            {
+                cleaned = cleaned.Substring(0, idxVp).TrimEnd('-', '#', ' ', '\r', '\n');
+            }
+        }
+
+        return cleaned.Trim();
+    }
+
+    private static string StripReasoningTags(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"<think>.*?</think>",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+        return cleaned;
+    }
+
+    private static string NormalizeTargetLength(string targetLength)
+    {
+        if (string.IsNullOrWhiteSpace(targetLength))
+            return "10-15 Dakika (Detaylı)";
+
+        return targetLength.Trim().ToLowerInvariant() switch
+        {
+            "kisa" or "kısa" => "~5-8 Dakika (Kısa)",
+            "orta" => "~10-12 Dakika (Orta)",
+            "uzun" => "~15-20 Dakika (Uzun ve Detaylı)",
+            _ => targetLength
+        };
+    }
+
+    private async Task<(string Text, string FinishReason)> CallLlmRawAsync(string prompt, CancellationToken ct)
+    {
         AiProviderSettingsDto? settings = null;
         if (_settingsService != null)
         {
@@ -96,7 +231,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
             var openRouterUrl = $"{settings.OpenRouterBaseUrl.TrimEnd('/')}/chat/completions";
-            var openRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-2.5-flash" : settings.OpenRouterModel;
+            var openRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
             var orKeys = settings.OpenRouterApiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                                   .Select(k => k.Trim())
                                                   .ToArray();
@@ -113,7 +248,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                     var requestBody = new
                     {
                         model = openRouterModel,
-                        messages = new[] { new { role = "user", content = prompt } }
+                        messages = new[] { new { role = "user", content = prompt } },
+                        max_tokens = 16384,
+                        temperature = 0.2
                     };
                     var jsonContent = new System.Net.Http.StringContent(
                         System.Text.Json.JsonSerializer.Serialize(requestBody),
@@ -136,9 +273,10 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
                         {
                             var firstChoice = choices[0];
+                            var finishReason = firstChoice.TryGetProperty("finish_reason", out var fr) ? (fr.GetString() ?? "stop") : "stop";
                             if (firstChoice.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content))
                             {
-                                return content.GetString() ?? string.Empty;
+                                return (content.GetString() ?? string.Empty, finishReason);
                             }
                         }
                     }
@@ -161,12 +299,11 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "OpenRouter modeli {Model} beklenmedik hata ile başarısız oldu", openRouterModel);
-                    throw new Exception($"[OPENROUTER_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}", ex);
+                    lastOrEx = ex;
+                    _logger.LogWarning("OpenRouter modeli {Model} başarısız oldu ({Message}), OtoEdit yedek zincirine geçiliyor...", openRouterModel, ex.Message);
+                    break;
                 }
             }
-
-            throw new Exception("[OPENROUTER_API_ERROR]: Servis şu anda yoğun talep altında veya limit aşıldı.", lastOrEx);
         }
 
         var anthropicKey = _configuration["ANTHROPIC_API_KEY"];
@@ -182,18 +319,22 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             var parameters = new MessageParameters
             {
                 Messages = messages,
-                MaxTokens = 4096,
+                MaxTokens = 8192,
                 Model = model,
                 Temperature = 0.2m // Düşük sıcaklık, tutarlı ve halüsinasyonsuz çıktılar için
             };
 
             var response = await client.Messages.GetClaudeMessageAsync(parameters, ct);
-            return (response.Content[0] as TextContent)?.Text ?? string.Empty;
+            return ((response.Content[0] as TextContent)?.Text ?? string.Empty, response.StopReason ?? "stop");
         }
 
-        var geminiKey = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
-            ? settings.AntigravityProxyKey
-            : _configuration["GEMINI_API_KEY"];
+        // 2. Yerel Antigravity Proxy (yalnızca ActiveProvider 'antigravity' ise veya ayar servisi yoksa)
+        bool allowLocalProxy = settings == null || settings.ActiveProvider.Equals("antigravity", StringComparison.OrdinalIgnoreCase);
+        var geminiKey = allowLocalProxy
+            ? (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey)
+                ? settings.AntigravityProxyKey
+                : _configuration["GEMINI_API_KEY"])
+            : null;
 
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
@@ -209,7 +350,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                                    .ToArray();
             
             Exception lastException = null;
-            int maxRetries = Math.Max(apiKeys.Length, 3);
+            int maxRetries = Math.Max(apiKeys.Length, 1);
 
             for (int tryCount = 0; tryCount < maxRetries; tryCount++)
             {
@@ -218,7 +359,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 try
                 {
                     using var httpClient = new System.Net.Http.HttpClient();
-                    httpClient.Timeout = TimeSpan.FromMinutes(10);
+                    httpClient.Timeout = TimeSpan.FromMinutes(5);
                     
                     var requestBody = new
                     {
@@ -226,7 +367,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         messages = new[]
                         {
                             new { role = "user", content = prompt }
-                        }
+                        },
+                        max_tokens = 16384,
+                        temperature = 0.2
                     };
                     var jsonContent = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
                     var requestUrl = $"{proxyBaseUrl}/chat/completions";
@@ -245,10 +388,11 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
                         {
                             var firstChoice = choices[0];
+                            var finishReason = firstChoice.TryGetProperty("finish_reason", out var fr) ? (fr.GetString() ?? "stop") : "stop";
                             if (firstChoice.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content))
                             {
                                 var textResult = content.GetString();
-                                return textResult ?? string.Empty;
+                                return (textResult ?? string.Empty, finishReason);
                             }
                         }
                     }
@@ -271,13 +415,82 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Gemini modeli {Model} beklenmedik hata ile başarısız oldu", geminiModel);
-                    throw new Exception($"[GEMINI_API_ERROR]: Beklenmeyen bir hata oluştu: {ex.Message}", ex);
+                    lastException = ex;
+                    _logger.LogWarning("Antigravity Proxy ({Model}) erişilemedi ({Message}).", geminiModel, ex.Message);
+                    break;
                 }
             }
+        }
 
-            _logger.LogError(lastException, "Gemini modeli {Model} tüm denemelere rağmen başarısız oldu", geminiModel);
-            throw new Exception("[GEMINI_API_ERROR]: Servis şu anda yoğun talep altında. Lütfen kısa bir süre sonra tekrar deneyin.", lastException);
+        // 3. Groq Cloud LLM (Yalnızca arayüzden veya ortam değişkeninden girilmiş bir Groq anahtarı varsa kullanılır)
+        var groqKey = settings != null && !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+            ? settings.GroqApiKey
+            : (_configuration["GROQ_API_KEY"] ?? _configuration["Groq:ApiKey"]);
+
+        if (!string.IsNullOrWhiteSpace(groqKey))
+        {
+            var preferredGroqModel = settings != null && !string.IsNullOrWhiteSpace(settings.GroqModel) ? settings.GroqModel : "openai/gpt-oss-120b";
+            var candidateModels = new[] { preferredGroqModel, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" }
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            int[] maxCharsPasses = { 9500, 7200, 5800 };
+            for (int pass = 0; pass < maxCharsPasses.Length; pass++)
+            {
+                if (pass > 0)
+                {
+                    int waitSeconds = pass == 1 ? 14 : 20;
+                    _logger.LogInformation("Groq TPM penceresinin yenilenmesi için {Wait} saniye beklenip tekrar deneniyor (Pass {Pass})...", waitSeconds, pass + 1);
+                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds), ct);
+                }
+
+                var groqPrompt = CompactPromptForGroq(prompt, maxCharsPasses[pass]);
+                foreach (var groqModel in candidateModels)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Groq Cloud LLM ({Model}) ile sentez çağrısı yapılıyor (Prompt: {Len} krk)...", groqModel, groqPrompt.Length);
+                        using var groqClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+                        var groqBody = new
+                        {
+                            model = groqModel,
+                            messages = new[] { new { role = "user", content = groqPrompt } },
+                            max_tokens = 8192,
+                            temperature = 0.2
+                        };
+                        using var groqReq = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+                        groqReq.Headers.Add("Authorization", $"Bearer {groqKey.Trim()}");
+                        groqReq.Headers.Add("User-Agent", "VideoOzet/1.0");
+                        groqReq.Content = new System.Net.Http.StringContent(
+                            System.Text.Json.JsonSerializer.Serialize(groqBody),
+                            System.Text.Encoding.UTF8,
+                            "application/json");
+
+                        var groqResp = await groqClient.SendAsync(groqReq, ct);
+                        var groqStr = await groqResp.Content.ReadAsStringAsync(ct);
+                        if (groqResp.IsSuccessStatusCode)
+                        {
+                            using var doc = System.Text.Json.JsonDocument.Parse(groqStr);
+                            if (doc.RootElement.TryGetProperty("choices", out var ch) && ch.GetArrayLength() > 0 &&
+                                ch[0].TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var cnt))
+                            {
+                                var finishReason = ch[0].TryGetProperty("finish_reason", out var fr) ? (fr.GetString() ?? "stop") : "stop";
+                                var textResult = cnt.GetString();
+                                if (!string.IsNullOrWhiteSpace(textResult))
+                                    return (textResult, finishReason);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Groq LLM ({Model}) returned {Status}: {Body}", groqModel, groqResp.StatusCode, groqStr);
+                        }
+                    }
+                    catch (Exception gEx)
+                    {
+                        _logger.LogWarning(gEx, "Groq LLM ({Model}) sentez çağrısı başarısız oldu.", groqModel);
+                    }
+                }
+            }
         }
 
         var openAiKey = _configuration["OPENAI_API_KEY"] ?? _configuration["OpenAI:ApiKey"];
@@ -287,23 +500,108 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             var chatClient = new ChatClient(openAiModel, openAiKey);
             var chatMessages = new List<ChatMessage> { new UserChatMessage(prompt) };
             var chatResponse = await chatClient.CompleteChatAsync(chatMessages, cancellationToken: ct);
-            return chatResponse.Value.Content[0].Text ?? string.Empty;
+            return (chatResponse.Value.Content[0].Text ?? string.Empty, "stop");
+        }
+
+        if (_settingsService != null)
+        {
+            throw new InvalidOperationException("Yapay zeka sağlayıcısından yanıt alınamadı. Lütfen sağ üstteki 'API Ayarları' menüsünden girdiğiniz API anahtarını ve model seçimini kontrol edin.");
         }
 
         _logger.LogWarning("No AI API key (ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY) configured. Returning mock response.");
-        return "Mock Claude Response";
+        return ("Mock Claude Response", "stop");
+    }
+
+    private static string CompactPromptForGroq(string prompt, int maxChars)
+    {
+        if (string.IsNullOrEmpty(prompt) || prompt.Length <= maxChars)
+            return prompt;
+
+        // Eğer bu bir Revizyon çağrısıysa (MEVCUT DOKÜMAN içeriyorsa), mevcut dokümanı ve revizyon talimatını ASLA kesme;
+        // yalnızca KAYNAK BAĞLAMI kısmını kısalt:
+        int refIdx = prompt.IndexOf("KAYNAK BAĞLAMI (Referans gerekirse):", StringComparison.Ordinal);
+        int rulesIdx = prompt.IndexOf("ÇOK KRİTİK VE KESİN KURALLAR:", refIdx > 0 ? refIdx : 0, StringComparison.Ordinal);
+        if (refIdx > 0 && rulesIdx > refIdx)
+        {
+            string beforeRef = prompt.Substring(0, refIdx + "KAYNAK BAĞLAMI (Referans gerekirse):".Length);
+            string afterRef = prompt.Substring(rulesIdx);
+            int availForRef = Math.Max(800, maxChars - beforeRef.Length - afterRef.Length);
+            string refBody = prompt.Substring(beforeRef.Length, rulesIdx - beforeRef.Length);
+            if (refBody.Length > availForRef)
+            {
+                refBody = "\n" + refBody.Substring(0, availForRef) + "\n[... Kaynak bağlamı kısaltıldı ...]\n\n";
+            }
+            return beforeRef + refBody + afterRef;
+        }
+
+        // Eğer prompt içinde birden fazla [KAYNAK #...] bloğu varsa, ortadaki bir kaynağı tamamen silmemek için
+        // her kaynağın başından (Damıtılmış Özet + Transkript başı) eşit pay ayırarak sıkıştır.
+        int firstSourceIdx = prompt.IndexOf("[KAYNAK #", StringComparison.Ordinal);
+        int lastSourceIdx = prompt.LastIndexOf("[KAYNAK #", StringComparison.Ordinal);
+        int lastSepIdx = lastSourceIdx >= 0 ? prompt.IndexOf("\n---", lastSourceIdx, StringComparison.Ordinal) : -1;
+
+        if (firstSourceIdx >= 0 && lastSepIdx > firstSourceIdx)
+        {
+            int sourcesEndIdx = lastSepIdx + 4;
+            string prefix = prompt.Substring(0, firstSourceIdx);
+            string sourcesSection = prompt.Substring(firstSourceIdx, sourcesEndIdx - firstSourceIdx);
+            string suffix = prompt.Substring(sourcesEndIdx);
+
+            int maxPrefix = (int)(maxChars * 0.25);
+            if (prefix.Length > maxPrefix)
+            {
+                prefix = prefix.Substring(0, maxPrefix - 120) + "\n[...]\n" + prefix.Substring(prefix.Length - 120);
+            }
+
+            int maxSuffix = Math.Max(3800, (int)(maxChars * 0.42));
+            if (suffix.Length > maxSuffix)
+            {
+                // Eğer suffix başında "--- KONU VE BAŞLIK DÖKÜMÜ ---" varsa hem başını hem sonundaki kuralları koru
+                int halfSuffix = maxSuffix / 2;
+                suffix = suffix.Substring(0, halfSuffix) + "\n[...]\n" + suffix.Substring(suffix.Length - (maxSuffix - halfSuffix));
+            }
+
+            int remainingForSources = Math.Max(1800, maxChars - prefix.Length - suffix.Length);
+            var rawBlocks = sourcesSection.Split(new[] { "[KAYNAK #" }, StringSplitOptions.RemoveEmptyEntries);
+            if (rawBlocks.Length > 0)
+            {
+                int perSourceBudget = Math.Max(350, remainingForSources / rawBlocks.Length);
+                var sb = new System.Text.StringBuilder(prefix);
+                foreach (var raw in rawBlocks)
+                {
+                    var block = "[KAYNAK #" + raw;
+                    if (block.Length > perSourceBudget)
+                    {
+                        block = block.Substring(0, perSourceBudget) + "\n[... Kaynak metninin devamı kısaltıldı ...]\n---\n";
+                    }
+                    sb.Append(block);
+                }
+                sb.Append(suffix);
+                return sb.ToString();
+            }
+        }
+
+        // Fallback: Baş ve sonu koru
+        int headChars = (int)(maxChars * 0.55);
+        int tailChars = maxChars - headChars;
+
+        return prompt.Substring(0, headChars)
+             + "\n\n[... Uzun kaynak metinleri token limiti nedeniyle kısaltıldı ...]\n\n"
+             + prompt.Substring(prompt.Length - tailChars);
     }
 
     public async Task<string> GenerateResearchSummaryAsync(string topic, string targetLength, string targetAudience, string contextData, CancellationToken ct = default)
     {
-        var prompt = string.Format(PromptTemplates.SynthesisResearchPrompt, topic, targetLength, targetAudience, contextData);
-        return await CallLlmAsync(prompt, ct);
+        var prompt = string.Format(PromptTemplates.SynthesisResearchPrompt, topic, NormalizeTargetLength(targetLength), targetAudience, contextData);
+        var raw = await CallLlmAsync(prompt, ct);
+        return NormalizeMarkdownOutput(raw, isVideoPlan: false);
     }
 
     public async Task<string> GenerateVideoPlanAsync(string topic, string targetLength, string contextData, CancellationToken ct = default)
     {
-        var prompt = string.Format(PromptTemplates.SynthesisVideoPlanPrompt, topic, targetLength, contextData);
-        return await CallLlmAsync(prompt, ct);
+        var prompt = string.Format(PromptTemplates.SynthesisVideoPlanPrompt, topic, NormalizeTargetLength(targetLength), contextData);
+        var raw = await CallLlmAsync(prompt, ct);
+        return NormalizeMarkdownOutput(raw, isVideoPlan: true);
     }
 
     public async Task<string> ExtractClaimsAsync(string text, CancellationToken ct = default)
@@ -327,7 +625,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     public async Task<string> ReviseContentAsync(string originalContent, string revisionInstruction, string contentType, string topic, string contextData = "", CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.RevisionPrompt, contentType, originalContent, revisionInstruction, topic, contextData);
-        return await CallLlmAsync(prompt, ct);
+        var raw = await CallLlmAsync(prompt, ct);
+        bool isPlan = contentType.Contains("Plan", StringComparison.OrdinalIgnoreCase);
+        return NormalizeMarkdownOutput(raw, isVideoPlan: isPlan);
     }
 
     public async Task<string> ReQualityCheckAsync(string currentContent, string previousQcReportJson, string contextData, int claimCount = 8, CancellationToken ct = default)
@@ -351,12 +651,34 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
     public async Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, string userInstructions = "", CancellationToken ct = default)
     {
-        var instructions = string.IsNullOrWhiteSpace(userInstructions)
-            ? "Özel bir talimat belirtilmedi. Standart format ve kurallara tam sadık kalarak üret."
-            : userInstructions;
+        var enrichedContext = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(bolumKonulariJson))
+        {
+            enrichedContext.AppendLine($"[BU BÖLÜMDE İŞLENECEK ALT KONULAR]: {bolumKonulariJson}");
+        }
+        if (!string.IsNullOrWhiteSpace(oncekiVideoDevirNotuJson))
+        {
+            enrichedContext.AppendLine($"[ÖNCEKİ BÖLÜMDEN DEVİR NOTU]: {oncekiVideoDevirNotuJson}");
+        }
+        if (!string.IsNullOrWhiteSpace(userInstructions))
+        {
+            enrichedContext.AppendLine($"[KULLANICI ÖZEL DİREKTİFİ]: {userInstructions}");
+        }
+        enrichedContext.AppendLine(contextData);
 
-        var prompt = string.Format(PromptTemplates.SeriesVideoGenerationPrompt, bolumBasligi, bolumKonulariJson, oncekiVideoDevirNotuJson, targetAudience, contextData, instructions);
-        return await CallLlmAsync(prompt, ct);
+        var fullContext = enrichedContext.ToString();
+
+        // Hızlı Mod ile birebir aynı araştırma özeti ve video planı formatını üretmek için
+        // aynı iki üretim fonksiyonunu çağırıp standart JSON olarak paketliyoruz:
+        var arastirmaOzeti = await GenerateResearchSummaryAsync(bolumBasligi, "Uzun ve Detaylı (10-15 Dakika)", targetAudience, fullContext, ct);
+        var videoPlani = await GenerateVideoPlanAsync(bolumBasligi, "10-15 Dakika", fullContext, ct);
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            ArastirmaOzeti = arastirmaOzeti,
+            VideoPlani = videoPlani,
+            DevirNotu = $"{bolumBasligi} işlendi."
+        });
     }
 
     public async Task<string> ExtractSourceTopicsAsync(string kaynakAdi, string metin, int parcaNo, int parcaSayisi, CancellationToken ct = default)

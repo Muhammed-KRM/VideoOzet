@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using VideoOzet.Business.DTOs;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
@@ -98,11 +99,16 @@ public class ContentRequestDetailsController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
+    private readonly ISourceContextBuilder? _sourceContextBuilder;
 
-    public ContentRequestDetailsController(AppDbContext dbContext, ISynthesisProvider synthesisProvider)
+    public ContentRequestDetailsController(
+        AppDbContext dbContext,
+        ISynthesisProvider synthesisProvider,
+        ISourceContextBuilder? sourceContextBuilder = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
+        _sourceContextBuilder = sourceContextBuilder;
     }
 
     /// <summary>
@@ -263,6 +269,17 @@ public class ContentRequestDetailsController : ControllerBase
         var revisedOzet = currentOzet;
         var revisedPlan = currentPlan;
 
+        var revisionContext = string.Empty;
+        if (_sourceContextBuilder != null)
+        {
+            try
+            {
+                var sc = await _sourceContextBuilder.BuildContextAsync(request.EgitimId, new[] { request.Konu }, 80000, ct);
+                revisionContext = sc.ContextText;
+            }
+            catch { }
+        }
+
         if (hedefAlan == "hepsi" || hedefAlan == "ozet")
         {
             revisedOzet = await _synthesisProvider.ReviseContentAsync(
@@ -270,7 +287,7 @@ public class ContentRequestDetailsController : ControllerBase
                 dto.RevizeTalimati,
                 "Araştırma Özeti",
                 request.Konu,
-                "",
+                revisionContext,
                 ct);
         }
 
@@ -279,9 +296,9 @@ public class ContentRequestDetailsController : ControllerBase
             revisedPlan = await _synthesisProvider.ReviseContentAsync(
                 currentPlan,
                 dto.RevizeTalimati,
-                "Video İçerik ve Bölüm Planı",
+                "Video Planı",
                 request.Konu,
-                "",
+                revisionContext,
                 ct);
         }
 
@@ -366,12 +383,12 @@ public class ContentRequestDetailsController : ControllerBase
             }
         }
 
-        // Varsa bir önceki versiyonun QC raporunu al
+        // Varsa bir önceki versiyonun QC raporunu al (V1 için önceki rapor gönderilmez, sıfırdan kaynaklarla doğrulanır)
         var prevVersion = request.Versions
             .Where(v => v.VersiyonNo < versiyonNo)
             .OrderByDescending(v => v.VersiyonNo)
             .FirstOrDefault();
-        var prevReport = prevVersion?.DetayliRapor ?? request.QcResult?.DetayliRapor ?? "[]";
+        var prevReport = prevVersion?.DetayliRapor;
 
         var qc = await ExecuteQualityCheckInternal(request, targetVersion.ArastirmaOzeti, prevReport, ct);
         targetVersion.ToplamIddiaSayisi = qc.toplam;
@@ -381,6 +398,17 @@ public class ContentRequestDetailsController : ControllerBase
         targetVersion.DetayliRapor = qc.raporJson;
         targetVersion.GuvenSkorYuzde = qc.guvenSkor;
         targetVersion.QcTarihi = DateTime.UtcNow;
+
+        if (request.QcResult != null)
+        {
+            request.QcResult.ToplamIddiaSayisi = qc.toplam;
+            request.QcResult.DesteklenenSayisi = qc.desteklenen;
+            request.QcResult.BelirsizSayisi = qc.belirsiz;
+            request.QcResult.DesteklenmeyenSayisi = qc.desteklenmeyen;
+            request.QcResult.DetayliRapor = qc.raporJson;
+            request.QcResult.GuvenSkorYuzde = qc.guvenSkor;
+            request.QcResult.OlusturmaTarihi = DateTime.UtcNow;
+        }
 
         await _dbContext.SaveChangesAsync(ct);
 
@@ -395,10 +423,10 @@ public class ContentRequestDetailsController : ControllerBase
     {
         var contextData = string.Empty;
         var chunkIdsStr = request.GeneratedContent?.KullanilanKaynaklar;
+        List<Guid> chunkIds = new();
 
         if (!string.IsNullOrEmpty(chunkIdsStr))
         {
-            List<Guid> chunkIds = new();
             try
             {
                 if (chunkIdsStr.TrimStart().StartsWith("["))
@@ -411,22 +439,28 @@ public class ContentRequestDetailsController : ControllerBase
                 }
             }
             catch { }
+        }
 
-            if (chunkIds.Any())
+        if (_sourceContextBuilder != null)
+        {
+            var sc = await _sourceContextBuilder.BuildFromChunkIdsAsync(request.EgitimId, chunkIds, ct);
+            contextData = sc.ContextText;
+        }
+
+        if (string.IsNullOrWhiteSpace(contextData) && chunkIds.Any())
+        {
+            var chunks = await _dbContext.VideoChunkDocuments
+                .Where(c => chunkIds.Contains(c.Id))
+                .Take(15)
+                .ToListAsync(ct);
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var chunk in chunks)
             {
-                var chunks = await _dbContext.VideoChunkDocuments
-                    .Where(c => chunkIds.Contains(c.Id))
-                    .Take(15)
-                    .ToListAsync(ct);
-
-                var sb = new System.Text.StringBuilder();
-                foreach (var chunk in chunks)
-                {
-                    sb.AppendLine($"[Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
-                    sb.AppendLine(chunk.Text);
-                }
-                contextData = sb.ToString();
+                sb.AppendLine($"[Zaman={chunk.StartTimeMs / 1000.0}-{chunk.EndTimeMs / 1000.0}s]");
+                sb.AppendLine(chunk.Text);
             }
+            contextData = sb.ToString();
         }
 
         if (string.IsNullOrWhiteSpace(contextData))
@@ -449,12 +483,18 @@ public class ContentRequestDetailsController : ControllerBase
             }
         }
 
-        var batchQcResponse = await _synthesisProvider.ReQualityCheckAsync(
-            contentText,
-            previousQcReportJson ?? string.Empty,
-            contextData,
-            claimCount: 8,
-            ct);
+        var batchQcResponse = !string.IsNullOrWhiteSpace(previousQcReportJson) && previousQcReportJson != "[]"
+            ? await _synthesisProvider.ReQualityCheckAsync(
+                contentText,
+                previousQcReportJson,
+                contextData,
+                claimCount: 8,
+                ct)
+            : await _synthesisProvider.BatchQualityCheckAsync(
+                contentText,
+                contextData,
+                claimCount: 8,
+                ct);
 
         var cleanJson = batchQcResponse.Trim();
         if (cleanJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase))

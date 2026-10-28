@@ -29,55 +29,78 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
 
           <!-- İçerik -->
           <div class="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
-            <!-- Sağlayıcı Seçimi (2 Seçenek: Antigravity vs OpenRouter) -->
+            <!-- Sağlayıcı Seçimi (3 Seçenek: OpenRouter, Groq Cloud, Yerel Proxy) -->
             <div>
               <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-                Aktif Yapay Zeka Sağlayıcısı
+                Aktif Yapay Zeka Sağlayıcısı (Sadece Buradan Girdiğiniz API Anahtarları Kullanılır)
               </label>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <!-- Seçenek 1: Mevcut Antigravity Proxy -->
-                <button
-                  type="button"
-                  (click)="selectProvider('antigravity')"
-                  class="flex flex-col items-start p-4 rounded-xl border text-left transition-all relative"
-                  [ngClass]="form().activeProvider === 'antigravity'
-                    ? 'border-purple-500 bg-purple-500/10 shadow-lg shadow-purple-500/10'
-                    : 'border-slate-700/80 bg-slate-800/50 hover:border-slate-600'"
-                >
-                  <div class="flex items-center justify-between w-full mb-2">
-                    <span class="px-2.5 py-0.5 text-xs font-bold rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      Antigravity AI (Mevcut)
-                    </span>
-                    @if (form().activeProvider === 'antigravity') {
-                      <span class="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
-                    }
-                  </div>
-                  <div class="font-semibold text-white text-sm">Yerel Antigravity Proxy</div>
-                  <p class="text-xs text-slate-400 mt-1">
-                    Mevcut yerel proxy ({{ form().antigravityProxyUrl }}) üzerinden Gemini 3.8 Flash / Claude modellerini kullanır.
-                  </p>
-                </button>
-
-                <!-- Seçenek 2: OpenRouter API -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <!-- Seçenek 1: OpenRouter API -->
                 <button
                   type="button"
                   (click)="selectProvider('openrouter')"
-                  class="flex flex-col items-start p-4 rounded-xl border text-left transition-all relative"
+                  class="flex flex-col items-start p-3.5 rounded-xl border text-left transition-all relative"
                   [ngClass]="form().activeProvider === 'openrouter'
                     ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-500/10'
                     : 'border-slate-700/80 bg-slate-800/50 hover:border-slate-600'"
                 >
-                  <div class="flex items-center justify-between w-full mb-2">
-                    <span class="px-2.5 py-0.5 text-xs font-bold rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  <div class="flex items-center justify-between w-full mb-1.5">
+                    <span class="px-2 py-0.5 text-[11px] font-bold rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                       OpenRouter API
                     </span>
                     @if (form().activeProvider === 'openrouter') {
                       <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
                     }
                   </div>
-                  <div class="font-semibold text-white text-sm">OpenRouter Bulut Modelleri</div>
-                  <p class="text-xs text-slate-400 mt-1">
-                    Başka bilgisayarda veya bulutta OpenRouter API anahtarınızla istediğiniz modeli seçip çalıştırın.
+                  <div class="font-semibold text-white text-xs">OpenRouter Modelleri</div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    OpenRouter API anahtarınızla Gemini, Claude, GPT, DeepSeek modellerini kullanın.
+                  </p>
+                </button>
+
+                <!-- Seçenek 2: Groq Cloud API -->
+                <button
+                  type="button"
+                  (click)="selectProvider('groq')"
+                  class="flex flex-col items-start p-3.5 rounded-xl border text-left transition-all relative"
+                  [ngClass]="form().activeProvider === 'groq'
+                    ? 'border-amber-400 bg-amber-500/10 shadow-lg shadow-amber-500/10'
+                    : 'border-slate-700/80 bg-slate-800/50 hover:border-slate-600'"
+                >
+                  <div class="flex items-center justify-between w-full mb-1.5">
+                    <span class="px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Groq Cloud API
+                    </span>
+                    @if (form().activeProvider === 'groq') {
+                      <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    }
+                  </div>
+                  <div class="font-semibold text-white text-xs">Groq Whisper + LLM</div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    Tek bir Groq anahtarıyla (gsk_...) hem ultra hızlı Whisper STT hem LLM özetleme çalıştırın.
+                  </p>
+                </button>
+
+                <!-- Seçenek 3: Yerel / Özel Proxy -->
+                <button
+                  type="button"
+                  (click)="selectProvider('antigravity')"
+                  class="flex flex-col items-start p-3.5 rounded-xl border text-left transition-all relative"
+                  [ngClass]="form().activeProvider === 'antigravity'
+                    ? 'border-purple-500 bg-purple-500/10 shadow-lg shadow-purple-500/10'
+                    : 'border-slate-700/80 bg-slate-800/50 hover:border-slate-600'"
+                >
+                  <div class="flex items-center justify-between w-full mb-1.5">
+                    <span class="px-2 py-0.5 text-[11px] font-bold rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Yerel / Özel Proxy
+                    </span>
+                    @if (form().activeProvider === 'antigravity') {
+                      <span class="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
+                    }
+                  </div>
+                  <div class="font-semibold text-white text-xs">Özel Proxy Sunucusu</div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    Kendi bilgisayarınızdaki veya ağınızdaki OpenAI uyumlu proxy adresini kullanın.
                   </p>
                 </button>
               </div>
@@ -93,7 +116,7 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
                   <span class="text-[11px] text-slate-400">Endpoint: {{ form().openRouterBaseUrl }}</span>
                 </div>
 
-                <!-- API Key -->
+                <!-- OpenRouter API Key -->
                 <div>
                   <label class="block text-xs font-medium text-slate-300 mb-1.5">OpenRouter API Anahtarı</label>
                   <div class="relative">
@@ -174,7 +197,7 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
                   <select
                     [ngModel]="form().openRouterModel"
                     (ngModelChange)="updateField('openRouterModel', $event)"
-                    size="6"
+                    size="5"
                     class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
                   >
                     @for (group of groupedOpenRouterModels(); track group.category) {
@@ -205,21 +228,71 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
               </div>
             }
 
-            <!-- Antigravity Proxy Ayarları -->
+            <!-- Groq Cloud API Ayarları -->
+            @if (form().activeProvider === 'groq') {
+              <div class="space-y-4 p-4 rounded-xl bg-slate-950/70 border border-slate-800">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-semibold text-amber-400 flex items-center gap-2">
+                    ⚡ Groq Cloud (Whisper STT + LLM) Yapılandırması
+                  </h3>
+                  <span class="text-[11px] text-slate-400">https://api.groq.com/openai/v1</span>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-medium text-slate-300 mb-1.5">Groq API Anahtarı (gsk_...)</label>
+                  <div class="relative">
+                    <input
+                      [type]="showGroqKey() ? 'text' : 'password'"
+                      [ngModel]="form().groqApiKey"
+                      (ngModelChange)="updateField('groqApiKey', $event)"
+                      placeholder="gsk_..."
+                      class="w-full px-3.5 py-2.5 pr-20 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      type="button"
+                      (click)="showGroqKey.set(!showGroqKey())"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:text-white"
+                    >
+                      {{ showGroqKey() ? 'Gizle' : 'Göster' }}
+                    </button>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    Bu anahtar hem videodan metin çıkarma (Whisper Large V3 Turbo) hem de özet/senaryo üretimi için kullanılır.
+                  </p>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-medium text-slate-300 mb-1.5">Groq LLM Modeli</label>
+                  <select
+                    [ngModel]="form().groqModel"
+                    (ngModelChange)="updateField('groqModel', $event)"
+                    class="w-full px-3.5 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+                  >
+                    @for (m of settingsService.groqModels(); track m.id) {
+                      <option [value]="m.id">{{ m.name }}</option>
+                    }
+                    @if (settingsService.groqModels().length === 0) {
+                      <option value="openai/gpt-oss-120b">GPT-OSS 120B (Groq LPU - Önerilen)</option>
+                      <option value="openai/gpt-oss-20b">GPT-OSS 20B (Groq LPU - Hızlı)</option>
+                      <option value="qwen/qwen3.8-27b">Qwen 3.8 27B (Groq LPU)</option>
+                    }
+                  </select>
+                </div>
+              </div>
+            }
+
+            <!-- Antigravity / Yerel Proxy Ayarları -->
             @if (form().activeProvider === 'antigravity') {
               <div class="space-y-4 p-4 rounded-xl bg-slate-950/70 border border-slate-800">
                 <div class="flex items-center justify-between">
                   <h3 class="text-sm font-semibold text-purple-300 flex items-center gap-2">
-                    🚀 Antigravity AI Proxy Yapılandırması
+                    🚀 Yerel / Özel Proxy Yapılandırması
                   </h3>
-                  <span class="px-2 py-0.5 text-[11px] rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                    Varsayılan Sistem
-                  </span>
                 </div>
 
                 <!-- Antigravity Model Seçimi -->
                 <div>
-                  <label class="block text-xs font-medium text-slate-300 mb-1.5">Kullanılacak Antigravity Modeli</label>
+                  <label class="block text-xs font-medium text-slate-300 mb-1.5">Kullanılacak Proxy Modeli</label>
                   <select
                     [ngModel]="form().antigravityProxyModel"
                     (ngModelChange)="updateField('antigravityProxyModel', $event)"
@@ -257,14 +330,48 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
                     />
                   </div>
                   <div>
-                    <label class="block text-xs font-medium text-slate-300 mb-1">Proxy API Key (Çoklu anahtar için virgül kullanın)</label>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Proxy API Key</label>
                     <input
-                      type="text"
+                      [type]="showProxyKey() ? 'text' : 'password'"
                       [ngModel]="form().antigravityProxyKey"
                       (ngModelChange)="updateField('antigravityProxyKey', $event)"
+                      placeholder="sk-..."
                       class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
                     />
                   </div>
+                </div>
+              </div>
+            }
+
+            <!-- OpenRouter veya Proxy seçiliyken Opsiyonel Groq Whisper STT Anahtarı Alanı -->
+            @if (form().activeProvider !== 'groq') {
+              <div class="p-4 rounded-xl bg-slate-950/50 border border-amber-500/20 space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                    🎙️ Ses Deşifre (Whisper STT) İçin Groq API Anahtarı (Opsiyonel ama Önerilen)
+                  </label>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                    Ultra Hızlı STT
+                  </span>
+                </div>
+                <p class="text-[11px] text-slate-400">
+                  Groq API anahtarınızı (<code class="text-amber-300">gsk_...</code>) girerseniz videoların sesinden metin çıkarma işlemi (STT) saniyeler içinde Groq Whisper ile yapılır. Boş bırakırsanız seçili sağlayıcı kullanılır.
+                </p>
+                <div class="relative">
+                  <input
+                    [type]="showGroqKey() ? 'text' : 'password'"
+                    [ngModel]="form().groqApiKey"
+                    (ngModelChange)="updateField('groqApiKey', $event)"
+                    placeholder="gsk_... (İsteğe bağlı Groq API Anahtarı)"
+                    class="w-full px-3.5 py-2 pr-20 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    type="button"
+                    (click)="showGroqKey.set(!showGroqKey())"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] rounded bg-slate-800 text-slate-300 hover:text-white"
+                  >
+                    {{ showGroqKey() ? 'Gizle' : 'Göster' }}
+                  </button>
                 </div>
               </div>
             }
@@ -331,6 +438,8 @@ export class SettingsModalComponent {
   readonly settingsService = inject(SettingsService);
 
   readonly showApiKey = signal(false);
+  readonly showGroqKey = signal(false);
+  readonly showProxyKey = signal(false);
   readonly saveMessage = signal('');
   readonly modelSearchQuery = signal('');
   readonly selectedCategoryChip = signal('ALL');
@@ -346,12 +455,14 @@ export class SettingsModalComponent {
   ];
 
   readonly form = signal<AiProviderSettings>({
-    activeProvider: 'antigravity',
+    activeProvider: 'openrouter',
     openRouterApiKey: '',
     openRouterBaseUrl: 'https://openrouter.ai/api/v1',
-    openRouterModel: 'google/gemini-2.5-flash',
+    openRouterModel: 'google/gemini-3.8-flash',
+    groqApiKey: '',
+    groqModel: 'openai/gpt-oss-120b',
     antigravityProxyUrl: 'http://localhost:8045/v1',
-    antigravityProxyKey: 'sk-ea6e0c519b12403784eb5cdf79ca2615',
+    antigravityProxyKey: '',
     antigravityProxyModel: 'gemini-3.8-flash-tiered'
   });
 
@@ -385,7 +496,7 @@ export class SettingsModalComponent {
     }, { allowSignalWrites: true });
   }
 
-  selectProvider(provider: 'openrouter' | 'antigravity'): void {
+  selectProvider(provider: 'openrouter' | 'groq' | 'antigravity'): void {
     this.form.update(f => ({ ...f, activeProvider: provider }));
     this.settingsService.testResult.set(null);
     this.saveMessage.set('');

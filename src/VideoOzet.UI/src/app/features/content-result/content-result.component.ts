@@ -90,8 +90,8 @@ export class ContentResultComponent implements OnChanges {
     } else {
       const ozet = this.result.generatedContent?.arastirmaOzeti ?? this.result.arastirmaOzeti ?? '';
       const plan = this.result.generatedContent?.videoPlani ?? this.result.videoPlani ?? '';
-      this.parsedOzet = ozet ? (marked.parse(ozet) as string) : '';
-      this.parsedPlan = plan ? (marked.parse(plan) as string) : '';
+      this.parsedOzet = this.parseMarkdown(ozet);
+      this.parsedPlan = this.parseMarkdown(plan);
       this.activeVersion = null;
       this.updateActiveVersionQc(null);
     }
@@ -101,10 +101,18 @@ export class ContentResultComponent implements OnChanges {
     this.activeVersion = version;
     const ozet = version?.arastirmaOzeti ?? '';
     const plan = version?.videoPlani ?? '';
-    this.parsedOzet = ozet ? (marked.parse(ozet) as string) : '';
-    this.parsedPlan = plan ? (marked.parse(plan) as string) : '';
+    this.parsedOzet = this.parseMarkdown(ozet);
+    this.parsedPlan = this.parseMarkdown(plan);
 
     this.updateActiveVersionQc(version);
+  }
+
+  private parseMarkdown(text: string): string {
+    if (!text) return '';
+    const normalized = text
+      .replace(/^(>\s*\S.*)\r?\n(?=>\s*["“”])/gm, '$1\n>\n')
+      .replace(/^(>\s*.*)\r?\n(?!\s*>|\s*$)/gm, '$1\n\n');
+    return marked.parse(normalized) as string;
   }
 
   updateActiveVersionQc(version: any) {

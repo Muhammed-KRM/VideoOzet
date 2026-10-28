@@ -16,11 +16,21 @@ public class FfmpegAudioExtractor : IAudioExtractor
     public FfmpegAudioExtractor(ILogger<FfmpegAudioExtractor> logger)
     {
         _logger = logger;
-        
+
+        var binaryName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        var probeName = OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe";
+
         var possiblePaths = new[]
         {
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ffmpeg", "bin")),
+            Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin"),
+            Path.Combine(AppContext.BaseDirectory, "ffmpeg"),
+            AppContext.BaseDirectory,
             Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg", "bin"),
+            Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg"),
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ffmpeg", "bin")),
             @"D:\Hoca\ffmpeg\bin",
             @"D:\Hoca\VideoOzet\ffmpeg\bin",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WinGet\Links")
@@ -28,12 +38,44 @@ public class FfmpegAudioExtractor : IAudioExtractor
 
         foreach (var path in possiblePaths)
         {
-            if (File.Exists(Path.Combine(path, "ffmpeg.exe")))
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            var ffmpegFull = Path.Combine(path, binaryName);
+            if (File.Exists(ffmpegFull))
             {
+                if (!OperatingSystem.IsWindows())
+                {
+                    EnsureUnixExecutable(ffmpegFull);
+                    var ffprobeFull = Path.Combine(path, probeName);
+                    if (File.Exists(ffprobeFull))
+                    {
+                        EnsureUnixExecutable(ffprobeFull);
+                    }
+                }
+
                 GlobalFFOptions.Configure(new FFOptions { BinaryFolder = path });
                 _logger.LogInformation("Configured FFmpeg BinaryFolder to {Path}", path);
                 break;
             }
+        }
+    }
+
+    private static void EnsureUnixExecutable(string filePath)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows() && File.Exists(filePath))
+            {
+                var mode = File.GetUnixFileMode(filePath);
+                var execFlags = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                if ((mode & execFlags) == 0)
+                {
+                    File.SetUnixFileMode(filePath, mode | UnixFileMode.UserRead | UnixFileMode.UserWrite | execFlags);
+                }
+            }
+        }
+        catch
+        {
+            // Sistem dizinlerinde (/opt/homebrew/bin vb.) yetki gerekirse sessizce geç
         }
     }
 

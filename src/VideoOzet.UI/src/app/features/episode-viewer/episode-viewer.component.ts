@@ -153,12 +153,12 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   }
 
   requestRevision() {
-    if (!this.revizyonTalimati) return;
+    if (!this.revizyonTalimati && this.episode?.durum !== 'Hata') return;
     if (this.episode.durum === 'Isleniyor') return; // Zaten işleniyor
     
     this.isRevising = true;
     this.apiService.reviseEpisode(this.contentRequestId, this.bolumNo, { 
-      talimat: this.revizyonTalimati,
+      talimat: this.revizyonTalimati || '',
       hedefAlan: this.hedefAlan
     }).subscribe({
       next: () => {
@@ -170,6 +170,26 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
         console.error('Revizyon başarısız', err);
         this.isRevising = false;
         alert('Revizyon isteği başarısız oldu.');
+      }
+    });
+  }
+
+  retryEpisode() {
+    if (this.episode?.durum === 'Isleniyor' || this.isRevising) return;
+    this.isRevising = true;
+    this.apiService.reviseEpisode(this.contentRequestId, this.bolumNo, {
+      talimat: this.revizyonTalimati || '',
+      hedefAlan: 'Hepsi'
+    }).subscribe({
+      next: () => {
+        this.revizyonTalimati = '';
+        this.seciliRevizyonId = null;
+        this.startPolling();
+      },
+      error: (err) => {
+        console.error('Yeniden üretim başarısız', err);
+        this.isRevising = false;
+        alert('Yeniden üretim isteği başarısız oldu.');
       }
     });
   }

@@ -168,11 +168,7 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 userInstructions,
                 context.CancellationToken);
 
-            var contentData = LlmJson.Deserialize<JsonElement>(contentJsonStr);
-            if (contentData.ValueKind != JsonValueKind.Object)
-            {
-                throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
-            }
+            var (arastirmaOzeti, videoPlani, parsedDevirNotu) = LlmJson.ParseSeriesVideoContent(contentJsonStr);
 
             var usedChunkIds = new List<Guid>(sourceContext.UsedChunkIds);
             if (!usedChunkIds.Any())
@@ -204,9 +200,6 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 ? JsonSerializer.Serialize(usedChunkIds)
                 : (sourceContext.UsedSourceTitles.Any() ? JsonSerializer.Serialize(sourceContext.UsedSourceTitles) : "[]");
 
-            var arastirmaOzeti = contentData.TryGetProperty("ArastirmaOzeti", out var ao) ? ao.GetString() ?? "" : "";
-            var videoPlani = contentData.TryGetProperty("VideoPlani", out var vp) ? vp.GetString() ?? "" : "";
-
             var revizyon = new BolumRevizyonu
             {
                 SeriBolumId = bolum.Id,
@@ -215,7 +208,7 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 Talimat = yeniVersiyonNo == 1 ? "Sistem tarafından ilk üretim" : "",
                 ArastirmaOzeti = arastirmaOzeti,
                 VideoPlani = videoPlani,
-                DevirNotuJson = contentData.TryGetProperty("DevirNotu", out var dn) ? dn.GetString() ?? "" : "",
+                DevirNotuJson = parsedDevirNotu,
                 KullanilanKaynaklar = kullanilanKaynaklar,
                 LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 Durum = BolumDurumu.Tamamlandi

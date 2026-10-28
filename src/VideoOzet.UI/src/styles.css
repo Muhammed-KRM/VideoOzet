@@ -18,6 +18,8 @@
 .prose h1 { font-size: 1.6rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
 .prose h2 { font-size: 1.35rem; color: #93c5fd; }
 .prose h3 { font-size: 1.15rem; color: #60a5fa; }
+.prose h4 { font-size: 1.05rem; color: #c7d2fe; }
+.prose hr { border-color: #334155; margin: 1.5rem 0; }
 .prose p {
   margin-top: 0.5rem;
   margin-bottom: 1rem;
@@ -41,12 +43,22 @@
 }
 .prose blockquote {
   border-left: 4px solid #3b82f6;
-  padding-left: 1rem;
+  padding: 0.75rem 1.25rem;
   margin: 1rem 0;
-  color: #94a3b8;
+  color: #cbd5e1;
   font-style: italic;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 0 0.375rem 0.375rem 0;
+  background: rgba(30, 41, 59, 0.55);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+.prose blockquote p {
+  margin-top: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.prose blockquote p:first-child {
+  margin-top: 0;
+}
+.prose blockquote p:last-child {
+  margin-bottom: 0;
 }
 .prose code {
   background-color: #1e293b;

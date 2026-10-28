@@ -158,14 +158,17 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     // Kullanıcı yeni bir taslak talep ettiyse
     if (this.isDrafting) return true;
 
-    // Genel istek durumu devam ediyorsa
-    if (d.durum === 'Bekliyor' || d.durum === 'IcerikUretiliyor' || d.durum === 'QcYapiliyor') {
+    // Genel istek durumu aktif bölüm/QC üretimindeyse
+    if (d.durum === 'IcerikUretiliyor' || d.durum === 'QcYapiliyor') {
       return true;
     }
 
     const analiz = d.konuAnalizi;
     if (!analiz) {
       return d.durum !== 'Hata';
+    }
+    if (analiz.durum === 'Hata') {
+      return false;
     }
     if (analiz.durum === 'Isleniyor' || analiz.durum === 'Bekliyor') {
       return true;
@@ -175,6 +178,9 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     if (!plan) {
       // Analiz tamamlanmışsa plan oluşturulması bekleniyor demektir
       return analiz.durum !== 'Hata';
+    }
+    if (plan.durum === 'Hata') {
+      return false;
     }
 
     if (plan.durum === 'Olusturuluyor' || plan.durum === 'Taslak') {

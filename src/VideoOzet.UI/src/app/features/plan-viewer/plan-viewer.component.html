@@ -1,38 +1,57 @@
-<div class="h-full w-full bg-slate-900 rounded-xl border border-slate-700/50 shadow-xl flex flex-col">
+<div class="w-full bg-slate-800 rounded-xl border border-slate-700/50 overflow-hidden shadow-2xl">
   <!-- Tabs Header -->
-  <div class="flex border-b border-slate-700/50 bg-slate-800 rounded-t-xl">
-    <button 
-      class="flex-1 py-3 text-sm font-medium transition-colors"
-      [ngClass]="activeTab === 'plan' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-700/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/20'"
-      (click)="activeTab = 'plan'">
-      Video Planı
-    </button>
-    <button 
-      class="flex-1 py-3 text-sm font-medium transition-colors"
-      [ngClass]="activeTab === 'ozet' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-700/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/20'"
-      (click)="activeTab = 'ozet'">
-      Araştırma Özeti
-    </button>
-    <button 
-      class="flex-1 py-3 text-sm font-medium transition-colors"
-      [ngClass]="activeTab === 'qc' ? 'text-emerald-400 border-b-2 border-emerald-400 bg-emerald-900/10' : 'text-slate-400 hover:text-emerald-300 hover:bg-emerald-900/5'"
-      (click)="activeTab = 'qc'">
-      Kalite Kontrol ({{ revision?.guvenSkorYuzde || 0 }}%)
-    </button>
+  <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-b border-slate-700 bg-slate-900/50 px-2 sm:px-6">
+    <div class="flex flex-1 overflow-x-auto">
+      <button 
+        class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors whitespace-nowrap cursor-pointer"
+        [class.border-blue-500]="activeTab === 'ozet'"
+        [class.text-blue-400]="activeTab === 'ozet'"
+        [class.text-slate-400]="activeTab !== 'ozet'"
+        (click)="activeTab = 'ozet'">
+        Araştırma Özeti
+      </button>
+      <button 
+        class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors whitespace-nowrap cursor-pointer"
+        [class.border-blue-500]="activeTab === 'plan'"
+        [class.text-blue-400]="activeTab === 'plan'"
+        [class.text-slate-400]="activeTab !== 'plan'"
+        (click)="activeTab = 'plan'">
+        Video Planı
+      </button>
+      <button 
+        class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+        [class.border-blue-500]="activeTab === 'qc'"
+        [class.text-blue-400]="activeTab === 'qc'"
+        [class.text-slate-400]="activeTab !== 'qc'"
+        (click)="activeTab = 'qc'">
+        <span>QC Raporu</span>
+        <span class="px-2 py-0.5 rounded-full bg-slate-800 text-xs font-bold"
+          [ngClass]="{
+            'text-emerald-400': (revision?.guvenSkorYuzde || 0) >= 80,
+            'text-amber-400': (revision?.guvenSkorYuzde || 0) >= 50 && (revision?.guvenSkorYuzde || 0) < 80,
+            'text-red-400': (revision?.guvenSkorYuzde || 0) < 50
+          }">
+          %{{ revision?.guvenSkorYuzde || 0 }}
+        </span>
+      </button>
+    </div>
 
     <!-- İndir Dropdown -->
-    <div class="relative flex items-center px-2 border-l border-slate-700/50">
+    <div class="relative py-2.5 sm:py-0 self-end sm:self-center">
       <button
         id="episode-download-btn"
         type="button"
         (click)="toggleDownloadMenu()"
         [disabled]="isGeneratingDocx"
-        class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow transition-colors flex items-center gap-1.5 whitespace-nowrap">
+        class="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer whitespace-nowrap">
         <span *ngIf="isGeneratingDocx" class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span>
         <svg *ngIf="!isGeneratingDocx" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
-        {{ isGeneratingDocx ? 'Hazırlanıyor...' : 'İndir' }}
+        <span>{{ isGeneratingDocx ? 'Hazırlanıyor...' : 'Döküman Olarak İndir' }}</span>
+        <span *ngIf="revision?.revizyonNo" class="bg-indigo-900/60 text-indigo-200 text-[10px] px-1.5 py-0.5 rounded">
+          V{{ revision.revizyonNo }}
+        </span>
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-200" [class.rotate-180]="isDownloadMenuOpen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
         </svg>
@@ -41,9 +60,9 @@
       <!-- Dışarı tıklayınca kapat -->
       <div *ngIf="isDownloadMenuOpen" (click)="isDownloadMenuOpen = false" class="fixed inset-0 z-20"></div>
 
-      <div *ngIf="isDownloadMenuOpen" class="absolute right-2 top-full mt-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-30 text-sm">
+      <div *ngIf="isDownloadMenuOpen" class="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-30 text-sm">
         <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Word (.docx)</p>
-        <button id="dl-docx-all" (click)="downloadDocx('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor <span class="text-slate-500 text-xs">(Plan + Özet + QC)</span></button>
+        <button id="dl-docx-all" (click)="downloadDocx('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor <span class="text-slate-500 text-xs">(Özet + Plan + QC)</span></button>
         <button id="dl-docx-active" (click)="downloadDocx('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Sadece {{ activeTabLabel }}</button>
 
         <div class="my-1.5 border-t border-slate-700"></div>
@@ -60,14 +79,14 @@
     </div>
   </div>
 
-  <!-- Content Area (Scrollable) -->
-  <div class="flex-1 overflow-y-auto p-6 custom-scrollbar text-slate-300 leading-relaxed text-sm">
+  <!-- Content Area -->
+  <div class="p-8 text-slate-300 leading-relaxed">
     
-    <!-- PLAN TAB -->
-    <div *ngIf="activeTab === 'plan'" [innerHTML]="formattedPlan"></div>
-
     <!-- ÖZET TAB -->
-    <div *ngIf="activeTab === 'ozet'" [innerHTML]="formattedOzet"></div>
+    <div *ngIf="activeTab === 'ozet'" class="prose max-w-none" [innerHTML]="formattedOzet"></div>
+
+    <!-- PLAN TAB -->
+    <div *ngIf="activeTab === 'plan'" class="prose max-w-none" [innerHTML]="formattedPlan"></div>
 
     <!-- QC TAB -->
     <div *ngIf="activeTab === 'qc'" class="space-y-6">

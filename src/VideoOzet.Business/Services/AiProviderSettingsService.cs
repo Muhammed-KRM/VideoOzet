@@ -18,7 +18,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 {
     private const string CacheKey = "videoozet:settings:ai_provider";
     private const string OpenRouterModelsCacheKey = "videoozet:settings:openrouter_models";
-    private static readonly string SharedFilePath = Path.Combine(Path.GetTempPath(), "videoozet_ai_provider_settings.json");
+    private static readonly string SharedFilePath = Path.Combine(AppContext.BaseDirectory, "ai_provider_settings.json");
 
     private readonly ICacheService _cache;
     private readonly IConfiguration _config;
@@ -60,7 +60,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             _logger.LogWarning(ex, "Redis üzerinden AI Provider ayarları okunamadı, yerel dosya/bellek yedeğine geçiliyor.");
         }
 
-        // Yerel dosya yedeği (API ve Worker süreçleri arasında Redis kapalıyken de senkron kalması için)
+        // Yerel dosya yedeği (Uygulama klasöründeki ai_provider_settings.json)
         try
         {
             if (File.Exists(SharedFilePath))
@@ -88,12 +88,14 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
         var defaultSettings = new AiProviderSettingsDto
         {
-            ActiveProvider = _config["AI_ACTIVE_PROVIDER"] ?? "antigravity",
+            ActiveProvider = _config["AI_ACTIVE_PROVIDER"] ?? "openrouter",
             OpenRouterApiKey = _config["OpenRouter:ApiKey"] ?? _config["OPENROUTER_API_KEY"] ?? "",
             OpenRouterBaseUrl = _config["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1",
-            OpenRouterModel = _config["OpenRouter:Model"] ?? "google/gemini-2.5-flash",
+            OpenRouterModel = _config["OpenRouter:Model"] ?? "google/gemini-3.8-flash",
+            GroqApiKey = _config["GROQ_API_KEY"] ?? _config["Groq:ApiKey"] ?? "",
+            GroqModel = _config["GROQ_MODEL"] ?? "openai/gpt-oss-120b",
             AntigravityProxyUrl = _config["Antigravity:ProxyUrl"] ?? "http://localhost:8045/v1",
-            AntigravityProxyKey = _config["GEMINI_API_KEY"] ?? "sk-ea6e0c519b12403784eb5cdf79ca2615",
+            AntigravityProxyKey = _config["GEMINI_API_KEY"] ?? "",
             AntigravityProxyModel = _config["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered"
         };
 
@@ -106,12 +108,14 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
         var updated = new AiProviderSettingsDto
         {
-            ActiveProvider = string.IsNullOrWhiteSpace(settings.ActiveProvider) ? current.ActiveProvider : settings.ActiveProvider.ToLowerInvariant(),
-            OpenRouterApiKey = settings.OpenRouterApiKey?.Trim() ?? current.OpenRouterApiKey,
+            ActiveProvider = string.IsNullOrWhiteSpace(settings.ActiveProvider) ? current.ActiveProvider : settings.ActiveProvider.Trim().ToLowerInvariant(),
+            OpenRouterApiKey = (settings.OpenRouterApiKey ?? "").Trim(),
             OpenRouterBaseUrl = string.IsNullOrWhiteSpace(settings.OpenRouterBaseUrl) ? current.OpenRouterBaseUrl : settings.OpenRouterBaseUrl.Trim(),
             OpenRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? current.OpenRouterModel : NormalizeModelId(settings.OpenRouterModel),
+            GroqApiKey = (settings.GroqApiKey ?? "").Trim(),
+            GroqModel = string.IsNullOrWhiteSpace(settings.GroqModel) ? current.GroqModel : settings.GroqModel.Trim(),
             AntigravityProxyUrl = string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl) ? current.AntigravityProxyUrl : settings.AntigravityProxyUrl.Trim(),
-            AntigravityProxyKey = string.IsNullOrWhiteSpace(settings.AntigravityProxyKey) ? current.AntigravityProxyKey : settings.AntigravityProxyKey.Trim(),
+            AntigravityProxyKey = (settings.AntigravityProxyKey ?? "").Trim(),
             AntigravityProxyModel = string.IsNullOrWhiteSpace(settings.AntigravityProxyModel) ? current.AntigravityProxyModel : settings.AntigravityProxyModel.Trim()
         };
 
@@ -136,9 +140,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             _logger.LogWarning(ex, "Yerel AI Provider ayar dosyasına yazılamadı.");
         }
 
-        _logger.LogInformation("AI Provider ayarları güncellendi. Aktif Sağlayıcı: {Provider}, Model: {Model}",
-            updated.ActiveProvider,
-            updated.ActiveProvider == "openrouter" ? updated.OpenRouterModel : updated.AntigravityProxyModel);
+        _logger.LogInformation("AI Provider ayarları güncellendi. Aktif Sağlayıcı: {Provider}", updated.ActiveProvider);
 
         return updated;
     }
@@ -147,7 +149,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
     {
         var sw = Stopwatch.StartNew();
         using var client = _httpFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(12);
+        client.Timeout = TimeSpan.FromSeconds(10);
 
         try
         {
@@ -158,24 +160,27 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                     return new TestConnectionResultDto
                     {
                         Success = false,
-                        Message = "OpenRouter API anahtarı boş olamaz.",
-                        LatencyMs = sw.ElapsedMilliseconds
+                        Message = "Lütfen OpenRouter API anahtarınızı girin.",
+                        LatencyMs = 0
                     };
                 }
 
                 var url = $"{settings.OpenRouterBaseUrl.TrimEnd('/')}/auth/key";
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.OpenRouterApiKey);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.OpenRouterApiKey.Trim());
 
                 var res = await client.SendAsync(req, ct);
                 sw.Stop();
 
                 if (res.IsSuccessStatusCode)
                 {
+                    var sttNote = !string.IsNullOrWhiteSpace(settings.GroqApiKey)
+                        ? " + Groq Whisper STT anahtarı tanımlı"
+                        : "";
                     return new TestConnectionResultDto
                     {
                         Success = true,
-                        Message = $"OpenRouter bağlantısı başarılı! Seçili model: {NormalizeModelId(settings.OpenRouterModel)}",
+                        Message = $"OpenRouter bağlantısı başarılı! Model: {NormalizeModelId(settings.OpenRouterModel)}{sttNote}",
                         LatencyMs = sw.ElapsedMilliseconds
                     };
                 }
@@ -183,15 +188,62 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                 return new TestConnectionResultDto
                 {
                     Success = false,
-                    Message = $"OpenRouter bağlantı hatası: HTTP {(int)res.StatusCode}",
+                    Message = $"OpenRouter API anahtarı geçersiz veya hata döndü (HTTP {(int)res.StatusCode}). Lütfen geçerli bir OpenRouter anahtarı girin.",
+                    LatencyMs = sw.ElapsedMilliseconds
+                };
+            }
+            else if (settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(settings.GroqApiKey))
+                {
+                    return new TestConnectionResultDto
+                    {
+                        Success = false,
+                        Message = "Lütfen Groq API anahtarınızı (gsk_...) girin.",
+                        LatencyMs = 0
+                    };
+                }
+
+                using var groqReq = new HttpRequestMessage(HttpMethod.Get, "https://api.groq.com/openai/v1/models");
+                groqReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.GroqApiKey.Trim());
+                var groqRes = await client.SendAsync(groqReq, ct);
+                sw.Stop();
+
+                if (groqRes.IsSuccessStatusCode)
+                {
+                    return new TestConnectionResultDto
+                    {
+                        Success = true,
+                        Message = $"Groq Cloud API (Whisper STT + {settings.GroqModel}) bağlantısı başarılı!",
+                        LatencyMs = sw.ElapsedMilliseconds
+                    };
+                }
+
+                return new TestConnectionResultDto
+                {
+                    Success = false,
+                    Message = $"Groq API anahtarı geçersiz veya hata döndü (HTTP {(int)groqRes.StatusCode}).",
                     LatencyMs = sw.ElapsedMilliseconds
                 };
             }
             else
             {
+                if (string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl))
+                {
+                    return new TestConnectionResultDto
+                    {
+                        Success = false,
+                        Message = "Lütfen Proxy URL adresini girin.",
+                        LatencyMs = 0
+                    };
+                }
+
                 var url = $"{settings.AntigravityProxyUrl.TrimEnd('/')}/models";
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.AntigravityProxyKey);
+                if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyKey))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.AntigravityProxyKey.Trim());
+                }
 
                 var res = await client.SendAsync(req, ct);
                 sw.Stop();
@@ -201,7 +253,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                     return new TestConnectionResultDto
                     {
                         Success = true,
-                        Message = $"Antigravity AI Proxy bağlantısı aktif! Seçili model: {settings.AntigravityProxyModel}",
+                        Message = $"Yerel / Özel Proxy bağlantısı aktif! Seçili model: {settings.AntigravityProxyModel}",
                         LatencyMs = sw.ElapsedMilliseconds
                     };
                 }
@@ -209,7 +261,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                 return new TestConnectionResultDto
                 {
                     Success = false,
-                    Message = $"Antigravity AI Proxy yanıt vermedi: HTTP {(int)res.StatusCode}",
+                    Message = $"Proxy sunucusu hata döndürdü: HTTP {(int)res.StatusCode}",
                     LatencyMs = sw.ElapsedMilliseconds
                 };
             }
@@ -228,47 +280,63 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
     public async Task<List<ModelOptionDto>> GetAvailableModelsAsync(string provider, CancellationToken ct = default)
     {
+        if (provider.Equals("groq", StringComparison.OrdinalIgnoreCase))
+        {
+            return new List<ModelOptionDto>
+            {
+                new() { Id = "openai/gpt-oss-120b", Name = "GPT-OSS 120B (Groq LPU - Önerilen)", Category = "Groq Cloud", Description = "128K bağlam, ultra hızlı Türkçe özetleme ve senaryo üretimi" },
+                new() { Id = "llama-3.3-70b-versatile", Name = "Llama 3.3 70B Versatile (Groq LPU)", Category = "Groq Cloud", Description = "128K bağlam, yüksek TPM kapasiteli çok dilli model" },
+                new() { Id = "openai/gpt-oss-20b", Name = "GPT-OSS 20B (Groq LPU - Hızlı)", Category = "Groq Cloud", Description = "128K bağlam, çok yüksek hız ve düşük token tüketimi" },
+                new() { Id = "qwen/qwen3.8-27b", Name = "Qwen 3.8 27B (Groq LPU)", Category = "Groq Cloud", Description = "128K bağlam, muhakeme destekli çok dilli model" }
+            };
+        }
+
         if (provider.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
         {
             var settings = await GetSettingsAsync(ct);
-            try
+            if (settings.ActiveProvider.Equals("antigravity", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(settings.AntigravityProxyKey) &&
+                !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl))
             {
-                using var client = _httpFactory.CreateClient();
-                client.Timeout = TimeSpan.FromSeconds(5);
-                using var req = new HttpRequestMessage(HttpMethod.Get, $"{settings.AntigravityProxyUrl.TrimEnd('/')}/models");
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.AntigravityProxyKey);
-
-                var res = await client.SendAsync(req, ct);
-                if (res.IsSuccessStatusCode)
+                try
                 {
-                    var body = await res.Content.ReadAsStringAsync(ct);
-                    using var doc = JsonDocument.Parse(body);
-                    if (doc.RootElement.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
-                    {
-                        var proxyModels = new List<ModelOptionDto>();
-                        foreach (var item in dataArr.EnumerateArray())
-                        {
-                            var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-                            if (!string.IsNullOrWhiteSpace(id))
-                            {
-                                proxyModels.Add(new ModelOptionDto
-                                {
-                                    Id = id,
-                                    Name = $"{id} (Antigravity Proxy)",
-                                    Category = "Antigravity Proxy",
-                                    Description = "Yerel Antigravity AI Proxy modeli"
-                                });
-                            }
-                        }
+                    using var client = _httpFactory.CreateClient();
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    using var req = new HttpRequestMessage(HttpMethod.Get, $"{settings.AntigravityProxyUrl.TrimEnd('/')}/models");
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.AntigravityProxyKey);
 
-                        if (proxyModels.Count > 0)
-                            return proxyModels;
+                    var res = await client.SendAsync(req, ct);
+                    if (res.IsSuccessStatusCode)
+                    {
+                        var body = await res.Content.ReadAsStringAsync(ct);
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+                        {
+                            var proxyModels = new List<ModelOptionDto>();
+                            foreach (var item in dataArr.EnumerateArray())
+                            {
+                                var id = item.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+                                if (!string.IsNullOrWhiteSpace(id))
+                                {
+                                    proxyModels.Add(new ModelOptionDto
+                                    {
+                                        Id = id,
+                                        Name = $"{id} (Antigravity Proxy)",
+                                        Category = "Antigravity Proxy",
+                                        Description = "Yerel Antigravity AI Proxy modeli"
+                                    });
+                                }
+                            }
+
+                            if (proxyModels.Count > 0)
+                                return proxyModels;
+                        }
                     }
                 }
-            }
-            catch
-            {
-                // Proxy çalışmıyorsa varsayılan listeye dön
+                catch
+                {
+                    // Proxy çalışmıyorsa varsayılan listeye dön
+                }
             }
 
             return new List<ModelOptionDto>
@@ -332,6 +400,8 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                     {
                         var sorted = liveModels
                             .OrderBy(m => GetCategoryPriority(m.Category))
+                            .ThenBy(m => m.Id.Equals("google/gemini-3.8-flash", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                            .ThenByDescending(m => m.Id.StartsWith("google/gemini-3.", StringComparison.OrdinalIgnoreCase))
                             .ThenBy(m => m.Name)
                             .ToList();
 
@@ -356,6 +426,9 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
     private static string NormalizeModelId(string rawModel)
     {
+        if (string.IsNullOrWhiteSpace(rawModel))
+            return "google/gemini-3.8-flash";
+
         var trimmed = rawModel.Trim().TrimStart('~').Replace(":batch", "", StringComparison.OrdinalIgnoreCase);
         if (trimmed.StartsWith("https://openrouter.ai/", StringComparison.OrdinalIgnoreCase))
         {
@@ -364,7 +437,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             if (path.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
                 path = path.Substring("models/".Length);
             if (!string.IsNullOrWhiteSpace(path))
-                return path.Replace(":batch", "", StringComparison.OrdinalIgnoreCase);
+                trimmed = path.Replace(":batch", "", StringComparison.OrdinalIgnoreCase);
         }
         return trimmed;
     }
@@ -400,9 +473,11 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
     private static List<ModelOptionDto> GetFallbackOpenRouterModels() => new()
     {
+        new() { Id = "google/gemini-3.8-flash", Name = "Google: Gemini 3.8 Flash (Varsayılan)", Category = "Google Gemini", Description = "En güncel yüksek hızlı Gemini 3.8 modeli" },
+        new() { Id = "google/gemini-3.7-flash", Name = "Google: Gemini 3.7 Flash", Category = "Google Gemini", Description = "Yüksek hızlı Gemini 3.7 modeli" },
+        new() { Id = "google/gemini-3.5-flash", Name = "Google: Gemini 3.5 Flash", Category = "Google Gemini", Description = "Hızlı ve dengeli Gemini 3.5 modeli" },
         new() { Id = "google/gemini-2.5-flash", Name = "Gemini 2.5 Flash", Category = "Google Gemini", Description = "Hızlı, ekonomik ve ses/metin destekli" },
         new() { Id = "google/gemini-2.5-pro", Name = "Gemini 2.5 Pro", Category = "Google Gemini", Description = "En yüksek doğruluk ve 1M bağlam" },
-        new() { Id = "google/gemini-2.0-flash-001", Name = "Gemini 2.0 Flash", Category = "Google Gemini", Description = "Düşük gecikmeli multimodal model" },
         new() { Id = "anthropic/claude-3.7-sonnet", Name = "Claude 3.7 Sonnet", Category = "Anthropic Claude", Description = "Akademik metin ve senaryo üretiminde lider" },
         new() { Id = "anthropic/claude-3.5-sonnet", Name = "Claude 3.5 Sonnet", Category = "Anthropic Claude", Description = "Yüksek kaliteli içerik ve kod sentezi" },
         new() { Id = "openai/gpt-4o", Name = "GPT-4o", Category = "OpenAI GPT", Description = "OpenAI amiral gemisi multimodal model" },

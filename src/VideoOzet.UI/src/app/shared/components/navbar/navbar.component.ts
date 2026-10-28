@@ -50,16 +50,26 @@ import { SettingsModalComponent } from '../settings-modal/settings-modal.compone
             >
               <span
                 class="w-2 h-2 rounded-full animate-pulse"
-                [ngClass]="settingsService.settings().activeProvider === 'openrouter' ? 'bg-cyan-400' : 'bg-purple-400'"
+                [ngClass]="settingsService.settings().activeProvider === 'openrouter'
+                  ? 'bg-cyan-400'
+                  : settingsService.settings().activeProvider === 'groq'
+                    ? 'bg-amber-400'
+                    : 'bg-purple-400'"
               ></span>
               <span class="text-slate-400">AI:</span>
               <span class="font-semibold text-white">
-                {{ settingsService.settings().activeProvider === 'openrouter' ? 'OpenRouter' : 'Antigravity Proxy' }}
+                {{ settingsService.settings().activeProvider === 'openrouter'
+                  ? 'OpenRouter'
+                  : settingsService.settings().activeProvider === 'groq'
+                    ? 'Groq Cloud'
+                    : 'Yerel Proxy' }}
               </span>
               <span class="text-slate-500 font-mono text-[11px] max-w-[160px] truncate">
                 ({{ settingsService.settings().activeProvider === 'openrouter'
                   ? settingsService.settings().openRouterModel
-                  : settingsService.settings().antigravityProxyModel }})
+                  : settingsService.settings().activeProvider === 'groq'
+                    ? settingsService.settings().groqModel
+                    : settingsService.settings().antigravityProxyModel }})
               </span>
             </button>
 

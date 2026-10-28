@@ -16,6 +16,7 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
     private readonly HttpClient _httpClient;
     private readonly string _ollamaUrl;
     private readonly string _defaultModel;
+    private readonly bool _isStandalone;
     private readonly ILogger<OllamaEmbeddingProvider> _logger;
 
     public OllamaEmbeddingProvider(
@@ -24,9 +25,10 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
         HttpClient? httpClient = null)
     {
         _logger = logger;
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         _ollamaUrl = configuration["OLLAMA_URL"] ?? configuration["Ollama:Url"] ?? "http://localhost:11435";
         _defaultModel = configuration["OLLAMA_EMBED_MODEL"] ?? "bge-m3";
+        _isStandalone = string.Equals(configuration["StandaloneMode"], "true", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<float[]> GenerateEmbeddingAsync(string text, string modelName = "bge-m3")
@@ -40,6 +42,9 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
     {
         if (texts == null || !texts.Any())
             return new List<float[]>();
+
+        if (_isStandalone)
+            return texts.Select(CreateLocalFallbackEmbedding).ToList();
 
         var model = string.IsNullOrEmpty(modelName) || modelName == "text-embedding-3-small" ? _defaultModel : modelName;
 

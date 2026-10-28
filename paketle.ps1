@@ -60,6 +60,8 @@ $StandaloneAppSettings = @"
   "ApiKey": "SUPER_SECRET_API_KEY_123!",
   "GEMINI_API_KEY": "",
   "GEMINI_MODEL": "gemini-3.8-flash-tiered",
+  "GROQ_API_KEY": "",
+  "STT_PROVIDER": "Auto",
   "Logging": {
     "LogLevel": {
       "Default": "Information",
