@@ -60,6 +60,9 @@ begin
   if InstallCompletedSuccessfully then
   begin
     SetupExePath := ExpandConstant('{srcexe}');
-    Exec(ExpandConstant('{cmd}'), '/c ping 127.0.0.1 -n 3 > nul & del /f /q "' + SetupExePath + '"', '', SW_HIDE, ewNoWait, ResultCode);
+    if Pos('d:\hoca\videoozet\dagitimpaketi\', LowerCase(SetupExePath)) = 0 then
+    begin
+      Exec(ExpandConstant('{cmd}'), '/c ping 127.0.0.1 -n 3 > nul & del /f /q "' + SetupExePath + '"', '', SW_HIDE, ewNoWait, ResultCode);
+    end;
   end;
 end;
