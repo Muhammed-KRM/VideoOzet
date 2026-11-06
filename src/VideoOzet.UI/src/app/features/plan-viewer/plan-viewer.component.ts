@@ -1,7 +1,14 @@
 import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { marked } from 'marked';
-import { markdownToDocxBlob, qcToMarkdown, DocxSection } from '../../core/utils/markdown-docx';
+import {
+  markdownToDocxBlob,
+  qcToMarkdown,
+  DocxSection,
+  extractPrompterScript,
+  extractPrompterPlainText,
+  prompterToDocxBlob
+} from '../../core/utils/markdown-docx';
 
 type DownloadScope = 'active' | 'all';
 
@@ -23,6 +30,16 @@ export class PlanViewerComponent implements OnChanges {
 
   isDownloadMenuOpen = false;
   isGeneratingDocx = false;
+  isPrompterMenuOpen = false;
+  copyPrompterSuccess = false;
+
+  get hasVideoPlan(): boolean {
+    return !!(this.revision?.videoPlani && String(this.revision.videoPlani).trim());
+  }
+
+  togglePrompterMenu() {
+    this.isPrompterMenuOpen = !this.isPrompterMenuOpen;
+  }
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['revision'] && this.revision) {
@@ -199,6 +216,64 @@ export class PlanViewerComponent implements OnChanges {
     printWindow.focus();
     setTimeout(() => printWindow.print(), 400);
     this.isDownloadMenuOpen = false;
+  }
+
+  // ───────────────────────── Prompter İndirme ─────────────────────────
+
+  downloadPrompterTxt() {
+    if (!this.hasVideoPlan) return;
+    const plainText = extractPrompterPlainText(this.revision.videoPlani, this.docTitle);
+    const blob = new Blob(['\ufeff' + plainText], { type: 'text/plain;charset=utf-8' });
+    this.saveBlob(blob, this.prompterFileName('txt'));
+    this.isPrompterMenuOpen = false;
+    this.isDownloadMenuOpen = false;
+  }
+
+  downloadPrompterDocx() {
+    if (!this.hasVideoPlan || this.isGeneratingDocx) return;
+    this.isGeneratingDocx = true;
+    const dateStr = new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    prompterToDocxBlob(this.revision.videoPlani, this.docTitle, dateStr)
+      .then((blob) => this.saveBlob(blob, this.prompterFileName('docx')))
+      .catch((err: any) => {
+        console.error('Prompter Word (.docx) oluşturulamadı:', err);
+        alert('Prompter Word dosyası oluşturulamadı. Lütfen tekrar deneyin.');
+      })
+      .finally(() => {
+        this.isGeneratingDocx = false;
+        this.isPrompterMenuOpen = false;
+        this.isDownloadMenuOpen = false;
+      });
+  }
+
+  downloadPrompterMd() {
+    if (!this.hasVideoPlan) return;
+    const md = extractPrompterScript(this.revision.videoPlani, this.docTitle);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    this.saveBlob(blob, this.prompterFileName('md'));
+    this.isPrompterMenuOpen = false;
+    this.isDownloadMenuOpen = false;
+  }
+
+  copyPrompterScript() {
+    if (!this.hasVideoPlan) return;
+    const text = extractPrompterPlainText(this.revision.videoPlani, this.docTitle);
+    navigator.clipboard.writeText(text).then(() => {
+      this.copyPrompterSuccess = true;
+      setTimeout(() => (this.copyPrompterSuccess = false), 2500);
+    });
+    this.isPrompterMenuOpen = false;
+  }
+
+  private prompterFileName(ext: string): string {
+    const bolum = this.bolumNo ?? this.revision?.bolumNo;
+    const base = (this.title || 'Bolum')
+      .replace(/[\\/:*?"<>|'.,;]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 40) || 'Bolum';
+    const prefix = bolum ? `Bolum${bolum}_` : '';
+    return `${prefix}${base}_Prompter_Metni_V${this.versionNo}.${ext}`;
   }
 
   private mdToHtml(md: string): string {

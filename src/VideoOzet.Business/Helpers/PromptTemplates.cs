@@ -13,9 +13,15 @@ public static class PromptTemplates
         
         ÇOK KRİTİK KURALLAR VE BİREBİR MARKDOWN ŞABLONU:
         1. SADECE verilen kaynaklardaki bilgileri, kavramları, delilleri ve örnekleri kullan; kaynakta olmayan bilgi ekleme.
-        2. KESİNLİKLE köşeli parantez (`[` veya `]`) içinde şablon yer tutucu ifadeler bırakma; tüm başlıkları ve alt madde etiketlerini konunun gerçek içeriğine göre adlandır.
-        3. Özeti kesinlikle 2-3 kısa başlıkla yarıda kesme! Kaynaklardaki tüm alt konuları, delilleri, örnekleri ve karşılaştırmaları eksiksiz kapsayacak şekilde EN AZ 4-5 ANA BÖLÜM (## 2., ## 3., ## 4., ## 5.) ve her ana bölüm altında EN AZ 2 ALT BAŞLIK (### 2.1., ### 2.2. vb.) oluştur ve en sonda mutlaka "## Sonuç ve Genel Değerlendirme" bölümüyle tamamla.
-        4. Yanıtını aşağıdaki Markdown yapısına birebir uyarak oluştur:
+        2. KAYNAK KULLANIM MODLARI KURALLARI (ÇOK ÖNEMLİ):
+           - "DOĞRUDAN REFERANS" olarak etiketlenen kaynaklar için: Tanımlar, hoca/yazar atıfları, formülasyonlar ve kilit alıntılar doğrudan kullanılabilir ve aktarılabilir.
+           - "DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR" olarak etiketlenen kaynaklar için:
+             * Kaynaktan yalnızca kavramsal mantığı, argümanları, neden-sonuç zincirini ve ana fikri soyutlayarak al.
+             * Konuşmacının/yazarın cümlelerini, kelime dizilimlerini, kendine has benzetme/metaforlarını ve anlatım sırasını KESİNLİKLE kopyalama.
+             * Bu argüman ve mantıkları tamamen kendi pedagojik akışımız içinde, sıfırdan kendi özgün cümlelerinle ve yeni somut örneklerle yeniden inşa et.
+        3. KESİNLİKLE köşeli parantez (`[` veya `]`) içinde şablon yer tutucu ifadeler bırakma; tüm başlıkları ve alt madde etiketlerini konunun gerçek içeriğine göre adlandır.
+        4. Özeti kesinlikle 2-3 kısa başlıkla yarıda kesme! Kaynaklardaki tüm alt konuları, delilleri, örnekleri ve karşılaştırmaları eksiksiz kapsayacak şekilde EN AZ 4-5 ANA BÖLÜM (## 2., ## 3., ## 4., ## 5.) ve her ana bölüm altında EN AZ 2 ALT BAŞLIK (### 2.1., ### 2.2. vb.) oluştur ve en sonda mutlaka "## Sonuç ve Genel Değerlendirme" bölümüyle tamamla.
+        5. Yanıtını aşağıdaki Markdown yapısına birebir uyarak oluştur:
 
         # {0}
         **Kapsamlı Araştırma Özeti**
@@ -95,7 +101,12 @@ public static class PromptTemplates
 
         ÇOK KRİTİK VE KESİN KURALLAR:
         1. SADECE VE SADECE verilen KAYNAKLARDAKİ bilgileri, kavramları, argümanları ve analizleri kullan. Kaynaklarda yer almayan harici konuları uydurma.
-        2. Kaynak metinlerde geçen özel kavramları, tanımları, yazar/hoca atıflarını ve örnekleri aynen ve detaylıca aktar.
+        2. KAYNAK KULLANIM MODLARI KURALLARI (ÇOK ÖNEMLİ):
+           - "DOĞRUDAN REFERANS" olarak etiketlenen kaynaklar için: Tanımlar, hoca/yazar atıfları, formülasyonlar ve kilit örnekler doğrudan ve detaylıca aktarılabilir.
+           - "DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR" olarak etiketlenen kaynaklar için:
+             * Kaynaktan yalnızca kavramsal mantığı, argümanları, neden-sonuç zincirini ve ana fikri soyutlayarak al.
+             * Konuşmacının/yazarın cümlelerini, kelime dizilimlerini, kendine has benzetme/metaforlarını ve sahne/anlatım sırasını KESİNLİKLE kopyalama.
+             * Bu argüman ve mantıkları tamamen kendi pedagojik akışımız içinde, prompter metninde sıfırdan kendi özgün cümlelerinle ve yeni somut örneklerle yeniden inşa et.
         3. Her sahne için [Prompter Metni (Aynen Okunacak)] kısmı KESİNLİKLE 2-3 cümlelik kısa bir özet OLMAYACAK; sunucunun kameraya karşı kelimesi kelimesine okuyacağı EN AZ 3 DOLU PARAGRAF (180-250 kelime) uzunluğunda akıcı stüdyo konuşma metni olacaktır. Her paragrafın arasına mutlaka boş bir `>` satırı koy ki paragraflar birbirine yapışmasın.
         4. Video planını KESİNLİKLE yarıda bırakma! Konunun tüm alt başlıklarını kapsayacak şekilde EN AZ 6 SAHNE (Sahne 1: Giriş, Sahne 2-5+: Gelişme Sahneleri ve son sahne olarak Kapanış / Sonuç Sahnesi) oluştur.
         5. Yanıtını KESİNLİKLE aşağıdaki Markdown şablonuna birebir uyarak (JSON sarmalaması olmadan) döndür:
@@ -318,7 +329,12 @@ public static class PromptTemplates
         ÇOK KRİTİK VE KESİN KURALLAR:
         1. SADECE VE SADECE verilen KAYNAKLARDAKİ bilgileri, kavramları, argümanları ve analizleri kullan.
         2. Kaynaklarda yer almayan harici/genel teorileri veya konuları uydurma ya da ekleme.
-        3. Kaynak metinlerde geçen özel kavramları, tanımları, yazar/hoca atıflarını ve örnekleri aynen ve detaylıca aktar.
+        3. KAYNAK KULLANIM MODLARI KURALLARI (ÇOK ÖNEMLİ):
+           - "DOĞRUDAN REFERANS" olarak etiketlenen kaynaklar için: Tanımlar, hoca/yazar atıfları, formülasyonlar ve örnekler doğrudan ve detaylıca aktarılabilir.
+           - "DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR" olarak etiketlenen kaynaklar için:
+             * Kaynaktan yalnızca kavramsal mantığı, argümanları, neden-sonuç zincirini ve ana fikri soyutlayarak al.
+             * Konuşmacının/yazarın cümlelerini, kelime dizilimlerini, kendine has benzetme/metaforlarını ve sahne/anlatım sırasını KESİNLİKLE kopyalama.
+             * Bu argüman ve mantıkları tamamen kendi pedagojik akışımız içinde, sıfırdan kendi özgün cümlelerinle ve yeni somut örneklerle yeniden inşa et.
 
         İÇERİK YAPISI VE FORMAT ZORUNLULUKLARI:
         
@@ -444,5 +460,22 @@ public static class PromptTemplates
                 }}
             ]
         }}
+        """;
+
+    public const string TermPreservingTranslationPrompt = """
+        Sen akademik, teknik ve sektörel içeriklerde uzman bir çevirmen ve terminoloji editörüsün.
+        Aşağıda "{0}" dilindeki bir kaynağın damıtılmış bilgi dökümü yer almaktadır.
+        Görevin bu metni hiçbir bilgi, argüman veya detay kaybı olmadan akıcı, doğal ve anlaşılır bir TÜRKÇEYE çevirmektir.
+
+        ÇOK KRİTİK KAVRAM VE TERİM KORUMA KURALLARI:
+        1. O DİLDE KALMASI GEREKEN KAVRAMLAR: Uluslararası literatürde, felsefede, hukukta, yazılımda veya ilgili disiplinde orijinal haliyle yerleşmiş özel terimleri, kavramları, model/yöntem adlarını (Örn: "Prompt Engineering", "Zero-Shot", "Zeitgeist", "Dasein", "Common Law", "Rule of Law", "Fine-Tuning", "Backpropagation" vb.) zorlama ve yapay kelimelerle Türkçeleştirme!
+        2. KULLANIM FORMATI: Bu tür özel kavramlar metinde ilk kez geçtiğinde Türkçe karşılığını/açıklamasını verip parantez içinde orijinal terimi koru veya doğrudan orijinal terimi kullanıp parantez içinde kısa Türkçe karşılığını belirt (Örn: "Zero-Shot (Sıfır Örnekli Öğrenme)" veya "Varoluşsal Bulunuş (Dasein)"). Sonraki geçişlerde kavramın en doğal kabul gören halini tutarlı şekilde kullan.
+        3. AKICILIK VE BÜTÜNLÜK: Terimler dışındaki tüm cümle yapılarını, argüman akışlarını ve açıklamaları çeviri kokmayan, stüdyoda bir uzmanın anlatacağı doğallıkta kusursuz bir Türkçeye dönüştür.
+        4. BİLGİ SADAKATİ: Metindeki hiçbir paragrafı kısaltma, özetin özetini çıkarma; tüm maddeleri ve örnekleri birebir koruyarak çevir.
+
+        METİN ({0}):
+        {1}
+
+        Lütfen SADECE çevrilmiş Türkçe metni döndür. Başka hiçbir giriş, önsöz veya açıklama ekleme.
         """;
 }

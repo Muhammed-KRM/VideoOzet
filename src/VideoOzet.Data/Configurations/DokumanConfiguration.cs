@@ -18,6 +18,7 @@ public class DokumanConfiguration : IEntityTypeConfiguration<Dokuman>
         builder.Property(d => d.Uzanti).HasColumnName("uzanti").HasMaxLength(20).IsRequired();
         builder.Property(d => d.DosyaBoyutu).HasColumnName("dosya_boyutu").HasDefaultValue(0).IsRequired();
         builder.Property(d => d.IslemDurumu).HasColumnName("islem_durumu").HasDefaultValue(VideoOzet.Data.Enums.VideoIslemDurumu.Bekliyor).IsRequired();
+        builder.Property(d => d.KullanimTuru).HasColumnName("kullanim_turu").HasDefaultValue(VideoOzet.Data.Enums.KaynakKullanimTuru.DogrudanReferans).IsRequired();
         builder.Property(d => d.OlusturmaTarihi).HasColumnName("olusturma_tarihi").HasDefaultValueSql("now()").HasColumnType("timestamptz").IsRequired();
         builder.Property(d => d.IslemTamamlanmaTarihi).HasColumnName("islem_tamamlanma_tarihi").HasColumnType("timestamptz");
 

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using VideoOzet.Business.DTOs;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
@@ -33,7 +34,7 @@ public class DokumanService : IDokumanService
         _logger = logger;
     }
 
-    public async Task<Guid> UploadDokumanAsync(Guid egitimId, string fileName, string contentType, Stream fileStream)
+    public async Task<Guid> UploadDokumanAsync(Guid egitimId, string fileName, string contentType, Stream fileStream, KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
     {
         var egitimExists = await _context.Egitimler.AnyAsync(e => e.Id == egitimId);
         if (!egitimExists)
@@ -54,7 +55,8 @@ public class DokumanService : IDokumanService
             DosyaYolu = objectName, // We store the object name to fetch later
             Uzanti = uzanti,
             DosyaBoyutu = fileStream.Length,
-            IslemDurumu = VideoIslemDurumu.Bekliyor
+            IslemDurumu = VideoIslemDurumu.Bekliyor,
+            KullanimTuru = kullanimTuru
         };
 
         _context.Dokumanlar.Add(dokuman);
@@ -77,6 +79,7 @@ public class DokumanService : IDokumanService
     public async Task<IEnumerable<object>> GetDokumanlarByEgitimIdAsync(Guid egitimId)
     {
         return await _context.Dokumanlar
+            .Include(d => d.DokumanMetin)
             .Where(d => d.EgitimId == egitimId)
             .Select(d => new
             {
@@ -85,6 +88,8 @@ public class DokumanService : IDokumanService
                 d.Uzanti,
                 d.DosyaBoyutu,
                 d.IslemDurumu,
+                d.KullanimTuru,
+                OrijinalDil = d.DokumanMetin != null && !string.IsNullOrWhiteSpace(d.DokumanMetin.OrijinalDil) ? d.DokumanMetin.OrijinalDil : "tr",
                 d.OlusturmaTarihi
             })
             .ToListAsync();
@@ -108,5 +113,43 @@ public class DokumanService : IDokumanService
             _context.Dokumanlar.Remove(dokuman);
             await _context.SaveChangesAsync();
         }
+    }
+
+    public async Task UpdateKullanimTuruAsync(Guid dokumanId, KaynakKullanimTuru kullanimTuru)
+    {
+        var dokuman = await _context.Dokumanlar.FindAsync(dokumanId);
+        if (dokuman == null)
+            throw new Exception("Doküman bulunamadı.");
+
+        dokuman.KullanimTuru = kullanimTuru;
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Doküman {DokumanId} kullanım türü güncellendi: {KullanimTuru}", dokumanId, kullanimTuru);
+    }
+
+    public async Task<KaynakIcerikDetayDto?> GetDokumanIcerikDetayAsync(Guid dokumanId)
+    {
+        var dokuman = await _context.Dokumanlar
+            .Include(d => d.DokumanMetin)
+            .FirstOrDefaultAsync(d => d.Id == dokumanId);
+
+        if (dokuman == null) return null;
+
+        var dto = new KaynakIcerikDetayDto
+        {
+            Id = dokuman.Id,
+            Tip = "dokuman",
+            Baslik = dokuman.DosyaAdi,
+            KullanimTuru = dokuman.KullanimTuru,
+            OrijinalDil = dokuman.DokumanMetin?.OrijinalDil ?? "tr",
+            KelimeSayisi = dokuman.DokumanMetin?.KelimeSayisi ?? 0,
+            SttModel = null,
+            LlmModel = "gemini-1.5-flash",
+            OlusturmaTarihi = dokuman.OlusturmaTarihi,
+            HamMetin = dokuman.DokumanMetin?.HamMetin ?? string.Empty,
+            DamitilmisOzetMetni = dokuman.DokumanMetin?.DamitilmisOzetMetni,
+            CevrilmisOzetMetni = dokuman.DokumanMetin?.CevrilmisOzetMetni
+        };
+
+        return dto;
     }
 }

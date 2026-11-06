@@ -10,4 +10,6 @@ public interface IGeminiProvider
     string ActiveModelName => string.Empty;
 
     Task<string> SummarizeAsync(string transcript, string modelName = "gemini-1.5-flash");
+
+    Task<string> TranslateDistilledSummaryToTurkishAsync(string text, string sourceLang = "en");
 }

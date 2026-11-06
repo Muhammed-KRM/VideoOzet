@@ -1,6 +1,7 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
+import { ApiService } from '../../core/services/api.service';
 
 /**
  * Seri haritası.
@@ -19,7 +20,7 @@ export class SeriesMapComponent {
   @Input() readonly: boolean = false;
   @Input() contentRequestId: string = '';
 
-  constructor(private router: Router) {}
+  constructor(private router: Router, private apiService: ApiService) {}
 
   // Getter olarak tutulur: polling ile gelen her yeni `plan` referansında otomatik güncellenir.
   get bolumler(): any[] {
@@ -52,5 +53,23 @@ export class SeriesMapComponent {
   goToEpisode(bolumNo: number) {
     if (!this.plan?.onaylandi) return;
     this.router.navigate(['/episode-viewer', this.contentRequestId, this.plan.planNo, bolumNo]);
+  }
+
+  retryBolum(event: Event, bolumNo: number) {
+    event.stopPropagation();
+    if (!this.contentRequestId) return;
+    const target = this.bolumler.find(b => b.bolumNo === bolumNo);
+    if (target) {
+      target.durum = 'Isleniyor';
+    }
+    this.apiService.retryEpisode(this.contentRequestId, bolumNo).subscribe({
+      next: () => {},
+      error: (err) => {
+        console.error('Yeniden deneme hatası:', err);
+        if (target) {
+          target.durum = 'Hata';
+        }
+      }
+    });
   }
 }

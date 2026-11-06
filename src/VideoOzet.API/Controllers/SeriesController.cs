@@ -252,6 +252,46 @@ public class SeriesController : ControllerBase
     }
 
     /// <summary>
+    /// Hata alan veya yeniden üretilmek istenen bölümü baştan üretir.
+    /// </summary>
+    [HttpPost("api/series-requests/{id:guid}/videos/{bolumNo:int}/retry")]
+    public async Task<IActionResult> RetryEpisode(Guid id, int bolumNo)
+    {
+        var bolum = await _dbContext.SeriBolumler
+            .Include(b => b.Revizyonlar)
+            .Include(b => b.SeriPlani)
+                .ThenInclude(p => p.ContentRequest)
+            .FirstOrDefaultAsync(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+
+        if (bolum == null)
+            return NotFound(new { Mesaj = "Video bulunamadı." });
+
+        if (bolum.Durum == BolumDurumu.Isleniyor)
+            return Conflict(new { Mesaj = "Bu video şu anda zaten üretiliyor." });
+
+        bolum.Durum = BolumDurumu.Isleniyor;
+
+        var request = bolum.SeriPlani?.ContentRequest;
+        if (request != null && request.Durum == ContentRequestDurumu.Hata)
+        {
+            request.Durum = ContentRequestDurumu.IcerikUretiliyor;
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        await _publishEndpoint.Publish(new SeriesVideoGenerationCommand
+        {
+            ContentRequestId = id,
+            EgitimId = bolum.SeriPlani!.ContentRequest.EgitimId,
+            SeriPlaniId = bolum.SeriPlaniId,
+            SeriBolumId = bolum.Id,
+            BolumNo = bolum.BolumNo
+        });
+
+        return Accepted(new { Mesaj = "Bölüm üretimi yeniden başlatıldı." });
+    }
+
+    /// <summary>
     /// Kullanıcının açıkça bir videoyu revize etme talebi.
     /// </summary>
     [HttpPost("api/series-requests/{id:guid}/videos/{bolumNo:int}/revisions")]
@@ -272,8 +312,13 @@ public class SeriesController : ControllerBase
         bolum.Durum = BolumDurumu.Isleniyor;
         await _dbContext.SaveChangesAsync();
 
-        // Eğer bölümün henüz hiç revizyonu yoksa veya boş talimatla yeniden üretim istenmişse, sıfırdan üretim komutunu tetikle
-        if (!bolum.Revizyonlar.Any() || string.IsNullOrWhiteSpace(dto.Talimat))
+        var isYenidenDene = string.IsNullOrWhiteSpace(dto?.Talimat) ||
+            dto.Talimat.Trim().Equals("yeniden dene", StringComparison.OrdinalIgnoreCase) ||
+            dto.Talimat.Trim().Equals("tekrar dene", StringComparison.OrdinalIgnoreCase) ||
+            dto.Talimat.Trim().Equals("tekrar üret", StringComparison.OrdinalIgnoreCase);
+
+        // Eğer bölüm henüz üretilememişse (veya Hata durumundaysa), hiç revizyonu yoksa veya talimat "yeniden dene" ise, sıfırdan üretim komutunu tetikle
+        if (!bolum.Revizyonlar.Any() || isYenidenDene)
         {
             await _publishEndpoint.Publish(new SeriesVideoGenerationCommand
             {

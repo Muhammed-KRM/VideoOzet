@@ -80,6 +80,8 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 }
                 
                 string ozetMetni = jsonResponse;
+                string? cevrilmisOzetMetni = null;
+                string detectedLang = transcript.Dil ?? "tr";
                 string konuBasliklariJson = "[]";
                 string konuEtiketleriJson = "[]";
 
@@ -89,6 +91,10 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     if (parsed != null)
                     {
                         ozetMetni = parsed.OzetMetni ?? jsonResponse; // Fallback
+                        if (!string.IsNullOrWhiteSpace(parsed.Dil))
+                        {
+                            detectedLang = parsed.Dil.Trim().ToLowerInvariant();
+                        }
                         konuBasliklariJson = parsed.KonuBasliklari != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuBasliklari) : "[]";
                         konuEtiketleriJson = parsed.KonuEtiketleri != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuEtiketleri) : "[]";
                     }
@@ -98,6 +104,32 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     _logger.LogWarning(ex, "LLM json parse failed. Using raw response as summary. Raw: {Raw}", jsonResponse);
                 }
 
+                // Normalize language code
+                if (detectedLang.Length > 2 && (detectedLang.StartsWith("en") || detectedLang == "english")) detectedLang = "en";
+                else if (detectedLang.Length > 2 && (detectedLang.StartsWith("de") || detectedLang == "german")) detectedLang = "de";
+                else if (detectedLang.Length > 2 && (detectedLang.StartsWith("tr") || detectedLang == "turkish")) detectedLang = "tr";
+                else if (detectedLang.Length > 2) detectedLang = detectedLang.Substring(0, 2);
+
+                transcript.Dil = detectedLang;
+
+                // Eğer kaynak yabancı dildeyse ("tr" değilse), terim korumalı Türkçe çeviri hattını çalıştır
+                if (!detectedLang.Equals("tr", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Video {VideoId} yabancı dilde tespit edildi ({Lang}). Terim korumalı Türkçe çeviri başlatılıyor...", evt.VideoId, detectedLang);
+                    
+                    await _publishEndpoint.Publish(new PipelineProgressEvent
+                    {
+                        VideoId = evt.VideoId,
+                        EgitimId = evt.EgitimId,
+                        Asama = "Ceviri",
+                        Durum = "Basladi",
+                        Mesaj = $"Yabancı içerik ({detectedLang.ToUpperInvariant()}) tespit edildi. Terim korumalı Türkçe çevirisi hazırlanıyor..."
+                    });
+
+                    cevrilmisOzetMetni = await _geminiProvider.TranslateDistilledSummaryToTurkishAsync(ozetMetni, detectedLang);
+                    _logger.LogInformation("Video {VideoId} Türkçe çevirisi tamamlandı. Çeviri uzunluğu: {Length}", evt.VideoId, cevrilmisOzetMetni?.Length ?? 0);
+                }
+
                 var existingSummary = await _context.VideoSummaries
                     .FirstOrDefaultAsync(s => s.VideoId == evt.VideoId, context.CancellationToken);
 
@@ -105,6 +137,8 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 if (existingSummary != null)
                 {
                     existingSummary.OzetMetni = ozetMetni;
+                    existingSummary.CevrilmisOzetMetni = cevrilmisOzetMetni;
+                    existingSummary.OrijinalDil = detectedLang;
                     existingSummary.KonuBasliklari = konuBasliklariJson;
                     existingSummary.KonuEtiketleri = konuEtiketleriJson;
                     existingSummary.LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "gemini-3.8-flash-tiered" : _geminiProvider.ActiveModelName;
@@ -117,6 +151,8 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     {
                         VideoId = evt.VideoId,
                         OzetMetni = ozetMetni,
+                        CevrilmisOzetMetni = cevrilmisOzetMetni,
+                        OrijinalDil = detectedLang,
                         KonuBasliklari = konuBasliklariJson, 
                         KonuEtiketleri = konuEtiketleriJson,
                         LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "gemini-3.8-flash-tiered" : _geminiProvider.ActiveModelName,
@@ -205,6 +241,7 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
 
     private class SummaryLlmResponse
     {
+        public string? Dil { get; set; }
         public string OzetMetni { get; set; }
         public string[] KonuBasliklari { get; set; }
         public string[] KonuEtiketleri { get; set; }

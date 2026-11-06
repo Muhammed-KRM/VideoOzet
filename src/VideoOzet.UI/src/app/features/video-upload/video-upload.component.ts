@@ -15,6 +15,9 @@ export class VideoUploadComponent {
   isDragging = false;
   isUploading = false;
   
+  // 0: DogrudanReferans (Kendi notlarım/dersim), 1: SadeceArgumanVeMantik (Dış kanal/telif korumalı)
+  selectedKullanimTuru: number = 0;
+
   currentFileIndex = 0;
   totalFiles = 0;
   currentFileName = '';
@@ -83,6 +86,7 @@ export class VideoUploadComponent {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('baslik', file.name);
+      formData.append('kullanimTuru', this.selectedKullanimTuru.toString());
 
       try {
         await firstValueFrom(this.apiService.uploadFile(this.egitimId, formData));

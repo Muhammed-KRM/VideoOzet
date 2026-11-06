@@ -285,6 +285,12 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("islem_tamamlanma_tarihi");
 
+                    b.Property<int>("KullanimTuru")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("kullanim_turu");
+
                     b.Property<DateTime>("OlusturmaTarihi")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -315,6 +321,14 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<string>("CevrilmisOzetMetni")
+                        .HasColumnType("text")
+                        .HasColumnName("cevrilmis_ozet_metni");
+
+                    b.Property<string>("DamitilmisOzetMetni")
+                        .HasColumnType("text")
+                        .HasColumnName("damitilmis_ozet_metni");
+
                     b.Property<Guid>("DokumanId")
                         .HasColumnType("uuid")
                         .HasColumnName("dokuman_id");
@@ -335,6 +349,14 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("olusturma_tarihi")
                         .HasDefaultValueSql("now()");
+
+                    b.Property<string>("OrijinalDil")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("tr")
+                        .HasColumnName("orijinal_dil");
 
                     b.HasKey("Id");
 
@@ -1005,6 +1027,12 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("islem_tamamlanma_tarihi");
 
+                    b.Property<int>("KullanimTuru")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("kullanim_turu");
+
                     b.Property<DateTime>("OlusturmaTarihi")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -1101,6 +1129,10 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<string>("CevrilmisOzetMetni")
+                        .HasColumnType("text")
+                        .HasColumnName("cevrilmis_ozet_metni");
+
                     b.Property<string>("KonuBasliklari")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1126,6 +1158,14 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("olusturma_tarihi")
                         .HasDefaultValueSql("now()");
+
+                    b.Property<string>("OrijinalDil")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("tr")
+                        .HasColumnName("orijinal_dil");
 
                     b.Property<string>("OzetMetni")
                         .IsRequired()

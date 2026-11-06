@@ -12,6 +12,7 @@ public class Dokuman
     public string Uzanti { get; set; } = string.Empty; // .pdf, .docx, .pptx vb.
     public long DosyaBoyutu { get; set; }
     public VideoIslemDurumu IslemDurumu { get; set; } // İşlem durumu enum'unu ortak kullanabiliriz
+    public KaynakKullanimTuru KullanimTuru { get; set; } = KaynakKullanimTuru.DogrudanReferans;
     public DateTime OlusturmaTarihi { get; set; } = DateTime.UtcNow;
     public DateTime? IslemTamamlanmaTarihi { get; set; }
 

@@ -7,6 +7,8 @@ import { SignalRService } from '../../core/services/signalr.service';
 import { VideoUploadComponent } from '../video-upload/video-upload.component';
 import { ContentResultComponent } from '../content-result/content-result.component';
 import { FormsModule } from '@angular/forms';
+import { marked } from 'marked';
+import { markdownToDocxBlob, DocxSection } from '../../core/utils/markdown-docx';
 
 @Component({
   selector: 'app-course-detail',
@@ -44,6 +46,15 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   contentResult: any = null;
   pastContentRequests: any[] = [];
   selectedRequestId: string = '';
+
+  // 3. Kaynak Detay Modalı (Transkript, Damıtılmış Özet, Terim Korumalı Çeviri)
+  isKaynakModalOpen: boolean = false;
+  isLoadingKaynakDetay: boolean = false;
+  kaynakDetay: any = null;
+  kaynakActiveTab: 'ozet' | 'cevirisi' | 'ham' = 'ozet';
+  isDownloadMenuOpen: boolean = false;
+  isGeneratingDocx: boolean = false;
+  copiedToClipboard: boolean = false;
 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -499,5 +510,209 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   goBack() {
     this.router.navigate(['/dashboard']);
+  }
+
+  // --- Kaynak Kullanım Türü & Detay Modal İşlemleri ---
+
+  toggleKullanimTuru(item: any, event?: MouseEvent) {
+    if (event) event.stopPropagation();
+    const current = (item.kullanimTuru === 1 || item.kullanimTuru === 'SadeceArgumanVeMantik') ? 1 : 0;
+    const next = current === 1 ? 0 : 1;
+    this.apiService.updateKaynakKullanimTuru(this.egitimId, item.tip, item.id, next).subscribe({
+      next: () => {
+        item.kullanimTuru = next;
+        if (this.kaynakDetay && this.kaynakDetay.id === item.id) {
+          this.kaynakDetay.kullanimTuru = next;
+        }
+      },
+      error: (err) => {
+        console.error('Kullanım türü güncellenemedi:', err);
+        alert('Kullanım türü güncellenirken hata oluştu.');
+      }
+    });
+  }
+
+  isArgumanMode(item: any): boolean {
+    return item?.kullanimTuru === 1 || item?.kullanimTuru === 'SadeceArgumanVeMantik';
+  }
+
+  openKaynakDetayModal(item: any) {
+    this.isKaynakModalOpen = true;
+    this.isLoadingKaynakDetay = true;
+    this.kaynakDetay = null;
+    this.isDownloadMenuOpen = false;
+    this.copiedToClipboard = false;
+
+    const req$ = item.tip === 'video'
+      ? this.apiService.getVideoIcerik(this.egitimId, item.id)
+      : this.apiService.getDokumanIcerik(this.egitimId, item.id);
+
+    req$.subscribe({
+      next: (res) => {
+        this.kaynakDetay = res;
+        this.isLoadingKaynakDetay = false;
+        if (res.orijinalDil && res.orijinalDil.toLowerCase() !== 'tr' && res.cevrilmisOzetMetni) {
+          this.kaynakActiveTab = 'cevirisi';
+        } else if (res.damitilmisOzetMetni) {
+          this.kaynakActiveTab = 'ozet';
+        } else {
+          this.kaynakActiveTab = 'ham';
+        }
+      },
+      error: (err) => {
+        console.error('Kaynak içeriği alınamadı:', err);
+        alert('Kaynak içeriği yüklenirken bir hata oluştu.');
+        this.isKaynakModalOpen = false;
+        this.isLoadingKaynakDetay = false;
+      }
+    });
+  }
+
+  closeKaynakModal() {
+    this.isKaynakModalOpen = false;
+    this.kaynakDetay = null;
+    this.isDownloadMenuOpen = false;
+  }
+
+  setKaynakTab(tab: 'ozet' | 'cevirisi' | 'ham') {
+    this.kaynakActiveTab = tab;
+  }
+
+  toggleDownloadMenu() {
+    this.isDownloadMenuOpen = !this.isDownloadMenuOpen;
+  }
+
+  get activeKaynakText(): string {
+    if (!this.kaynakDetay) return '';
+    if (this.kaynakActiveTab === 'cevirisi') {
+      return this.kaynakDetay.cevrilmisOzetMetni || this.kaynakDetay.damitilmisOzetMetni || '';
+    }
+    if (this.kaynakActiveTab === 'ozet') {
+      return this.kaynakDetay.damitilmisOzetMetni || '';
+    }
+    return this.kaynakDetay.hamMetin || '';
+  }
+
+  formatMarkdown(text: string): string {
+    if (!text) return '';
+    return marked.parse(text) as string;
+  }
+
+  copyKaynakText() {
+    const text = this.activeKaynakText;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      this.copiedToClipboard = true;
+      setTimeout(() => this.copiedToClipboard = false, 2500);
+    });
+  }
+
+  private sanitizeFilename(name: string): string {
+    return (name || 'kaynak')
+      .replace(/[^a-zA-Z0-9_\-ğüşıöçĞÜŞİÖÇ\.]+/g, '_')
+      .substring(0, 60);
+  }
+
+  private saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  downloadKaynakTxt() {
+    const text = this.activeKaynakText;
+    if (!text) return;
+    const tabName = this.kaynakActiveTab === 'cevirisi' ? 'Turkce_Ceviri' : (this.kaynakActiveTab === 'ozet' ? 'Damitilmis_Ozet' : 'Ham_Metin');
+    const filename = `${this.sanitizeFilename(this.kaynakDetay.baslik)}_${tabName}.txt`;
+    const blob = new Blob(['\ufeff' + text], { type: 'text/plain;charset=utf-8' });
+    this.saveBlob(blob, filename);
+    this.isDownloadMenuOpen = false;
+  }
+
+  downloadKaynakMd() {
+    const text = this.activeKaynakText;
+    if (!text) return;
+    const tabName = this.kaynakActiveTab === 'cevirisi' ? 'Turkce_Ceviri' : (this.kaynakActiveTab === 'ozet' ? 'Damitilmis_Ozet' : 'Ham_Metin');
+    const filename = `${this.sanitizeFilename(this.kaynakDetay.baslik)}_${tabName}.md`;
+    const header = `# ${this.kaynakDetay.baslik}\n**Dil:** ${this.kaynakDetay.orijinalDil?.toUpperCase()} | **Tür:** ${this.isArgumanMode(this.kaynakDetay) ? 'Dış Kaynak' : 'Doğrudan Referans'}\n\n---\n\n`;
+    const blob = new Blob([header + text], { type: 'text/markdown;charset=utf-8' });
+    this.saveBlob(blob, filename);
+    this.isDownloadMenuOpen = false;
+  }
+
+  downloadKaynakDocx() {
+    if (!this.kaynakDetay || this.isGeneratingDocx) return;
+    this.isGeneratingDocx = true;
+    const tabName = this.kaynakActiveTab === 'cevirisi' ? 'Türkçe Çeviri (Terim Korumalı)' : (this.kaynakActiveTab === 'ozet' ? 'Damıtılmış Bilgi Özeti' : 'Ham Metin / Transkript');
+    const filename = `${this.sanitizeFilename(this.kaynakDetay.baslik)}_${this.kaynakActiveTab}.docx`;
+
+    const sections: DocxSection[] = [
+      { heading: tabName, markdown: this.activeKaynakText }
+    ];
+
+    markdownToDocxBlob({
+      title: this.kaynakDetay.baslik,
+      subtitle: `${tabName} · Dil: ${this.kaynakDetay.orijinalDil?.toUpperCase() || 'TR'}`,
+      sections
+    })
+      .then(blob => this.saveBlob(blob, filename))
+      .catch(err => {
+        console.error('Docx hatası:', err);
+        alert('Word dosyası oluşturulamadı.');
+      })
+      .finally(() => {
+        this.isGeneratingDocx = false;
+        this.isDownloadMenuOpen = false;
+      });
+  }
+
+  downloadKaynakPdf() {
+    if (!this.kaynakDetay) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Açılır pencere engellendi. Lütfen tarayıcınızda açılır pencerelere izin verin.');
+      return;
+    }
+    const tabName = this.kaynakActiveTab === 'cevirisi' ? 'Türkçe Çeviri (Terim Korumalı)' : (this.kaynakActiveTab === 'ozet' ? 'Damıtılmış Bilgi Özeti' : 'Ham Transkript / Metin');
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${this.escapeHtml(this.kaynakDetay.baslik)} - ${tabName}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1e293b; padding: 40px; }
+          h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; font-size: 22px; }
+          .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+          .content { font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }
+        </style>
+      </head>
+      <body>
+        <h1>${this.escapeHtml(this.kaynakDetay.baslik)}</h1>
+        <div class="meta">Bölüm: <strong>${tabName}</strong> | Dil: <strong>${this.escapeHtml(this.kaynakDetay.orijinalDil?.toUpperCase())}</strong> | Kelime Sayısı: <strong>${this.kaynakDetay.kelimeSayisi || 0}</strong></div>
+        <div class="content">${this.escapeHtml(this.activeKaynakText)}</div>
+      </body>
+      </html>
+    `;
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 400);
+    this.isDownloadMenuOpen = false;
+  }
+
+  private escapeHtml(text: string): string {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

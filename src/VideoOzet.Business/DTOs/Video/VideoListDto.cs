@@ -12,5 +12,7 @@ public class VideoListDto
     public string? Transkript { get; set; }
     public string? Ozet { get; set; }
     public VideoIslemDurumu IslemDurumu { get; set; }
+    public KaynakKullanimTuru KullanimTuru { get; set; } = KaynakKullanimTuru.DogrudanReferans;
+    public string? OrijinalDil { get; set; } = "tr";
     public DateTime OlusturmaTarihi { get; set; }
 }

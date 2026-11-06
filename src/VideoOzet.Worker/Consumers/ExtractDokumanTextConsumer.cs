@@ -21,17 +21,20 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
     private readonly AppDbContext _dbContext;
     private readonly IFileStorageService _fileStorageService;
     private readonly IPublishEndpoint _publishEndpoint;
+    private readonly VideoOzet.Business.Interfaces.IGeminiProvider? _geminiProvider;
 
     public ExtractDokumanTextConsumer(
         ILogger<ExtractDokumanTextConsumer> logger,
         AppDbContext dbContext,
         IFileStorageService fileStorageService,
-        IPublishEndpoint publishEndpoint)
+        IPublishEndpoint publishEndpoint,
+        VideoOzet.Business.Interfaces.IGeminiProvider? geminiProvider = null)
     {
         _logger = logger;
         _dbContext = dbContext;
         _fileStorageService = fileStorageService;
         _publishEndpoint = publishEndpoint;
+        _geminiProvider = geminiProvider;
     }
 
     public async Task Consume(ConsumeContext<DocumentUploadedEvent> context)
@@ -103,10 +106,48 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
 
             var kelimeSayisi = extractedText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
 
+            string? damitilmisOzet = null;
+            string? cevrilmisOzet = null;
+            string orijinalDil = "tr";
+
+            if (_geminiProvider != null && extractedText.Length > 100 && extractedText != "Boş Döküman")
+            {
+                try
+                {
+                    var sampleText = extractedText.Length > 20000 ? extractedText.Substring(0, 20000) : extractedText;
+                    var summaryJson = await _geminiProvider.SummarizeAsync(sampleText);
+                    var parsed = VideoOzet.Business.Helpers.LlmJson.Deserialize<SummaryDocLlmResponse>(summaryJson);
+                    if (parsed != null)
+                    {
+                        damitilmisOzet = parsed.OzetMetni;
+                        if (!string.IsNullOrWhiteSpace(parsed.Dil))
+                        {
+                            var l = parsed.Dil.Trim().ToLowerInvariant();
+                            if (l.StartsWith("en") || l == "english") orijinalDil = "en";
+                            else if (l.StartsWith("de") || l == "german") orijinalDil = "de";
+                            else if (l.StartsWith("tr") || l == "turkish") orijinalDil = "tr";
+                            else if (l.Length >= 2) orijinalDil = l.Substring(0, 2);
+                        }
+
+                        if (!orijinalDil.Equals("tr", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(damitilmisOzet))
+                        {
+                            cevrilmisOzet = await _geminiProvider.TranslateDistilledSummaryToTurkishAsync(damitilmisOzet, orijinalDil);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Doküman için damıtılmış özet/çeviri adımı atlandı (Ham metin kullanılacak): {Msg}", ex.Message);
+                }
+            }
+
             var dokumanMetin = new DokumanMetin
             {
                 DokumanId = evt.DokumanId,
                 HamMetin = extractedText,
+                DamitilmisOzetMetni = damitilmisOzet,
+                CevrilmisOzetMetni = cevrilmisOzet,
+                OrijinalDil = orijinalDil,
                 KelimeSayisi = kelimeSayisi,
                 OlusturmaTarihi = DateTime.UtcNow
             };
@@ -236,5 +277,11 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
             }
         }
         return sb.ToString();
+    }
+
+    private class SummaryDocLlmResponse
+    {
+        public string? Dil { get; set; }
+        public string OzetMetni { get; set; } = string.Empty;
     }
 }

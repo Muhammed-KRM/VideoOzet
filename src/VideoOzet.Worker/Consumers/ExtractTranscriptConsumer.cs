@@ -6,6 +6,7 @@ using MassTransit;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using VideoOzet.Business.Events;
+using VideoOzet.Business.Infrastructure.AI;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
@@ -149,6 +150,17 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             }
 
             // 4. Save Transcript to Database (Upsert)
+            string detectedLang = "tr";
+            if (_sttProvider is CompositeSttProvider composite && !string.IsNullOrWhiteSpace(composite.LastDetectedLanguage))
+            {
+                var l = composite.LastDetectedLanguage.Trim().ToLowerInvariant();
+                if (l == "turkish") detectedLang = "tr";
+                else if (l == "english") detectedLang = "en";
+                else if (l == "german") detectedLang = "de";
+                else if (l == "french") detectedLang = "fr";
+                else if (l.Length >= 2) detectedLang = l.Substring(0, 2);
+            }
+
             var existingTranscript = await _dbContext.VideoTranscripts
                 .FirstOrDefaultAsync(t => t.VideoId == message.VideoId, context.CancellationToken);
 
@@ -157,6 +169,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             {
                 existingTranscript.HamMetin = transcriptText;
                 existingTranscript.KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                existingTranscript.Dil = detectedLang;
                 existingTranscript.SttModel = "gemini-3.8-flash-tiered";
                 existingTranscript.SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds;
                 existingTranscript.OlusturmaTarihi = DateTime.UtcNow;
@@ -169,6 +182,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                     VideoId = message.VideoId,
                     HamMetin = transcriptText,
                     KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length,
+                    Dil = detectedLang,
                     SttModel = "gemini-3.8-flash-tiered",
                     SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds,
                     OlusturmaTarihi = DateTime.UtcNow

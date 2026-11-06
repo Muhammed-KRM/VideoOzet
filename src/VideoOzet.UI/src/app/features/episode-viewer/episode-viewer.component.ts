@@ -177,13 +177,13 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   retryEpisode() {
     if (this.episode?.durum === 'Isleniyor' || this.isRevising) return;
     this.isRevising = true;
-    this.apiService.reviseEpisode(this.contentRequestId, this.bolumNo, {
-      talimat: this.revizyonTalimati || '',
-      hedefAlan: 'Hepsi'
-    }).subscribe({
+    this.apiService.retryEpisode(this.contentRequestId, this.bolumNo).subscribe({
       next: () => {
         this.revizyonTalimati = '';
         this.seciliRevizyonId = null;
+        if (this.episode) {
+          this.episode.durum = 'Isleniyor';
+        }
         this.startPolling();
       },
       error: (err) => {

@@ -7,6 +7,9 @@ public class DokumanMetin
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid DokumanId { get; set; }
     public string HamMetin { get; set; } = string.Empty;
+    public string? DamitilmisOzetMetni { get; set; }
+    public string? CevrilmisOzetMetni { get; set; }
+    public string OrijinalDil { get; set; } = "tr";
     public int KelimeSayisi { get; set; }
     public DateTime OlusturmaTarihi { get; set; } = DateTime.UtcNow;
 

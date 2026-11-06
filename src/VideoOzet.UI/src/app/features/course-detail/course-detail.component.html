@@ -80,8 +80,27 @@
                 </svg>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <h4 class="text-white font-medium text-sm truncate max-w-sm" [title]="v.baslik">{{ v.baslik }}</h4>
+
+                  <!-- Kaynak Kullanım Türü Etiketi (Tıklanabilir Değiştirici) -->
+                  <button 
+                    type="button"
+                    (click)="toggleKullanimTuru(v, $event)"
+                    [title]="isArgumanMode(v) ? 'Tıkla: Doğrudan Referans moduna geçir' : 'Tıkla: Dış Kaynak (Telif Korumalı) moduna geçir'"
+                    class="text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                    [ngClass]="isArgumanMode(v) ? 'bg-amber-950/80 text-amber-300 border-amber-600/70 hover:bg-amber-900' : 'bg-blue-950/80 text-blue-300 border-blue-600/70 hover:bg-blue-900'"
+                  >
+                    <span>{{ isArgumanMode(v) ? '🛡️ Dış Kaynak' : '📌 Doğrudan Referans' }}</span>
+                  </button>
+
+                  <!-- Orijinal Dil Rozeti (Yabancı dil ise) -->
+                  <span *ngIf="v.orijinalDil && v.orijinalDil.toLowerCase() !== 'tr'" 
+                        class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/50 shrink-0"
+                        title="Orijinal Dil: {{ v.orijinalDil | uppercase }} (Damıtılmış özet Türkçeye çevrildi)">
+                    🌐 {{ v.orijinalDil | uppercase }} ➔ TR
+                  </span>
+
                   <span *ngIf="v.islemDurumu !== 'Tamamlandi' && v.durum !== 'Tamamlandi' && v.islemDurumu !== 8 && v.islemDurumu !== 'Hata' && v.islemDurumu !== 9" 
                         class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/50">
                     {{ getVideoProgressText(v) }}
@@ -120,6 +139,20 @@
                 </span>
                 <p *ngIf="v.hataMesaji || v.durum === 'Hata'" class="text-xs text-rose-400 mt-1 max-w-xs truncate" [title]="v.hataMesaji">{{ v.hataMesaji || 'Bilinmeyen Hata' }}</p>
               </div>
+
+              <!-- Metin & Özet İnceleme Butonu (İşlem Tamamlanmışsa) -->
+              <button 
+                *ngIf="v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8"
+                (click)="openKaynakDetayModal(v)" 
+                title="Transkript, Damıtılmış Özet ve Çeviriyi İncele & İndir" 
+                class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 hover:text-white transition-colors flex items-center gap-1.5 shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>Metin & Özet</span>
+              </button>
+
               <button 
                 *ngIf="v.tip === 'video' && (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.durum === 'Bekliyor')"
                 (click)="retryVideo(v)" 
@@ -392,4 +425,209 @@
 <!-- Loading State -->
 <div *ngIf="isLoading" class="flex justify-center items-center py-20 min-h-screen">
   <div class="animate-spin rounded-full h-12 w-12 border-4 border-slate-700 border-t-blue-500"></div>
+</div>
+
+<!-- Kaynak İnceleme Modalı (Transkript, Damıtılmış Özet ve Terim Korumalı Çeviri) -->
+<div *ngIf="isKaynakModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" (click)="closeKaynakModal()">
+  <div class="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden text-slate-100" (click)="$event.stopPropagation()">
+    
+    <!-- Modal Başlık & Kontroller -->
+    <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/90">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <h3 class="text-lg font-semibold text-white truncate max-w-lg" [title]="kaynakDetay?.baslik">
+            {{ kaynakDetay?.baslik || 'Kaynak İçeriği' }}
+          </h3>
+          <span *ngIf="kaynakDetay?.orijinalDil" class="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-mono">
+            {{ kaynakDetay.orijinalDil | uppercase }}
+          </span>
+          <span class="text-xs px-2 py-0.5 rounded-full font-medium" 
+                [ngClass]="isArgumanMode(kaynakDetay) ? 'bg-amber-950/80 text-amber-300 border border-amber-600/60' : 'bg-blue-950/80 text-blue-300 border border-blue-600/60'">
+            {{ isArgumanMode(kaynakDetay) ? '🛡️ Dış Kaynak (Sadece Argüman)' : '📌 Doğrudan Referans' }}
+          </span>
+          <span *ngIf="kaynakDetay?.kelimeSayisi" class="text-xs text-slate-400">
+            · {{ kaynakDetay.kelimeSayisi | number }} kelime
+          </span>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">
+          {{ kaynakDetay?.tip === 'video' ? 'Video Transkripti ve Damıtılmış Özet Detayı' : 'Döküman Metni ve Damıtılmış Özet Detayı' }}
+          <span *ngIf="kaynakDetay?.sttModel"> · STT: {{ kaynakDetay.sttModel }}</span>
+          <span *ngIf="kaynakDetay?.llmModel"> · LLM: {{ kaynakDetay.llmModel }}</span>
+        </p>
+      </div>
+
+      <!-- Aksiyonlar: Kopyala, İndir, Kapat -->
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Kopyala Butonu -->
+        <button 
+          type="button" 
+          (click)="copyKaynakText()"
+          [disabled]="isLoadingKaynakDetay || !activeKaynakText"
+          class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          [title]="copiedToClipboard ? 'Panoya Kopyalandı!' : 'Görüntülenen Metni Kopyala'"
+        >
+          <svg *ngIf="!copiedToClipboard" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+          </svg>
+          <svg *ngIf="copiedToClipboard" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+          <span>{{ copiedToClipboard ? 'Kopyalandı!' : 'Kopyala' }}</span>
+        </button>
+
+        <!-- İndir Açılır Menüsü -->
+        <div class="relative">
+          <button 
+            type="button" 
+            (click)="toggleDownloadMenu()"
+            [disabled]="isLoadingKaynakDetay || !activeKaynakText"
+            class="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span>İndir</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <!-- Dropdown Menü -->
+          <div *ngIf="isDownloadMenuOpen" class="absolute right-0 mt-1.5 w-44 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-20 py-1.5 text-xs">
+            <button (click)="downloadKaynakTxt()" class="w-full text-left px-3.5 py-2 text-slate-200 hover:bg-slate-700/70 flex items-center gap-2">
+              <span>📄 Metin Belgesi (.txt)</span>
+            </button>
+            <button (click)="downloadKaynakMd()" class="w-full text-left px-3.5 py-2 text-slate-200 hover:bg-slate-700/70 flex items-center gap-2">
+              <span>📝 Markdown (.md)</span>
+            </button>
+            <button (click)="downloadKaynakDocx()" [disabled]="isGeneratingDocx" class="w-full text-left px-3.5 py-2 text-slate-200 hover:bg-slate-700/70 flex items-center gap-2">
+              <span>📘 Word Belgesi (.docx)</span>
+            </button>
+            <button (click)="downloadKaynakPdf()" class="w-full text-left px-3.5 py-2 text-slate-200 hover:bg-slate-700/70 flex items-center gap-2">
+              <span>🖨️ PDF / Yazdır</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Kapat Butonu -->
+        <button 
+          type="button" 
+          (click)="closeKaynakModal()" 
+          class="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+          title="Kapat (ESC)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Tab Çubuğu -->
+    <div class="px-6 pt-3 border-b border-slate-800 bg-slate-900/60 flex items-center gap-2 overflow-x-auto">
+      <button 
+        type="button"
+        (click)="setKaynakTab('ozet')"
+        [ngClass]="kaynakActiveTab === 'ozet' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'"
+        class="px-4 py-2 text-xs rounded-t-lg border-b-2 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+      >
+        <span>⚡ Damıtılmış Bilgi Özeti</span>
+        <span *ngIf="kaynakDetay?.damitilmisOzetMetni" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+      </button>
+
+      <button 
+        *ngIf="kaynakDetay?.cevrilmisOzetMetni || (kaynakDetay?.orijinalDil && kaynakDetay?.orijinalDil.toLowerCase() !== 'tr')"
+        type="button"
+        (click)="setKaynakTab('cevirisi')"
+        [ngClass]="kaynakActiveTab === 'cevirisi' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'"
+        class="px-4 py-2 text-xs rounded-t-lg border-b-2 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+      >
+        <span>🌐 Türkçe Çeviri (Terim Korumalı)</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300 font-mono">TR</span>
+      </button>
+
+      <button 
+        type="button"
+        (click)="setKaynakTab('ham')"
+        [ngClass]="kaynakActiveTab === 'ham' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'"
+        class="px-4 py-2 text-xs rounded-t-lg border-b-2 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+      >
+        <span>🎙️ {{ kaynakDetay?.tip === 'video' ? 'Ham Transkript Metni' : 'Orijinal Döküman Metni' }}</span>
+      </button>
+    </div>
+
+    <!-- İçerik Alanı -->
+    <div class="p-6 overflow-y-auto flex-1 min-h-[300px] max-h-[65vh] bg-slate-950/40">
+      <!-- Yükleniyor Durumu -->
+      <div *ngIf="isLoadingKaynakDetay" class="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+        <div class="animate-spin rounded-full h-8 w-8 border-2 border-slate-700 border-t-indigo-500"></div>
+        <p class="text-xs">Kaynak içeriği ve özet detayları getiriliyor...</p>
+      </div>
+
+      <!-- İçerik Gösterimi -->
+      <div *ngIf="!isLoadingKaynakDetay">
+        <!-- Konu Başlıkları ve Etiketleri Hapları (Özet veya Çeviri sekmesindeyken) -->
+        <div *ngIf="(kaynakActiveTab === 'ozet' || kaynakActiveTab === 'cevirisi') && (kaynakDetay?.konuBasliklari?.length || kaynakDetay?.konuEtiketleri?.length)" class="mb-5 pb-4 border-b border-slate-800 space-y-2">
+          <div *ngIf="kaynakDetay?.konuBasliklari?.length" class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] font-semibold text-slate-400 mr-1">Konu Başlıkları:</span>
+            <span *ngFor="let baslik of kaynakDetay.konuBasliklari" class="text-xs px-2.5 py-0.5 rounded-md bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
+              {{ baslik }}
+            </span>
+          </div>
+          <div *ngIf="kaynakDetay?.konuEtiketleri?.length" class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] font-semibold text-slate-400 mr-1">Etiketler:</span>
+            <span *ngFor="let tag of kaynakDetay.konuEtiketleri" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+              #{{ tag }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Metin İçeriği -->
+        <div *ngIf="activeKaynakText; else emptyTextTpl">
+          <!-- Markdown Formatlı Gösterim (Özet ve Çeviri için) -->
+          <div *ngIf="kaynakActiveTab === 'ozet' || kaynakActiveTab === 'cevirisi'" 
+               class="prose prose-invert max-w-none text-slate-200 text-sm leading-relaxed" 
+               [innerHTML]="formatMarkdown(activeKaynakText)">
+          </div>
+
+          <!-- Ham Metin Gösterimi -->
+          <div *ngIf="kaynakActiveTab === 'ham'" 
+               class="text-slate-300 text-xs md:text-sm font-sans whitespace-pre-wrap leading-relaxed select-text bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono">
+            {{ activeKaynakText }}
+          </div>
+        </div>
+
+        <!-- Boş Metin Durumu -->
+        <ng-template #emptyTextTpl>
+          <div class="text-center py-12 text-slate-500 text-sm">
+            <p>Bu sekmede görüntülenecek metin bulunamadı.</p>
+            <p class="text-xs text-slate-600 mt-1">İşlem henüz devam ediyor veya bu kaynak için ilgili aşama tamamlanmamış olabilir.</p>
+          </div>
+        </ng-template>
+      </div>
+    </div>
+
+    <!-- Modal Alt Bilgi -->
+    <div class="px-6 py-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between text-xs text-slate-400">
+      <div>
+        <span *ngIf="kaynakActiveTab === 'cevirisi'" class="text-emerald-400 flex items-center gap-1">
+          <span>🛡️ Felsefi ve teknik kavramlar orijinal dilde korunarak Türkçeye aktarılmıştır.</span>
+        </span>
+        <span *ngIf="kaynakActiveTab === 'ozet'" class="text-indigo-400">
+          ⚡ Damıtılmış özet, RAG indekslemesinde ve video planlayıcıda doğrudan kullanılır.
+        </span>
+        <span *ngIf="kaynakActiveTab === 'ham'" class="text-slate-400">
+          🎙️ Transkripsiyon / Orijinal döküman tam metni.
+        </span>
+      </div>
+      <button 
+        type="button" 
+        (click)="closeKaynakModal()" 
+        class="px-4 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+      >
+        Kapat
+      </button>
+    </div>
+
+  </div>
 </div>

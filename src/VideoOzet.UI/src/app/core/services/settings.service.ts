@@ -8,11 +8,20 @@ export interface AiProviderSettings {
   openRouterApiKey: string;
   openRouterBaseUrl: string;
   openRouterModel: string;
+  openRouterSummaryModel?: string;
+  openRouterVideoPlanModel?: string;
+  openRouterQcModel?: string;
   groqApiKey: string;
   groqModel: string;
+  groqSummaryModel?: string;
+  groqVideoPlanModel?: string;
+  groqQcModel?: string;
   antigravityProxyUrl: string;
   antigravityProxyKey: string;
   antigravityProxyModel: string;
+  antigravitySummaryModel?: string;
+  antigravityVideoPlanModel?: string;
+  antigravityQcModel?: string;
 }
 
 export interface TestConnectionResult {
@@ -40,11 +49,20 @@ export class SettingsService {
     openRouterApiKey: '',
     openRouterBaseUrl: 'https://openrouter.ai/api/v1',
     openRouterModel: 'google/gemini-3.8-flash',
+    openRouterSummaryModel: 'google/gemini-3.8-flash',
+    openRouterVideoPlanModel: 'anthropic/claude-3.7-sonnet',
+    openRouterQcModel: 'google/gemini-3.8-flash',
     groqApiKey: '',
     groqModel: 'openai/gpt-oss-120b',
+    groqSummaryModel: 'openai/gpt-oss-120b',
+    groqVideoPlanModel: 'openai/gpt-oss-120b',
+    groqQcModel: 'openai/gpt-oss-120b',
     antigravityProxyUrl: 'http://localhost:8045/v1',
     antigravityProxyKey: '',
-    antigravityProxyModel: 'gemini-3.8-flash-tiered'
+    antigravityProxyModel: 'gemini-3.8-flash-tiered',
+    antigravitySummaryModel: 'gemini-3.8-flash-tiered',
+    antigravityVideoPlanModel: 'claude-3-7-sonnet-tiered',
+    antigravityQcModel: 'gemini-3.8-flash-tiered'
   });
 
   readonly openRouterModels = signal<ModelOption[]>([]);

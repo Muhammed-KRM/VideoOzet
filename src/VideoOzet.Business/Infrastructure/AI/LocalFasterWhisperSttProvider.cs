@@ -18,6 +18,7 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
     private readonly ILogger<LocalFasterWhisperSttProvider> _logger;
 
     public Action<int, int>? OnProgress { get; set; }
+    public string? LastDetectedLanguage { get; private set; }
 
     public LocalFasterWhisperSttProvider(
         HttpClient httpClient,
@@ -79,7 +80,7 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
             var payload = new
             {
                 file_path = tempFile,
-                language = "tr",
+                language = (string?)null,
                 beam_size = 1,
                 stream = true
             };
@@ -134,6 +135,10 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                                 finalDuration = root.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
                                 finalElapsed = root.TryGetProperty("elapsed_seconds", out var elProp) ? elProp.GetDouble() : 0;
                                 finalDevice = root.TryGetProperty("device", out var devProp) ? devProp.GetString() ?? "unknown" : "unknown";
+                                if (root.TryGetProperty("language", out var langProp))
+                                {
+                                    LastDetectedLanguage = langProp.GetString()?.Trim().ToLowerInvariant();
+                                }
                             }
                             else
                             {
@@ -149,6 +154,10 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                         finalDuration = root.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
                         finalElapsed = root.TryGetProperty("elapsed_seconds", out var elProp) ? elProp.GetDouble() : 0;
                         finalDevice = root.TryGetProperty("device", out var devProp) ? devProp.GetString() ?? "unknown" : "unknown";
+                        if (root.TryGetProperty("language", out var langProp))
+                        {
+                            LastDetectedLanguage = langProp.GetString()?.Trim().ToLowerInvariant();
+                        }
                     }
                 }
                 catch (JsonException)

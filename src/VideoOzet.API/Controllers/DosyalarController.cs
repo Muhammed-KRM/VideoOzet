@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Data.Enums;
 
 namespace VideoOzet.API.Controllers;
 
@@ -24,7 +27,7 @@ public class DosyalarController : ControllerBase
     [HttpPost("upload")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue, ValueLengthLimit = int.MaxValue)]
-    public async Task<IActionResult> UploadFile(Guid egitimId, IFormFile file)
+    public async Task<IActionResult> UploadFile(Guid egitimId, IFormFile file, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
     {
         if (file == null || file.Length == 0)
             return BadRequest("Dosya yüklenemedi.");
@@ -40,14 +43,15 @@ public class DosyalarController : ControllerBase
                 EgitimId = egitimId,
                 FileName = file.FileName,
                 ContentType = file.ContentType,
-                FileStream = stream
+                FileStream = stream,
+                KullanimTuru = kullanimTuru
             };
             var result = await _videoService.UploadVideoAsync(dto);
-            return Ok(new { tip = "video", id = result });
+            return Ok(new { tip = "video", id = result.Id });
         }
         else if (ext == ".pdf" || ext == ".docx" || ext == ".pptx" || ext == ".txt")
         {
-            var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream);
+            var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru);
             return Ok(new { tip = "dokuman", id = result });
         }
         else
@@ -59,7 +63,7 @@ public class DosyalarController : ControllerBase
     [HttpPost("upload-batch")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue, ValueLengthLimit = int.MaxValue)]
-    public async Task<IActionResult> UploadBatch(Guid egitimId)
+    public async Task<IActionResult> UploadBatch(Guid egitimId, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
     {
         var files = Request.Form.Files;
         if (files == null || files.Count == 0)
@@ -81,19 +85,49 @@ public class DosyalarController : ControllerBase
                     EgitimId = egitimId,
                     FileName = file.FileName,
                     ContentType = file.ContentType,
-                    FileStream = stream
+                    FileStream = stream,
+                    KullanimTuru = kullanimTuru
                 };
                 var result = await _videoService.UploadVideoAsync(dto);
-                results.Add(new { tip = "video", fileName = file.FileName, id = result });
+                results.Add(new { tip = "video", fileName = file.FileName, id = result.Id });
             }
             else if (ext == ".pdf" || ext == ".docx" || ext == ".pptx" || ext == ".txt")
             {
-                var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream);
+                var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru);
                 results.Add(new { tip = "dokuman", fileName = file.FileName, id = result });
             }
         }
 
         return Ok(results);
+    }
+
+    [HttpPatch("{tip}/{id:guid}/kullanim-turu")]
+    public async Task<IActionResult> UpdateKullanimTuru(Guid egitimId, string tip, Guid id, [FromBody] UpdateKullanimTuruDto dto)
+    {
+        if (tip.Equals("video", StringComparison.OrdinalIgnoreCase))
+        {
+            await _videoService.UpdateKullanimTuruAsync(id, dto.KullanimTuru);
+            return Ok(new { success = true, tip = "video", id, kullanimTuru = dto.KullanimTuru });
+        }
+        else if (tip.Equals("dokuman", StringComparison.OrdinalIgnoreCase))
+        {
+            await _dokumanService.UpdateKullanimTuruAsync(id, dto.KullanimTuru);
+            return Ok(new { success = true, tip = "dokuman", id, kullanimTuru = dto.KullanimTuru });
+        }
+        else
+        {
+            return BadRequest("Geçersiz kaynak tipi. 'video' veya 'dokuman' olmalıdır.");
+        }
+    }
+
+    [HttpGet("dokumanlar/{dokumanId:guid}/icerik")]
+    public async Task<IActionResult> GetDokumanIcerik(Guid egitimId, Guid dokumanId)
+    {
+        var icerik = await _dokumanService.GetDokumanIcerikDetayAsync(dokumanId);
+        if (icerik == null)
+            return NotFound("Doküman içeriği bulunamadı.");
+
+        return Ok(icerik);
     }
 
     [HttpDelete("dokumanlar/{id:guid}")]

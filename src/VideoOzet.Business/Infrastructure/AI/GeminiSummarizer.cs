@@ -15,7 +15,7 @@ public class GeminiSummarizer : IGeminiProvider
     private readonly IConfiguration _configuration;
     private readonly ILogger<GeminiSummarizer> _logger;
     private readonly IAiProviderSettingsService? _settingsService;
-    private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(20) };
     private static int _currentKeyIndex = 0;
 
     // Proxy'ye gönderilen model; kayıtlardaki LlmModel alanı da buradan beslenir.
@@ -30,18 +30,7 @@ public class GeminiSummarizer : IGeminiProvider
                 try
                 {
                     var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
-                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
-                    }
-                    if (settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return string.IsNullOrWhiteSpace(settings.GroqModel) ? "openai/gpt-oss-120b" : settings.GroqModel;
-                    }
-                    if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyModel))
-                    {
-                        return settings.AntigravityProxyModel;
-                    }
+                    return settings.GetEffectiveSummaryModel();
                 }
                 catch { }
             }
@@ -69,6 +58,44 @@ public class GeminiSummarizer : IGeminiProvider
 
     public async Task<string> SummarizeAsync(string transcript, string modelName = "gemini-1.5-flash")
     {
+        var prompt = $@"
+        Sen bir bilgi çıkarma ve rafinasyon uzmanısın. Görevin aşağıdaki metni klasik anlamda 'özetlemek' değil, 'damıtmak'tır. Aşağıdaki kurallara kesinlikle uy: 
+        1) Metin hangi dilde ise 'ozetMetni' alanını O ORİJİNAL DİLDE damıt (bilgi kaybı yaşamamak için bu adımda çeviri yapma).
+        2) Konuyla ilgili verilen TÜM bilgileri, iddiaları, kuralları ve teknik detayları %100 oranında koru. Hiçbir bilgi kırıntısını atlama. 
+        3) Konuşmacının kendini tekrar ettiği yerleri, konudan tamamen bağımsız anılarını/sohbetlerini ve 'ııı, eee, yani' gibi boş laflarını tamamen temizle. 
+        4) Çıktın, asıl metnin bilgi yoğunluğunu kaybetmeden sadece gereksiz tekrarlardan ve konu dışı gürültüden arındırılmış, saf ve akıcı bir bilgi dökümü olmalıdır.
+        5) 'dil' alanında metnin ISO dil kodunu (örn: 'tr', 'en', 'de', 'fr' vb.) belirt.
+        6) 'konuBasliklari' ve 'konuEtiketleri' alanlarını ise her zaman Türkçe olarak yaz.
+
+        Lütfen cevabı sadece geçerli bir JSON formatında döndür.
+        
+        İstenen JSON formatı:
+        {{
+            ""dil"": ""tr"",
+            ""ozetMetni"": ""Damıtılmış, eksiksiz ancak gereksiz tekrarlardan arındırılmış tam metin"",
+            ""konuBasliklari"": [""Başlık 1"", ""Başlık 2""],
+            ""konuEtiketleri"": [""etiket1"", ""etiket2""]
+        }}
+
+        Transkript:
+        {transcript}
+        ";
+
+        return await ExecuteLlmPromptAsync(prompt);
+    }
+
+    public async Task<string> TranslateDistilledSummaryToTurkishAsync(string text, string sourceLang = "en")
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var prompt = string.Format(VideoOzet.Business.Helpers.PromptTemplates.TermPreservingTranslationPrompt, sourceLang, text);
+        var translated = await ExecuteLlmPromptAsync(prompt);
+        return translated.Trim();
+    }
+
+    private async Task<string> ExecuteLlmPromptAsync(string prompt)
+    {
         AiProviderSettingsDto? settings = null;
         if (_settingsService != null)
         {
@@ -81,25 +108,6 @@ public class GeminiSummarizer : IGeminiProvider
                 _logger.LogWarning(ex, "AI Provider ayarları okunamadı, varsayılan yapılandırma kullanılacak.");
             }
         }
-
-        var prompt = $@"
-        Sen bir bilgi çıkarma ve rafinasyon uzmanısın. Görevin aşağıdaki metni klasik anlamda 'özetlemek' değil, 'damıtmak'tır. Aşağıdaki kurallara kesinlikle uy: 
-        1) Konuyla ilgili verilen TÜM bilgileri, iddiaları, kuralları ve teknik detayları %100 oranında koru. Hiçbir bilgi kırıntısını atlama. 
-        2) Konuşmacının kendini tekrar ettiği yerleri, konudan tamamen bağımsız anılarını/sohbetlerini ve 'ııı, eee, yani' gibi boş laflarını tamamen temizle. 
-        3) Çıktın, asıl metnin bilgi yoğunluğunu kaybetmeden sadece gereksiz tekrarlardan ve konu dışı gürültüden arındırılmış, saf ve akıcı bir bilgi dökümü olmalıdır.
-
-        Lütfen cevabı sadece geçerli bir JSON formatında döndür.
-        
-        İstenen JSON formatı:
-        {{
-            ""ozetMetni"": ""Damıtılmış, eksiksiz ancak gereksiz tekrarlardan arındırılmış tam metin"",
-            ""konuBasliklari"": [""Başlık 1"", ""Başlık 2""],
-            ""konuEtiketleri"": [""etiket1"", ""etiket2""]
-        }}
-
-        Transkript:
-        {transcript}
-        ";
 
         // 1. Eğer aktif sağlayıcı "groq" ise doğrudan kullanıcının girdiği Groq API anahtarını ve modelini kullan
         if (settings != null && settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
@@ -156,11 +164,9 @@ public class GeminiSummarizer : IGeminiProvider
                                .Select(k => k.Trim())
                                .ToArray();
 
-        var effectiveModel = isOpenRouter
-            ? (string.IsNullOrWhiteSpace(settings!.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel)
-            : (settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
-                ? settings.AntigravityProxyModel
-                : ModelName);
+        var effectiveModel = settings != null
+            ? settings.GetEffectiveSummaryModel()
+            : ModelName;
 
         var baseUrl = isOpenRouter
             ? settings!.OpenRouterBaseUrl.TrimEnd('/')
@@ -168,39 +174,80 @@ public class GeminiSummarizer : IGeminiProvider
                 ? settings.AntigravityProxyUrl.TrimEnd('/')
                 : "http://localhost:8045/v1");
 
-        var requestBody = new
+        bool isReasoningModel = effectiveModel.Contains("r1", StringComparison.OrdinalIgnoreCase) ||
+                                effectiveModel.Contains("o1", StringComparison.OrdinalIgnoreCase) ||
+                                effectiveModel.Contains("o3", StringComparison.OrdinalIgnoreCase) ||
+                                effectiveModel.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+                                effectiveModel.Contains("thinking", StringComparison.OrdinalIgnoreCase);
+
+        var requestPayload = new System.Collections.Generic.Dictionary<string, object>
         {
-            model = effectiveModel,
-            messages = new[]
+            ["model"] = effectiveModel,
+            ["messages"] = new[]
             {
                 new { role = "user", content = prompt }
             },
-            max_tokens = 16384,
-            temperature = 0.2
+            ["max_tokens"] = 16384
         };
+
+        if (!isReasoningModel)
+        {
+            requestPayload["temperature"] = 0.2;
+        }
 
         Exception? lastException = null;
 
         for (int tryCount = 0; tryCount < apiKeys.Length; tryCount++)
         {
-            var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
             var keyToUse = apiKeys[_currentKeyIndex % apiKeys.Length];
             try
             {
-                var requestUrl = $"{baseUrl}/chat/completions";
-                using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
-                requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
-                if (isOpenRouter)
-                {
-                    requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
-                    requestMessage.Headers.Add("X-Title", "VideoOzet");
-                }
-                requestMessage.Content = jsonContent;
-                
-                var response = await _httpClient.SendAsync(requestMessage);
-                var responseString = await response.Content.ReadAsStringAsync();
+                HttpResponseMessage? response = null;
+                string responseString = string.Empty;
 
-                if (!response.IsSuccessStatusCode)
+                for (int subTry = 0; subTry < 2; subTry++)
+                {
+                    var jsonContent = new StringContent(JsonSerializer.Serialize(requestPayload), Encoding.UTF8, "application/json");
+                    var requestUrl = $"{baseUrl}/chat/completions";
+                    using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
+                    requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                    if (isOpenRouter)
+                    {
+                        requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
+                        requestMessage.Headers.Add("X-Title", "VideoOzet");
+                    }
+                    requestMessage.Content = jsonContent;
+                    
+                    response = await _httpClient.SendAsync(requestMessage);
+                    responseString = await response.Content.ReadAsStringAsync();
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        break;
+                    }
+
+                    if ((int)response.StatusCode == 400 && subTry == 0)
+                    {
+                        bool adjusted = false;
+                        if (responseString.Contains("temperature", StringComparison.OrdinalIgnoreCase) && requestPayload.ContainsKey("temperature"))
+                        {
+                            _logger.LogInformation("Özetleme modeli {Model} temperature kabul etmedi. Parametre kaldırılarak deneniyor...", effectiveModel);
+                            requestPayload.Remove("temperature");
+                            adjusted = true;
+                        }
+                        if (responseString.Contains("max_tokens", StringComparison.OrdinalIgnoreCase) || responseString.Contains("tokens", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation("Özetleme modeli {Model} max_tokens sınırına takıldı. 8192 olarak küçültülüp deneniyor...", effectiveModel);
+                            requestPayload["max_tokens"] = 8192;
+                            adjusted = true;
+                        }
+                        if (adjusted) continue;
+                    }
+
+                    break;
+                }
+
+                if (response == null || !response.IsSuccessStatusCode)
                 {
                     if (responseString.Contains("429") || responseString.Contains("quota") || responseString.Contains("exhausted"))
                     {
@@ -212,7 +259,7 @@ public class GeminiSummarizer : IGeminiProvider
                     }
                     else
                     {
-                        throw new Exception($"API error: {response.StatusCode} - {responseString}");
+                        throw new Exception($"API error: {(response != null ? (int)response.StatusCode : 0)} - {responseString}");
                     }
                 }
 

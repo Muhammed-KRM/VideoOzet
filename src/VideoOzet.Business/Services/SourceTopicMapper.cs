@@ -12,6 +12,7 @@ using VideoOzet.Business.Helpers;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
+using VideoOzet.Data.Enums;
 
 namespace VideoOzet.Business.Services;
 
@@ -80,7 +81,9 @@ public class SourceTopicMapper : ISourceTopicMapper
         // 1. Videoları MAP et (Sadece mock/placeholder olmayan gerçek videolar)
         foreach (var video in videolar)
         {
-            var videoText = (video.Summary!.OzetMetni ?? "").Trim();
+            var videoText = (!string.IsNullOrWhiteSpace(video.Summary!.CevrilmisOzetMetni)
+                ? video.Summary.CevrilmisOzetMetni
+                : video.Summary.OzetMetni ?? "").Trim();
             if (IsPlaceholder(videoText))
             {
                 _logger.LogInformation("Video {Baslik} placeholder/mock içerik içerdiği için konu çıkarımına dahil edilmedi.", video.Baslik);
@@ -130,7 +133,10 @@ public class SourceTopicMapper : ISourceTopicMapper
 
             if (topics.Any())
             {
-                digestBuilder.AppendLine($"[VİDEO: {video.Baslik} (ID: {video.Id})]");
+                var kullanimEtiketi = video.KullanimTuru == KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? " [DIŞ KAYNAK - KOPYALAMAK YASAK, SADECE ARGÜMAN/MANTIK AL]"
+                    : " [DOĞRUDAN REFERANS]";
+                digestBuilder.AppendLine($"[VİDEO: {video.Baslik} (ID: {video.Id}){kullanimEtiketi}]");
                 foreach (var topic in topics)
                 {
                     digestBuilder.AppendLine($"- {topic.Baslik}: {topic.Aciklama} (~{topic.TahminiSureDk} dk)");
@@ -142,7 +148,11 @@ public class SourceTopicMapper : ISourceTopicMapper
         // 2. Dokümanları MAP et
         foreach (var doc in dokumanlar)
         {
-            var docText = (doc.DokumanMetin!.HamMetin ?? "").Trim();
+            var docText = (!string.IsNullOrWhiteSpace(doc.DokumanMetin!.CevrilmisOzetMetni)
+                ? doc.DokumanMetin.CevrilmisOzetMetni
+                : !string.IsNullOrWhiteSpace(doc.DokumanMetin.DamitilmisOzetMetni)
+                    ? doc.DokumanMetin.DamitilmisOzetMetni
+                    : doc.DokumanMetin.HamMetin ?? "").Trim();
             if (string.IsNullOrWhiteSpace(docText)) continue;
 
             var hash = ComputeHash(docText);
@@ -184,7 +194,10 @@ public class SourceTopicMapper : ISourceTopicMapper
 
             if (topics.Any())
             {
-                digestBuilder.AppendLine($"[DÖKÜMAN: {doc.DosyaAdi} (ID: {doc.Id})]");
+                var kullanimEtiketi = doc.KullanimTuru == KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? " [DIŞ KAYNAK - KOPYALAMAK YASAK, SADECE ARGÜMAN/MANTIK AL]"
+                    : " [DOĞRUDAN REFERANS]";
+                digestBuilder.AppendLine($"[DÖKÜMAN: {doc.DosyaAdi} (ID: {doc.Id}){kullanimEtiketi}]");
                 foreach (var topic in topics)
                 {
                     digestBuilder.AppendLine($"- {topic.Baslik}: {topic.Aciklama} (~{topic.TahminiSureDk} dk)");

@@ -3,7 +3,14 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { marked } from 'marked';
 import { ApiService } from '../../core/services/api.service';
-import { markdownToDocxBlob, qcToMarkdown, DocxSection } from '../../core/utils/markdown-docx';
+import {
+  markdownToDocxBlob,
+  qcToMarkdown,
+  DocxSection,
+  extractPrompterScript,
+  extractPrompterPlainText,
+  prompterToDocxBlob
+} from '../../core/utils/markdown-docx';
 
 @Component({
   selector: 'app-content-result',
@@ -49,6 +56,22 @@ export class ContentResultComponent implements OnChanges {
 
   isDownloadMenuOpen = false;
   copySuccess = false;
+  isPrompterMenuOpen = false;
+  copyPrompterSuccess = false;
+  isGeneratingDocx = false;
+
+  get currentVideoPlan(): string {
+    return this.activeVersion?.videoPlani ?? (this.result?.generatedContent?.videoPlani ?? this.result?.videoPlani ?? '');
+  }
+
+  get hasVideoPlan(): boolean {
+    const plan = this.currentVideoPlan;
+    return !!(plan && plan.trim());
+  }
+
+  togglePrompterMenu() {
+    this.isPrompterMenuOpen = !this.isPrompterMenuOpen;
+  }
 
   ngOnChanges() {
     if (this.result) {
@@ -388,6 +411,56 @@ export class ContentResultComponent implements OnChanges {
       setTimeout(() => (this.copySuccess = false), 2500);
     });
     this.isDownloadMenuOpen = false;
+  }
+
+  // ───────────────────────── Prompter İndirme ─────────────────────────
+
+  downloadPrompterTxt() {
+    if (!this.hasVideoPlan) return;
+    const plain = extractPrompterPlainText(this.currentVideoPlan, this.documentTitle);
+    const blob = new Blob(['\ufeff' + plain], { type: 'text/plain;charset=utf-8' });
+    this.saveBlob(blob, `${this.cleanFileName}_Prompter_Metni.txt`);
+    this.isPrompterMenuOpen = false;
+    this.isDownloadMenuOpen = false;
+  }
+
+  downloadPrompterDocx() {
+    if (!this.hasVideoPlan || this.isGeneratingDocx) return;
+    this.isGeneratingDocx = true;
+    const dateSource = this.activeVersion?.olusturmaTarihi || this.result?.olusturmaTarihi;
+    const dateStr = (dateSource ? new Date(dateSource) : new Date())
+      .toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    prompterToDocxBlob(this.currentVideoPlan, this.documentTitle, dateStr)
+      .then((blob) => this.saveBlob(blob, `${this.cleanFileName}_Prompter_Metni.docx`))
+      .catch((err: any) => {
+        console.error('Prompter Word (.docx) oluşturulamadı:', err);
+        alert('Prompter Word dosyası oluşturulamadı. Lütfen tekrar deneyin.');
+      })
+      .finally(() => {
+        this.isGeneratingDocx = false;
+        this.isPrompterMenuOpen = false;
+        this.isDownloadMenuOpen = false;
+      });
+  }
+
+  downloadPrompterMd() {
+    if (!this.hasVideoPlan) return;
+    const md = extractPrompterScript(this.currentVideoPlan, this.documentTitle);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    this.saveBlob(blob, `${this.cleanFileName}_Prompter_Metni.md`);
+    this.isPrompterMenuOpen = false;
+    this.isDownloadMenuOpen = false;
+  }
+
+  copyPrompterScript() {
+    if (!this.hasVideoPlan) return;
+    const text = extractPrompterPlainText(this.currentVideoPlan, this.documentTitle);
+    navigator.clipboard.writeText(text).then(() => {
+      this.copyPrompterSuccess = true;
+      setTimeout(() => (this.copyPrompterSuccess = false), 2500);
+    });
+    this.isPrompterMenuOpen = false;
   }
 
   private escapeHtml(text: string): string {

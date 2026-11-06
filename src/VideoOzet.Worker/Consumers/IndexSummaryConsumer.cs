@@ -49,8 +49,11 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             return;
         }
 
-        // Metni parçala (chunking)
-        var chunks = _chunker.ChunkText(summary.OzetMetni);
+        // Metni parçala (chunking) - Çeviri varsa Türkçe çeviriyi, yoksa orijinal özeti indeksle
+        var textToIndex = !string.IsNullOrWhiteSpace(summary.CevrilmisOzetMetni)
+            ? summary.CevrilmisOzetMetni
+            : summary.OzetMetni;
+        var chunks = _chunker.ChunkText(textToIndex);
 
         if (chunks.Count == 0)
         {

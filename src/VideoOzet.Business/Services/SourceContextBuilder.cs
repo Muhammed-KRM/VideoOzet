@@ -83,8 +83,17 @@ public class SourceContextBuilder : ISourceContextBuilder
 
             foreach (var doc in dokumanlar)
             {
-                var text = doc.DokumanMetin!.HamMetin.Trim();
-                sb.AppendLine($"[KAYNAK #{idx++} · DOKÜMAN: {doc.DosyaAdi}]");
+                var modeStr = doc.KullanimTuru == VideoOzet.Data.Enums.KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? "KULLANIM MODU: DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR! (Yalnızca mantıksal argümanları, fikirleri ve kavramları al; cümle yapılarını, özel benzetmeleri ve anlatım sırasını ASLA kopyalama, sıfırdan kendi cümlelerinle kurgula)"
+                    : "KULLANIM MODU: DOĞRUDAN REFERANS (İfadeler, tanımlar ve örnekler doğrudan kullanılabilir)";
+
+                var text = (!string.IsNullOrWhiteSpace(doc.DokumanMetin!.CevrilmisOzetMetni)
+                    ? doc.DokumanMetin.CevrilmisOzetMetni
+                    : (!string.IsNullOrWhiteSpace(doc.DokumanMetin.DamitilmisOzetMetni)
+                        ? doc.DokumanMetin.DamitilmisOzetMetni
+                        : doc.DokumanMetin.HamMetin)).Trim();
+
+                sb.AppendLine($"[KAYNAK #{idx++} · DOKÜMAN: {doc.DosyaAdi} | {modeStr}]");
                 sb.AppendLine(text);
                 sb.AppendLine("---");
                 result.UsedSourceTitles.Add(doc.DosyaAdi);
@@ -99,13 +108,28 @@ public class SourceContextBuilder : ISourceContextBuilder
                     ? vid.Transcript.HamMetin.Trim()
                     : "";
 
-                sb.AppendLine($"[KAYNAK #{idx++} · VİDEO: {vid.Baslik}]");
-                if (!string.IsNullOrWhiteSpace(summaryText))
+                var modeStr = vid.KullanimTuru == VideoOzet.Data.Enums.KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? "KULLANIM MODU: DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR! (Yalnızca mantıksal argümanları, fikirleri ve kavramları al; cümle yapılarını, özel benzetmeleri ve anlatım sırasını ASLA kopyalama, sıfırdan kendi cümlelerinle kurgula)"
+                    : "KULLANIM MODU: DOĞRUDAN REFERANS (İfadeler, tanımlar ve örnekler doğrudan kullanılabilir)";
+
+                sb.AppendLine($"[KAYNAK #{idx++} · VİDEO: {vid.Baslik} | {modeStr}]");
+
+                // Eğer yabancı dildeyse ve Türkçe çevirisi varsa, öncelikle Türkçe çevrilmiş özeti ver
+                if (!string.IsNullOrWhiteSpace(vid.Summary?.CevrilmisOzetMetni))
+                {
+                    sb.AppendLine("[Türkçe Damıtılmış Özet (Terim Korumalı Çeviri)]:");
+                    sb.AppendLine(vid.Summary.CevrilmisOzetMetni.Trim());
+                }
+                else if (!string.IsNullOrWhiteSpace(summaryText))
                 {
                     sb.AppendLine("[Damıtılmış Özet]:");
                     sb.AppendLine(summaryText);
                 }
-                if (!string.IsNullOrWhiteSpace(transcriptText))
+
+                // Yabancı videolarda ham yabancı transkripti basıp LLM'i şaşırtmak yerine Türkçe özeti yeterlidir.
+                // Eğer video Türkçe ise veya çevirisi yoksa tam transkripti de ekle
+                bool isTurkish = (vid.Summary?.OrijinalDil ?? vid.Transcript?.Dil ?? "tr").Equals("tr", StringComparison.OrdinalIgnoreCase);
+                if (isTurkish && !string.IsNullOrWhiteSpace(transcriptText))
                 {
                     sb.AppendLine("[Tam Transkript]:");
                     sb.AppendLine(transcriptText);
@@ -206,12 +230,34 @@ public class SourceContextBuilder : ISourceContextBuilder
         int currentLength = 0;
         int chunkIdx = 1;
 
+        var docUsage = dokumanlar.ToDictionary(d => d.Id, d => (d.DosyaAdi, d.KullanimTuru));
+        var vidUsage = validVideolar.ToDictionary(v => v.Id, v => (v.Baslik, v.KullanimTuru));
+
         foreach (var chunk in distinctChunks)
         {
             if (currentLength + chunk.Text.Length > maxChars && currentLength > 0)
                 break;
 
-            string label = chunk.DokumanId != null ? $"Doküman Chunk #{chunkIdx++}" : $"Video #{chunk.VideoId}";
+            string label;
+            if (chunk.DokumanId != null && docUsage.TryGetValue(chunk.DokumanId.Value, out var docInfo))
+            {
+                var modeStr = docInfo.KullanimTuru == VideoOzet.Data.Enums.KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? "DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR! (Yalnızca argüman/mantık al)"
+                    : "DOĞRUDAN REFERANS";
+                label = $"DOKÜMAN: {docInfo.DosyaAdi} | KULLANIM MODU: {modeStr}";
+            }
+            else if (chunk.VideoId != null && vidUsage.TryGetValue(chunk.VideoId.Value, out var vidInfo))
+            {
+                var modeStr = vidInfo.KullanimTuru == VideoOzet.Data.Enums.KaynakKullanimTuru.SadeceArgumanVeMantik
+                    ? "DIŞ KAYNAK - KOPYALAMAK KESİNLİKLE YASAKTIR! (Yalnızca argüman/mantık al)"
+                    : "DOĞRUDAN REFERANS";
+                label = $"VİDEO: {vidInfo.Baslik} | KULLANIM MODU: {modeStr}";
+            }
+            else
+            {
+                label = chunk.DokumanId != null ? $"Doküman Chunk #{chunkIdx++}" : $"Video #{chunk.VideoId}";
+            }
+
             builder.AppendLine($"[KAYNAK: {label}]");
             builder.AppendLine(chunk.Text.Trim());
             builder.AppendLine("---");

@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AutoMapper;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Exceptions;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
 using VideoOzet.Data.Repositories;
@@ -16,6 +20,7 @@ namespace VideoOzet.Business.Services;
 
 public class VideoManager : IVideoService
 {
+    private readonly AppDbContext _dbContext;
     private readonly IRepository<Video> _videoRepository;
     private readonly IRepository<Egitim> _egitimRepository;
     private readonly IRepository<VideoTranscript> _transcriptRepository;
@@ -34,7 +39,22 @@ public class VideoManager : IVideoService
         IMapper mapper,
         ILogger<VideoManager> logger,
         ICacheService? cacheService = null)
+        : this(null!, videoRepository, egitimRepository, transcriptRepository, fileStorageService, publishEndpoint, mapper, logger, cacheService)
     {
+    }
+
+    public VideoManager(
+        AppDbContext dbContext,
+        IRepository<Video> videoRepository,
+        IRepository<Egitim> egitimRepository,
+        IRepository<VideoTranscript> transcriptRepository,
+        IFileStorageService fileStorageService,
+        IPublishEndpoint publishEndpoint,
+        IMapper mapper,
+        ILogger<VideoManager> logger,
+        ICacheService? cacheService = null)
+    {
+        _dbContext = dbContext;
         _videoRepository = videoRepository;
         _egitimRepository = egitimRepository;
         _transcriptRepository = transcriptRepository;
@@ -63,7 +83,8 @@ public class VideoManager : IVideoService
             EgitimId = dto.EgitimId,
             Baslik = dto.FileName,
             DosyaYolu = uploadedFilePath,
-            IslemDurumu = VideoIslemDurumu.Bekliyor
+            IslemDurumu = VideoIslemDurumu.Bekliyor,
+            KullanimTuru = dto.KullanimTuru
         };
 
         await _videoRepository.AddAsync(video);
@@ -95,7 +116,22 @@ public class VideoManager : IVideoService
         if (egitim == null)
             throw new NotFoundException("Egitim", egitimId);
 
-        var videolar = await _videoRepository.FindAsync(v => v.EgitimId == egitimId);
+        IEnumerable<Video> videolar;
+        if (_dbContext != null)
+        {
+            videolar = await _dbContext.Videolar
+                .AsNoTracking()
+                .Include(v => v.Summary)
+                .Include(v => v.Transcript)
+                .Where(v => v.EgitimId == egitimId)
+                .OrderBy(v => v.OlusturmaTarihi)
+                .ToListAsync();
+        }
+        else
+        {
+            videolar = await _videoRepository.FindAsync(v => v.EgitimId == egitimId);
+        }
+
         return _mapper.Map<IEnumerable<VideoListDto>>(videolar);
     }
 
@@ -208,5 +244,65 @@ public class VideoManager : IVideoService
             }
         }
         await _videoRepository.SaveChangesAsync();
+    }
+
+    public async Task UpdateKullanimTuruAsync(Guid id, KaynakKullanimTuru kullanimTuru)
+    {
+        var video = await _videoRepository.GetByIdAsync(id);
+        if (video == null)
+            throw new NotFoundException("Video", id);
+
+        video.KullanimTuru = kullanimTuru;
+        _videoRepository.Update(video);
+        await _videoRepository.SaveChangesAsync();
+        _logger.LogInformation("Video {VideoId} kullanım türü güncellendi: {KullanimTuru}", id, kullanimTuru);
+    }
+
+    public async Task<KaynakIcerikDetayDto?> GetVideoIcerikDetayAsync(Guid id)
+    {
+        var video = await _dbContext.Videolar
+            .Include(v => v.Transcript)
+            .Include(v => v.Summary)
+            .FirstOrDefaultAsync(v => v.Id == id);
+
+        if (video == null) return null;
+
+        var dto = new KaynakIcerikDetayDto
+        {
+            Id = video.Id,
+            Tip = "video",
+            Baslik = video.Baslik,
+            KullanimTuru = video.KullanimTuru,
+            OrijinalDil = video.Summary?.OrijinalDil ?? video.Transcript?.Dil ?? "tr",
+            KelimeSayisi = video.Transcript?.KelimeSayisi ?? 0,
+            SttModel = video.Transcript?.SttModel,
+            LlmModel = video.Summary?.LlmModel,
+            OlusturmaTarihi = video.OlusturmaTarihi,
+            HamMetin = video.Transcript?.HamMetin ?? string.Empty,
+            DamitilmisOzetMetni = video.Summary?.OzetMetni,
+            CevrilmisOzetMetni = video.Summary?.CevrilmisOzetMetni
+        };
+
+        if (video.Summary != null)
+        {
+            if (!string.IsNullOrWhiteSpace(video.Summary.KonuBasliklari))
+            {
+                try
+                {
+                    dto.KonuBasliklari = System.Text.Json.JsonSerializer.Deserialize<List<string>>(video.Summary.KonuBasliklari) ?? new();
+                }
+                catch { }
+            }
+            if (!string.IsNullOrWhiteSpace(video.Summary.KonuEtiketleri))
+            {
+                try
+                {
+                    dto.KonuEtiketleri = System.Text.Json.JsonSerializer.Deserialize<List<string>>(video.Summary.KonuEtiketleri) ?? new();
+                }
+                catch { }
+            }
+        }
+
+        return dto;
     }
 }

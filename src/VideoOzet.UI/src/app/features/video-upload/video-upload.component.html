@@ -1,8 +1,45 @@
+<!-- Kaynak Kullanım Türü Seçici -->
+<div class="mb-4 bg-slate-900/90 p-1.5 rounded-xl border border-slate-700/80 flex flex-col sm:flex-row gap-1.5 shadow-inner">
+  <button 
+    type="button"
+    (click)="selectedKullanimTuru = 0"
+    [class]="selectedKullanimTuru === 0 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="flex-1 py-2 px-3 rounded-lg text-xs md:text-sm transition-all flex items-center justify-center gap-2"
+  >
+    <span>📌 Doğrudan Kaynak</span>
+    <span class="text-[11px] opacity-80 font-normal">(Aynen Kullanım / Kendi Dersim)</span>
+  </button>
+  <button 
+    type="button"
+    (click)="selectedKullanimTuru = 1"
+    [class]="selectedKullanimTuru === 1 ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="flex-1 py-2 px-3 rounded-lg text-xs md:text-sm transition-all flex items-center justify-center gap-2"
+  >
+    <span>🛡️ Dış Kaynak</span>
+    <span class="text-[11px] opacity-80 font-normal">(Sadece Argüman/Mantık - Kopyalamak Yasak)</span>
+  </button>
+</div>
+
+<!-- Mod Açıklama Notu -->
+<div class="mb-3 px-3 py-2 rounded-lg text-xs flex items-center gap-2 border"
+     [ngClass]="selectedKullanimTuru === 0 ? 'bg-blue-950/40 text-blue-300 border-blue-800/50' : 'bg-amber-950/40 text-amber-300 border-amber-800/50'">
+  <span class="shrink-0 text-base">{{ selectedKullanimTuru === 0 ? 'ℹ️' : '🛡️' }}</span>
+  <p class="leading-relaxed">
+    <strong class="font-semibold">{{ selectedKullanimTuru === 0 ? 'Doğrudan Referans Modu:' : 'Dış Kaynak / Telif Korumalı Mod:' }}</strong>
+    {{ selectedKullanimTuru === 0 
+        ? 'Bu kaynaktaki tanımlar, hoca anlatımları, örnekler ve cümleler video planında doğrudan kullanılabilir.' 
+        : 'Bu kaynaktaki cümleler ASLA kopyalanmaz. Yalnızca mantık, fikir ve argümanlar alınıp tamamen özgün şekilde yeniden anlatılır.' }}
+  </p>
+</div>
+
+<!-- Sürükle Bırak Yükleme Alanı -->
 <div 
   class="relative border-2 border-dashed rounded-xl p-8 text-center transition-all"
   [ngClass]="{
-    'border-blue-500 bg-blue-500/10': isDragging,
-    'border-slate-600 bg-slate-800/50 hover:bg-slate-700/50 hover:border-slate-500': !isDragging
+    'border-blue-500 bg-blue-500/10': isDragging && selectedKullanimTuru === 0,
+    'border-amber-500 bg-amber-500/10': isDragging && selectedKullanimTuru === 1,
+    'border-blue-500/40 bg-blue-950/10 hover:bg-slate-800/50 hover:border-blue-400': !isDragging && selectedKullanimTuru === 0,
+    'border-amber-500/40 bg-amber-950/10 hover:bg-slate-800/50 hover:border-amber-400': !isDragging && selectedKullanimTuru === 1
   }"
   (dragover)="onDragOver($event)"
   (dragleave)="onDragLeave($event)"
@@ -18,31 +55,37 @@
   >
   
   <div *ngIf="!isUploading">
-    <div class="w-16 h-16 mx-auto mb-4 bg-slate-700 rounded-full flex items-center justify-center text-slate-400">
+    <div class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
+         [ngClass]="selectedKullanimTuru === 0 ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
       </svg>
     </div>
     <h3 class="text-lg font-medium text-white mb-1">Video veya Dökümanları Sürükleyip Bırakın</h3>
-    <p class="text-slate-400 text-sm mb-4">Birden fazla video, PDF, Word veya PowerPoint (.pptx) seçebilirsiniz</p>
+    <p class="text-slate-400 text-sm mb-4">Birden fazla video, PDF, Word veya PowerPoint (.pptx) seçebilirsiniz (TR, EN, DE vb.)</p>
     <button 
       (click)="fileInput.click()"
-      class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20"
+      [class]="selectedKullanimTuru === 0 ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20' : 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/20'"
+      class="px-5 py-2.5 text-white rounded-lg text-sm font-medium transition-colors shadow-lg"
     >
-      Toplu Dosya Seç
+      Toplu Dosya Seç ({{ selectedKullanimTuru === 0 ? 'Doğrudan Kaynak' : 'Dış Kaynak' }})
     </button>
   </div>
 
   <div *ngIf="isUploading" class="py-4">
-    <div class="animate-spin mx-auto h-10 w-10 border-4 border-slate-600 border-t-blue-500 rounded-full mb-4"></div>
+    <div class="animate-spin mx-auto h-10 w-10 border-4 border-slate-600 rounded-full mb-4"
+         [ngClass]="selectedKullanimTuru === 0 ? 'border-t-blue-500' : 'border-t-amber-500'"></div>
     <h3 class="text-white font-medium text-base">Dosyalar Yükleniyor... ({{ currentFileIndex }} / {{ totalFiles }})</h3>
-    <p class="text-sm text-blue-400 mt-1 max-w-md mx-auto truncate font-mono bg-slate-900/80 px-3 py-1 rounded-lg border border-slate-700">
+    <p class="text-sm mt-1 max-w-md mx-auto truncate font-mono bg-slate-900/80 px-3 py-1 rounded-lg border border-slate-700"
+       [ngClass]="selectedKullanimTuru === 0 ? 'text-blue-400' : 'text-amber-400'">
       {{ currentFileName }}
     </p>
     
     <!-- Progress bar -->
     <div class="w-full max-w-xs mx-auto bg-slate-700 h-2 rounded-full mt-4 overflow-hidden">
-      <div class="bg-blue-500 h-full transition-all duration-300" [style.width.%]="progressPercent"></div>
+      <div class="h-full transition-all duration-300"
+           [ngClass]="selectedKullanimTuru === 0 ? 'bg-blue-500' : 'bg-amber-500'"
+           [style.width.%]="progressPercent"></div>
     </div>
     <p class="text-xs text-slate-400 mt-2">%{{ progressPercent }} tamamlandı. Lütfen tarayıcıyı kapatmayın.</p>
   </div>

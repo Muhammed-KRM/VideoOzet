@@ -8,6 +8,9 @@ public class VideoProfile : Profile
 {
     public VideoProfile()
     {
-        CreateMap<Video, VideoListDto>();
+        CreateMap<Video, VideoListDto>()
+            .ForMember(dest => dest.OrijinalDil, opt => opt.MapFrom(src => 
+                src.Summary != null && !string.IsNullOrWhiteSpace(src.Summary.OrijinalDil) ? src.Summary.OrijinalDil :
+                (src.Transcript != null && !string.IsNullOrWhiteSpace(src.Transcript.Dil) ? src.Transcript.Dil : "tr")));
     }
 }

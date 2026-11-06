@@ -21,6 +21,8 @@ public class GroqWhisperSttProvider : ISttProvider
     private const string GroqEndpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
     private static readonly string[] CandidateModels = new[] { "whisper-large-v3-turbo", "whisper-large-v3" };
 
+    public string? LastDetectedLanguage { get; private set; }
+
     public GroqWhisperSttProvider(
         HttpClient httpClient,
         IConfiguration configuration,
@@ -89,8 +91,7 @@ public class GroqWhisperSttProvider : ISttProvider
 
                 content.Add(audioContent, "file", string.IsNullOrEmpty(fileName) ? "audio.mp3" : fileName);
                 content.Add(new StringContent(modelName), "model");
-                content.Add(new StringContent("tr"), "language");
-                content.Add(new StringContent("json"), "response_format");
+                content.Add(new StringContent("verbose_json"), "response_format");
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, GroqEndpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
@@ -113,10 +114,15 @@ public class GroqWhisperSttProvider : ISttProvider
                 }
 
                 using var doc = JsonDocument.Parse(responseString);
+                if (doc.RootElement.TryGetProperty("language", out var langProp))
+                {
+                    LastDetectedLanguage = langProp.GetString()?.Trim().ToLowerInvariant();
+                }
+
                 if (doc.RootElement.TryGetProperty("text", out var textProp))
                 {
                     var transcript = textProp.GetString()?.Trim() ?? string.Empty;
-                    _logger.LogInformation("Groq Whisper transcription completed successfully using {Model}. Characters: {Length}", modelName, transcript.Length);
+                    _logger.LogInformation("Groq Whisper transcription completed successfully using {Model} (Language: {Lang}). Characters: {Length}", modelName, LastDetectedLanguage ?? "auto", transcript.Length);
                     return transcript;
                 }
 

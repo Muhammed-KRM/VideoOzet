@@ -7,6 +7,8 @@ public class VideoSummary
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid VideoId { get; set; }
     public string OzetMetni { get; set; } = string.Empty;
+    public string? CevrilmisOzetMetni { get; set; }
+    public string OrijinalDil { get; set; } = "tr";
     public string KonuBasliklari { get; set; } = "[]";
     public string KonuEtiketleri { get; set; } = "[]";
     public string LlmModel { get; set; } = string.Empty;

@@ -36,45 +36,131 @@
       </button>
     </div>
 
-    <!-- İndir Dropdown -->
-    <div class="relative py-2.5 sm:py-0 self-end sm:self-center">
-      <button
-        id="episode-download-btn"
-        type="button"
-        (click)="toggleDownloadMenu()"
-        [disabled]="isGeneratingDocx"
-        class="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer whitespace-nowrap">
-        <span *ngIf="isGeneratingDocx" class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span>
-        <svg *ngIf="!isGeneratingDocx" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-        </svg>
-        <span>{{ isGeneratingDocx ? 'Hazırlanıyor...' : 'Döküman Olarak İndir' }}</span>
-        <span *ngIf="revision?.revizyonNo" class="bg-indigo-900/60 text-indigo-200 text-[10px] px-1.5 py-0.5 rounded">
-          V{{ revision.revizyonNo }}
+    <!-- Aksiyon Butonları (Prompter & İndir) -->
+    <div class="flex items-center gap-2 py-2.5 sm:py-0 self-end sm:self-center">
+      
+      <!-- 🎙️ SADECE PROMPTER METNİ BUTONU (YENİ) -->
+      <div class="relative" *ngIf="hasVideoPlan">
+        <button
+          id="episode-prompter-btn"
+          type="button"
+          (click)="togglePrompterMenu()"
+          [disabled]="isGeneratingDocx"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-emerald-500/25 transition-all active:scale-95 cursor-pointer whitespace-nowrap"
+          title="Görsel ve edit yönergelerini ayıklayarak yalnızca stüdyoda prompterdan okunacak konuşma metnini indir"
+        >
+          <span>🎙️</span>
+          <span>Prompter Metni</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-200" [class.rotate-180]="isPrompterMenuOpen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <!-- Kopyalandı Bildirimi -->
+        <span *ngIf="copyPrompterSuccess" class="absolute right-0 -top-8 bg-emerald-600 text-white text-xs font-semibold px-2.5 py-1 rounded shadow-lg animate-bounce z-40">
+          Panoya kopyalandı! ✓
         </span>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-200" [class.rotate-180]="isDownloadMenuOpen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
 
-      <!-- Dışarı tıklayınca kapat -->
-      <div *ngIf="isDownloadMenuOpen" (click)="isDownloadMenuOpen = false" class="fixed inset-0 z-20"></div>
+        <!-- Dışarı tıklayınca kapat -->
+        <div *ngIf="isPrompterMenuOpen" (click)="isPrompterMenuOpen = false" class="fixed inset-0 z-20"></div>
 
-      <div *ngIf="isDownloadMenuOpen" class="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-30 text-sm">
-        <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Word (.docx)</p>
-        <button id="dl-docx-all" (click)="downloadDocx('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor <span class="text-slate-500 text-xs">(Özet + Plan + QC)</span></button>
-        <button id="dl-docx-active" (click)="downloadDocx('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Sadece {{ activeTabLabel }}</button>
+        <!-- Prompter Açılır Menüsü -->
+        <div *ngIf="isPrompterMenuOpen" class="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-emerald-500/30 rounded-xl shadow-2xl py-2 z-30 text-sm animate-in fade-in zoom-in-95 duration-150">
+          <div class="px-4 pt-1 pb-1 text-[11px] font-bold text-emerald-400 flex items-center gap-1.5">
+            <span>🎙️</span> PROMPTER KONUŞMA METNİ
+          </div>
+          <p class="px-4 pb-2 text-[11px] text-slate-400 border-b border-slate-700/80">
+            Kamera/kurgu notları ayıklanmış, doğrudan okunacak stüdyo konuşma metni.
+          </p>
 
-        <div class="my-1.5 border-t border-slate-700"></div>
-        <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">PDF (Yazdır / PDF Kaydet)</p>
-        <button id="dl-pdf-all" (click)="downloadPdf('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor</button>
-        <button id="dl-pdf-active" (click)="downloadPdf('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Sadece {{ activeTabLabel }}</button>
+          <button id="dl-prompter-txt" (click)="downloadPrompterTxt()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+            <span class="group-hover:text-emerald-300 font-medium flex items-center gap-2">
+              <span>📄</span> Düz Metin (.txt)
+            </span>
+            <span class="text-[10px] text-emerald-300 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-800/50">Prompter Cihazları</span>
+          </button>
 
-        <div class="my-1.5 border-t border-slate-700"></div>
-        <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Metin</p>
-        <button id="dl-md-all" (click)="downloadMarkdown('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Markdown (.md) – Tam Rapor</button>
-        <button id="dl-txt-all" (click)="downloadTxt('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Düz Metin (.txt) – Tam Rapor</button>
-        <button id="dl-txt-active" (click)="downloadTxt('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Düz Metin (.txt) – Sadece {{ activeTabLabel }}</button>
+          <button id="dl-prompter-docx" (click)="downloadPrompterDocx()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+            <span class="group-hover:text-blue-300 font-medium flex items-center gap-2">
+              <span class="text-blue-400 font-bold">W</span> Word Belgesi (.docx)
+            </span>
+            <span class="text-[10px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Formatlı</span>
+          </button>
+
+          <button id="dl-prompter-md" (click)="downloadPrompterMd()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+            <span class="group-hover:text-purple-300 font-medium flex items-center gap-2">
+              <span>📝</span> Markdown (.md)
+            </span>
+            <span class="text-[10px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Not Defteri</span>
+          </button>
+
+          <div class="my-1 border-t border-slate-700"></div>
+
+          <button (click)="copyPrompterScript()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+            <span class="group-hover:text-emerald-300 flex items-center gap-2">
+              <span>📋</span> Panoya Kopyala
+            </span>
+            <span class="text-[10px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded">Kopyala</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- İndir Dropdown -->
+      <div class="relative">
+        <button
+          id="episode-download-btn"
+          type="button"
+          (click)="toggleDownloadMenu()"
+          [disabled]="isGeneratingDocx"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-indigo-500/25 transition-all active:scale-95 cursor-pointer whitespace-nowrap">
+          <span *ngIf="isGeneratingDocx" class="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full"></span>
+          <svg *ngIf="!isGeneratingDocx" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          <span>{{ isGeneratingDocx ? 'Hazırlanıyor...' : 'Döküman Olarak İndir' }}</span>
+          <span *ngIf="revision?.revizyonNo" class="bg-indigo-900/60 text-indigo-200 text-[10px] px-1.5 py-0.5 rounded">
+            V{{ revision.revizyonNo }}
+          </span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-200" [class.rotate-180]="isDownloadMenuOpen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <!-- Dışarı tıklayınca kapat -->
+        <div *ngIf="isDownloadMenuOpen" (click)="isDownloadMenuOpen = false" class="fixed inset-0 z-20"></div>
+
+        <div *ngIf="isDownloadMenuOpen" class="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-2 z-30 text-sm">
+          <!-- 🎙️ Sadece Prompter Metni (Hızlı Erişim) -->
+          <ng-container *ngIf="hasVideoPlan">
+            <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <span>🎙️</span> Prompter Metni (Sadece Konuşma)
+            </p>
+            <button (click)="downloadPrompterTxt()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+              <span class="group-hover:text-emerald-300">Düz Metin (.txt) – Prompter</span>
+              <span class="text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded">Cihazlar</span>
+            </button>
+            <button (click)="downloadPrompterDocx()" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 flex items-center justify-between group transition-colors cursor-pointer">
+              <span class="group-hover:text-blue-300">Word Belgesi (.docx) – Prompter</span>
+              <span class="text-[10px] text-blue-400 bg-blue-950/60 px-1.5 py-0.5 rounded">DOCX</span>
+            </button>
+            <div class="my-1.5 border-t border-slate-700"></div>
+          </ng-container>
+
+          <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Word (.docx)</p>
+          <button id="dl-docx-all" (click)="downloadDocx('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor <span class="text-slate-500 text-xs">(Özet + Plan + QC)</span></button>
+          <button id="dl-docx-active" (click)="downloadDocx('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Sadece {{ activeTabLabel }}</button>
+
+          <div class="my-1.5 border-t border-slate-700"></div>
+          <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">PDF (Yazdır / PDF Kaydet)</p>
+          <button id="dl-pdf-all" (click)="downloadPdf('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Tam Rapor</button>
+          <button id="dl-pdf-active" (click)="downloadPdf('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Sadece {{ activeTabLabel }}</button>
+
+          <div class="my-1.5 border-t border-slate-700"></div>
+          <p class="px-4 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Metin</p>
+          <button id="dl-md-all" (click)="downloadMarkdown('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Markdown (.md) – Tam Rapor</button>
+          <button id="dl-txt-all" (click)="downloadTxt('all')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Düz Metin (.txt) – Tam Rapor</button>
+          <button id="dl-txt-active" (click)="downloadTxt('active')" class="w-full text-left px-4 py-2 hover:bg-slate-700/70 text-slate-200 transition-colors">Düz Metin (.txt) – Sadece {{ activeTabLabel }}</button>
+        </div>
       </div>
     </div>
   </div>

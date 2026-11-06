@@ -60,7 +60,11 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
                 throw new Exception("DokumanMetin bulunamadı.");
             }
 
-            var text = dokumanMetin.HamMetin;
+            var text = !string.IsNullOrWhiteSpace(dokumanMetin.CevrilmisOzetMetni)
+                ? dokumanMetin.CevrilmisOzetMetni
+                : (!string.IsNullOrWhiteSpace(dokumanMetin.DamitilmisOzetMetni)
+                    ? dokumanMetin.DamitilmisOzetMetni
+                    : dokumanMetin.HamMetin);
             var chunks = _textChunker.ChunkText(text, 500);
 
             var chunkDocuments = new List<VideoChunkDocument>();

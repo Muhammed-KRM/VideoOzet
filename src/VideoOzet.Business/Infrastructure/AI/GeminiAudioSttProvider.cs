@@ -311,7 +311,7 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
             isOpenRouter ? "OpenRouter" : "AntigravityProxy", baseUrl, effectiveModel);
 
         var audioBase64 = Convert.ToBase64String(audioBytes);
-        var promptText = "Aşağıdaki ses kaydını dikkatle dinle ve içindeki tüm konuşmaları eksiksiz, kelimesi kelimesine Türkçe olarak yazıya dök (deşifre et). " +
+        var promptText = "Aşağıdaki ses kaydını dikkatle dinle ve içindeki tüm konuşmaları konuşulan ORİJİNAL DİLİNDE (Türkçe, İngilizce, Almanca vb. hangi dilde konuşuluyorsa o dilde, çeviri yapmadan) eksiksiz, kelimesi kelimesine yazıya dök (deşifre et). " +
                          "Sadece ve sadece deşifre edilmiş konuşma metnini döndür. Başka hiçbir açıklama, giriş veya yorum ekleme.";
 
         var requestBody = new
@@ -412,7 +412,6 @@ public class GeminiAudioSttProvider : ISttProvider, ISupportsProgress
                     audioContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(format == "wav" ? "audio/wav" : "audio/mpeg");
                     content.Add(audioContent, "file", $"chunk.{format}");
                     content.Add(new StringContent(groqModel), "model");
-                    content.Add(new StringContent("tr"), "language");
                     content.Add(new StringContent("json"), "response_format");
 
                     using var groqReq = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/audio/transcriptions");

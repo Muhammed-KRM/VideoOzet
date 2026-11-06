@@ -18,6 +18,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
     private readonly IAiProviderSettingsService? _settingsService;
 
     public Action<int, int>? OnProgress { get; set; }
+    public string? LastDetectedLanguage { get; private set; }
 
     public CompositeSttProvider(
         GroqWhisperSttProvider groqProvider,
@@ -84,7 +85,8 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                 var result = await _groqProvider.TranscribeAsync(memoryStream, fileName, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(result))
                 {
-                    _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars).", result.Length);
+                    LastDetectedLanguage = _groqProvider.LastDetectedLanguage;
+                    _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars, Lang: {Lang}).", result.Length, LastDetectedLanguage ?? "auto");
                     progressCallback?.Invoke(2, 2);
                     return result;
                 }
@@ -104,7 +106,8 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                     var localRes = await _localWhisperProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
                     if (!string.IsNullOrWhiteSpace(localRes))
                     {
-                        _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars).", localRes.Length);
+                        LastDetectedLanguage = _localWhisperProvider.LastDetectedLanguage;
+                        _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars, Lang: {Lang}).", localRes.Length, LastDetectedLanguage ?? "auto");
                         return localRes;
                     }
                 }

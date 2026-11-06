@@ -14,6 +14,8 @@ public class VideoSummaryConfiguration : IEntityTypeConfiguration<VideoSummary>
         builder.Property(vs => vs.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
         builder.Property(vs => vs.VideoId).HasColumnName("video_id").IsRequired();
         builder.Property(vs => vs.OzetMetni).HasColumnName("ozet_metni").HasColumnType("text").IsRequired();
+        builder.Property(vs => vs.CevrilmisOzetMetni).HasColumnName("cevrilmis_ozet_metni").HasColumnType("text");
+        builder.Property(vs => vs.OrijinalDil).HasColumnName("orijinal_dil").HasMaxLength(10).HasDefaultValue("tr").IsRequired();
         builder.Property(vs => vs.KonuBasliklari).HasColumnName("konu_basliklari").HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
         builder.Property(vs => vs.KonuEtiketleri).HasColumnName("konu_etiketleri").HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
         builder.Property(vs => vs.LlmModel).HasColumnName("llm_model").HasMaxLength(50).IsRequired();

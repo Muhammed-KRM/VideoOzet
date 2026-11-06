@@ -349,3 +349,279 @@ export function saveBlobAs(blob: Blob, filename: string) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Prompter Konuşma Metni Ayrıştırma ve Dışa Aktarma Yardımcıları
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface PrompterScene {
+  sceneTitle: string;
+  timeRange?: string;
+  paragraphs: string[];
+}
+
+export function cleanPrompterParagraphs(lines: string[]): string[] {
+  const stripped = lines.map(l => l.replace(/^\s*>\s?/, '').trimEnd());
+  const paragraphs: string[] = [];
+  let currentPara: string[] = [];
+
+  for (const l of stripped) {
+    if (l.trim() === '') {
+      if (currentPara.length > 0) {
+        paragraphs.push(currentPara.join(' ').trim());
+        currentPara = [];
+      }
+    } else {
+      currentPara.push(l.trim());
+    }
+  }
+  if (currentPara.length > 0) {
+    paragraphs.push(currentPara.join(' ').trim());
+  }
+
+  return paragraphs.map(p => {
+    let clean = p;
+    // 1. Dış tırnakları temizle
+    clean = clean.replace(/^["“'„»]\s*/, '').replace(/\s*["”'«]$/, '');
+
+    // 2. Prompt kalıntılarını temizle: (1. Paragraf: ...), 1. Paragraf:, Paragraf 1:
+    clean = clean.replace(/^\(\s*\d+\.?\s*Paragraf\s*:\s*/i, '');
+    clean = clean.replace(/^\d+\.?\s*Paragraf\s*:\s*/i, '');
+    clean = clean.replace(/^Paragraf\s*\d+\s*:\s*/i, '');
+
+    // 3. Eşleşen dış parantezleri temizle (örn. "(Merhaba dünya...)")
+    if (clean.startsWith('(') && clean.endsWith(')')) {
+      clean = clean.slice(1, -1).trim();
+    } else if (clean.endsWith(')') && !clean.includes('(')) {
+      clean = clean.slice(0, -1).trim();
+    }
+
+    // 4. Parantez içi temizlendikten sonra açığa çıkan tırnakları da temizle
+    clean = clean.replace(/^["“'„»]\s*/, '').replace(/\s*["”'«]$/, '');
+
+    return clean.trim();
+  }).filter(p => p.length > 0);
+}
+
+function extractFallbackPrompter(markdown: string): PrompterScene[] {
+  if (!markdown) return [];
+  const lines = markdown.split(/\r?\n/);
+  const scenes: PrompterScene[] = [];
+  let currentSceneTitle: string | null = null;
+  let currentTimeRange: string | null = null;
+  let sceneLines: string[] = [];
+
+  const finish = () => {
+    if (currentSceneTitle && sceneLines.length > 0) {
+      const nonBulletLines = sceneLines.filter(l => {
+        const t = l.trim();
+        if (!t) return true;
+        if (t.startsWith('-') || t.startsWith('*') || t.startsWith('#')) return false;
+        if (t.startsWith('---') || t.startsWith('===')) return false;
+        return true;
+      });
+      const paragraphs = cleanPrompterParagraphs(nonBulletLines);
+      if (paragraphs.length > 0) {
+        scenes.push({
+          sceneTitle: currentSceneTitle,
+          timeRange: currentTimeRange || undefined,
+          paragraphs
+        });
+      }
+    }
+    sceneLines = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const sceneMatch = trimmed.match(/^#{2,3}\s+(Sahne\b.*|\d+\.?\s*Sahne\b.*|(?:Giriş|Gelişme|Kapanış|Sonuç)\s*Sahnesi\b.*)/i);
+    if (sceneMatch) {
+      finish();
+      currentSceneTitle = sceneMatch[1].trim();
+      currentTimeRange = null;
+      continue;
+    }
+    const timeMatch = trimmed.match(/^\*\*Zaman\s*Aral[ıi][gğ][ıi]:?\*\*\s*(.+)$/i);
+    if (timeMatch) {
+      currentTimeRange = timeMatch[1].trim().replace(/\*+/g, '');
+      continue;
+    }
+    if (currentSceneTitle) {
+      sceneLines.push(line);
+    }
+  }
+  finish();
+  return scenes;
+}
+
+export function extractPrompterScenes(videoPlanMarkdown: string): PrompterScene[] {
+  if (!videoPlanMarkdown || !videoPlanMarkdown.trim()) return [];
+
+  const lines = videoPlanMarkdown.split(/\r?\n/);
+  const scenes: PrompterScene[] = [];
+
+  let currentSceneTitle: string | null = null;
+  let currentTimeRange: string | null = null;
+  let inPrompter = false;
+  let currentPrompterRawLines: string[] = [];
+
+  const finishCurrentScene = () => {
+    if (currentSceneTitle || currentPrompterRawLines.length > 0) {
+      const paragraphs = cleanPrompterParagraphs(currentPrompterRawLines);
+      if (paragraphs.length > 0) {
+        scenes.push({
+          sceneTitle: currentSceneTitle || `Sahne ${scenes.length + 1}`,
+          timeRange: currentTimeRange || undefined,
+          paragraphs
+        });
+      }
+    }
+    currentPrompterRawLines = [];
+    inPrompter = false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Sahne Başlığı
+    const sceneMatch = trimmed.match(/^#{2,3}\s+(Sahne\b.*|\d+\.?\s*Sahne\b.*|(?:Giriş|Gelişme|Kapanış|Sonuç)\s*Sahnesi\b.*)/i);
+    if (sceneMatch) {
+      finishCurrentScene();
+      currentSceneTitle = sceneMatch[1].trim();
+      currentTimeRange = null;
+      continue;
+    }
+
+    // Zaman Aralığı
+    const timeMatch = trimmed.match(/^\*\*Zaman\s*Aral[ıi][gğ][ıi]:?\*\*\s*(.+)$/i);
+    if (timeMatch) {
+      currentTimeRange = timeMatch[1].trim().replace(/\*+/g, '');
+      continue;
+    }
+
+    // Prompter Metni Başlığı
+    const isPrompterHeading =
+      /^#{3,4}\s*(?:2\.?\s*)?\[?Prompter/i.test(trimmed) ||
+      /^\*\*Prompter\s*(?:Metni|Konuşma)?/i.test(trimmed) ||
+      /^#{2,4}\s+.*Prompter\s*Metni/i.test(trimmed);
+
+    if (isPrompterHeading) {
+      inPrompter = true;
+      continue;
+    }
+
+    // Başka bir bölüm başlığı veya ayraç geldiyse prompter'ı durdur
+    if (inPrompter) {
+      const isOtherHeading = /^#{2,4}\s+/.test(trimmed) && !isPrompterHeading;
+      const isDivider = /^---+$/.test(trimmed) || /^===/.test(trimmed);
+
+      if (isOtherHeading || isDivider) {
+        inPrompter = false;
+        continue;
+      }
+
+      currentPrompterRawLines.push(line);
+    }
+  }
+
+  finishCurrentScene();
+
+  // Hiç sahne bulunamadıysa fallback dene
+  if (scenes.length === 0) {
+    const fallback = extractFallbackPrompter(videoPlanMarkdown);
+    if (fallback.length > 0) return fallback;
+  }
+
+  return scenes;
+}
+
+/**
+ * Video planındaki yönetmen/kamera/kurgu yönergelerini ayıklayarak
+ * SADECE prompterdan okunacak sahneleri ve konuşma metinlerini Markdown formatında döndürür.
+ */
+export function extractPrompterScript(videoPlanMarkdown: string, docTitle?: string): string {
+  const scenes = extractPrompterScenes(videoPlanMarkdown);
+  const titleHeader = docTitle
+    ? `# ${docTitle} – Prompter Konuşma Metni\n\n`
+    : '# Prompter Konuşma Metni\n\n';
+
+  if (!scenes || scenes.length === 0) {
+    return titleHeader + '_Bu video planında prompter konuşma metni bulunamadı._\n';
+  }
+
+  const sceneBlocks = scenes.map((scene) => {
+    let block = `## ${scene.sceneTitle}\n`;
+    if (scene.timeRange) {
+      block += `**Zaman Aralığı:** ${scene.timeRange}\n\n`;
+    } else {
+      block += '\n';
+    }
+    block += scene.paragraphs.join('\n\n');
+    return block;
+  });
+
+  return titleHeader + sceneBlocks.join('\n\n---\n\n') + '\n';
+}
+
+/**
+ * Prompter cihazları ve teleprompter uygulamaları için en temiz düz metin (.txt) formatını üretir.
+ * Markdown işaretleri olmadan, sahne blokları ve temiz konuşma paragrafları içerir.
+ */
+export function extractPrompterPlainText(videoPlanMarkdown: string, docTitle?: string): string {
+  const scenes = extractPrompterScenes(videoPlanMarkdown);
+  const sep = '='.repeat(50);
+  const sceneSep = '-'.repeat(50);
+  const title = (docTitle || 'VİDEO PLANI').toUpperCase();
+
+  if (!scenes || scenes.length === 0) {
+    return `${sep}\n${title}\nPROMPTER KONUŞMA METNİ\n${sep}\n\nBu video planında prompter konuşma metni bulunamadı.\n`;
+  }
+
+  let text = `${sep}\n${title}\nPROMPTER KONUŞMA METNİ\n${sep}\n\n`;
+
+  scenes.forEach((scene, idx) => {
+    text += `[${scene.sceneTitle.toUpperCase()}]\n`;
+    if (scene.timeRange) {
+      text += `Süre / Zaman Aralığı: ${scene.timeRange}\n`;
+    }
+    text += '\n';
+    text += scene.paragraphs.join('\n\n');
+    text += '\n\n';
+    if (idx < scenes.length - 1) {
+      text += `${sceneSep}\n\n`;
+    }
+  });
+
+  return text;
+}
+
+/**
+ * Sadece prompter metinlerini içeren temiz bir Word (.docx) belgesi üretir.
+ */
+export async function prompterToDocxBlob(
+  videoPlanMarkdown: string,
+  docTitle: string,
+  dateStr?: string
+): Promise<Blob> {
+  const scenes = extractPrompterScenes(videoPlanMarkdown);
+  const sections: DocxSection[] = scenes.map((scene) => ({
+    heading: scene.sceneTitle + (scene.timeRange ? ` (${scene.timeRange})` : ''),
+    markdown: scene.paragraphs.join('\n\n')
+  }));
+
+  if (sections.length === 0) {
+    sections.push({
+      heading: 'Prompter Metni',
+      markdown: '_Bu video planında prompter konuşma metni bulunamadı._'
+    });
+  }
+
+  return markdownToDocxBlob({
+    title: `${docTitle} – Prompter Metni`,
+    subtitle: `Sunucu Konuşma Metni · ${dateStr || new Date().toLocaleDateString('tr-TR')}`,
+    sections,
+    pageBreakBetweenSections: false
+  });
+}
+

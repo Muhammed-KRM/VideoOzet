@@ -101,7 +101,7 @@ class WhisperRequestHandler(BaseHTTPRequestHandler):
                 return
 
             file_path = data.get("file_path")
-            language = data.get("language", "tr")
+            language = data.get("language") or None
             beam_size = int(data.get("beam_size", 1))
             stream_mode = bool(data.get("stream", False))
 

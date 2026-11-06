@@ -14,6 +14,7 @@ public class Video
     public int Sira { get; set; }
     public long DosyaBoyutu { get; set; }
     public VideoIslemDurumu IslemDurumu { get; set; }
+    public KaynakKullanimTuru KullanimTuru { get; set; } = KaynakKullanimTuru.DogrudanReferans;
     public DateTime OlusturmaTarihi { get; set; } = DateTime.UtcNow;
     public DateTime? IslemTamamlanmaTarihi { get; set; }
 

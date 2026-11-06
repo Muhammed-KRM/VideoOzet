@@ -49,18 +49,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 try
                 {
                     var settings = _settingsService.GetSettingsAsync().GetAwaiter().GetResult();
-                    if (settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
-                    }
-                    if (settings.ActiveProvider.Equals("groq", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return string.IsNullOrWhiteSpace(settings.GroqModel) ? "openai/gpt-oss-120b" : settings.GroqModel;
-                    }
-                    if (!string.IsNullOrWhiteSpace(settings.AntigravityProxyKey))
-                    {
-                        return settings.AntigravityProxyModel;
-                    }
+                    return settings.GetEffectiveVideoPlanModel();
                 }
                 catch { }
             }
@@ -78,9 +67,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         }
     }
 
-    private async Task<string> CallLlmAsync(string prompt, CancellationToken ct)
+    private async Task<string> CallLlmAsync(string prompt, CancellationToken ct, string taskType = "videoplan")
     {
-        var (text, finishReason) = await CallLlmRawAsync(prompt, ct);
+        var (text, finishReason) = await CallLlmRawAsync(prompt, ct, taskType);
         text = StripReasoningTags(text);
 
         if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase) ||
@@ -99,7 +88,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
                     GÖREV: Yukarıdaki son cümlenin kaldığı yerden HİÇBİR BAŞLIĞI VEYA PARAGRAFI TEKRARLAMADAN doğrudan devam et ve dokümanı Sonuç / Kapanış bölümüne kadar aynı Markdown formatıyla eksiksiz tamamla.
                     """;
-                var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct);
+                var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct, taskType);
                 contText = StripReasoningTags(contText);
                 if (!string.IsNullOrWhiteSpace(contText))
                 {
@@ -187,9 +176,10 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         if (string.IsNullOrWhiteSpace(text))
             return string.Empty;
 
+        // Hem kapalı <think>...</think> bloklarını hem de modelin yarım kalıp </think> etiketini kapatmadığı durumları temizle
         var cleaned = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"<think>.*?</think>",
+            @"<(think|thought|thinking)>.*?(</\1>|$)",
             string.Empty,
             System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
 
@@ -210,7 +200,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         };
     }
 
-    private async Task<(string Text, string FinishReason)> CallLlmRawAsync(string prompt, CancellationToken ct)
+    private async Task<(string Text, string FinishReason)> CallLlmRawAsync(string prompt, CancellationToken ct, string taskType = "videoplan")
     {
         AiProviderSettingsDto? settings = null;
         if (_settingsService != null)
@@ -225,13 +215,20 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             }
         }
 
+        string GetTargetModel(AiProviderSettingsDto s) => taskType switch
+        {
+            "qc" => s.GetEffectiveQcModel(),
+            "summary" => s.GetEffectiveSummaryModel(),
+            _ => s.GetEffectiveVideoPlanModel()
+        };
+
         // 1. OpenRouter seçiliyse OpenRouter API'ye gönder
         if (settings != null &&
             settings.ActiveProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
             var openRouterUrl = $"{settings.OpenRouterBaseUrl.TrimEnd('/')}/chat/completions";
-            var openRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? "google/gemini-3.8-flash" : settings.OpenRouterModel;
+            var openRouterModel = GetTargetModel(settings);
             var orKeys = settings.OpenRouterApiKey.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
                                                   .Select(k => k.Trim())
                                                   .ToArray();
@@ -244,29 +241,74 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 var keyToUse = orKeys[tryCount % orKeys.Length];
                 try
                 {
-                    using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-                    var requestBody = new
+                    using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(20) };
+                    
+                    bool isReasoningModel = openRouterModel.Contains("r1", StringComparison.OrdinalIgnoreCase) ||
+                                            openRouterModel.Contains("o1", StringComparison.OrdinalIgnoreCase) ||
+                                            openRouterModel.Contains("o3", StringComparison.OrdinalIgnoreCase) ||
+                                            openRouterModel.Contains("argon", StringComparison.OrdinalIgnoreCase) ||
+                                            openRouterModel.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+                                            openRouterModel.Contains("thinking", StringComparison.OrdinalIgnoreCase);
+
+                    var requestPayload = new Dictionary<string, object>
                     {
-                        model = openRouterModel,
-                        messages = new[] { new { role = "user", content = prompt } },
-                        max_tokens = 16384,
-                        temperature = 0.2
+                        ["model"] = openRouterModel,
+                        ["messages"] = new[] { new { role = "user", content = prompt } },
+                        ["max_tokens"] = 16384
                     };
-                    var jsonContent = new System.Net.Http.StringContent(
-                        System.Text.Json.JsonSerializer.Serialize(requestBody),
-                        System.Text.Encoding.UTF8,
-                        "application/json");
 
-                    using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, openRouterUrl);
-                    requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
-                    requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
-                    requestMessage.Headers.Add("X-Title", "VideoOzet");
-                    requestMessage.Content = jsonContent;
+                    if (!isReasoningModel)
+                    {
+                        requestPayload["temperature"] = 0.2;
+                    }
 
-                    var response = await httpClient.SendAsync(requestMessage, ct);
-                    var responseString = await response.Content.ReadAsStringAsync(ct);
+                    HttpResponseMessage? response = null;
+                    string responseString = string.Empty;
 
-                    if (response.IsSuccessStatusCode)
+                    // 400 Bad Request (örneğin temperature kabul etmeyen model) durumunda parametre düzeltmeli retry
+                    for (int subTry = 0; subTry < 2; subTry++)
+                    {
+                        var jsonContent = new System.Net.Http.StringContent(
+                            System.Text.Json.JsonSerializer.Serialize(requestPayload),
+                            System.Text.Encoding.UTF8,
+                            "application/json");
+
+                        using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, openRouterUrl);
+                        requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                        requestMessage.Headers.Add("HTTP-Referer", "https://videoozet.local");
+                        requestMessage.Headers.Add("X-Title", "VideoOzet");
+                        requestMessage.Content = jsonContent;
+
+                        response = await httpClient.SendAsync(requestMessage, ct);
+                        responseString = await response.Content.ReadAsStringAsync(ct);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            break;
+                        }
+
+                        if ((int)response.StatusCode == 400 && subTry == 0)
+                        {
+                            bool adjusted = false;
+                            if (responseString.Contains("temperature", StringComparison.OrdinalIgnoreCase) && requestPayload.ContainsKey("temperature"))
+                            {
+                                _logger.LogInformation("OpenRouter modeli {Model} temperature parametresini kabul etmedi, parametre kaldırılarak deneniyor...", openRouterModel);
+                                requestPayload.Remove("temperature");
+                                adjusted = true;
+                            }
+                            if (responseString.Contains("max_tokens", StringComparison.OrdinalIgnoreCase) || responseString.Contains("tokens", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogInformation("OpenRouter modeli {Model} max_tokens sınırına takıldı, 8192 olarak deneniyor...", openRouterModel);
+                                requestPayload["max_tokens"] = 8192;
+                                adjusted = true;
+                            }
+                            if (adjusted) continue;
+                        }
+
+                        break;
+                    }
+
+                    if (response != null && response.IsSuccessStatusCode)
                     {
                         using var jsonDoc = System.Text.Json.JsonDocument.Parse(responseString);
                         var root = jsonDoc.RootElement;
@@ -286,7 +328,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         throw new Exception($"High Demand or Limit: {responseString}");
                     }
 
-                    throw new Exception($"OpenRouter API error ({response.StatusCode}): {responseString}");
+                    throw new Exception($"OpenRouter API error ({(response != null ? (int)response.StatusCode : 0)}): {responseString}");
                 }
                 catch (Exception ex) when (ex.Message.Contains("High Demand") || ex.Message.Contains("Limit") || ex.Message.Contains("503") || ex.Message.Contains("429"))
                 {
@@ -338,8 +380,8 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
         if (!string.IsNullOrWhiteSpace(geminiKey))
         {
-            var geminiModel = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
-                ? settings.AntigravityProxyModel
+            var geminiModel = settings != null
+                ? GetTargetModel(settings)
                 : (_configuration["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered");
             var proxyBaseUrl = settings != null && !string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl)
                 ? settings.AntigravityProxyUrl.TrimEnd('/')
@@ -359,28 +401,69 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 try
                 {
                     using var httpClient = new System.Net.Http.HttpClient();
-                    httpClient.Timeout = TimeSpan.FromMinutes(5);
+                    httpClient.Timeout = TimeSpan.FromMinutes(20);
                     
-                    var requestBody = new
+                    bool isProxyReasoningModel = geminiModel.Contains("r1", StringComparison.OrdinalIgnoreCase) ||
+                                                 geminiModel.Contains("o1", StringComparison.OrdinalIgnoreCase) ||
+                                                 geminiModel.Contains("o3", StringComparison.OrdinalIgnoreCase) ||
+                                                 geminiModel.Contains("argon", StringComparison.OrdinalIgnoreCase) ||
+                                                 geminiModel.Contains("reasoning", StringComparison.OrdinalIgnoreCase) ||
+                                                 geminiModel.Contains("thinking", StringComparison.OrdinalIgnoreCase);
+
+                    var requestPayload = new Dictionary<string, object>
                     {
-                        model = geminiModel,
-                        messages = new[]
+                        ["model"] = geminiModel,
+                        ["messages"] = new[]
                         {
                             new { role = "user", content = prompt }
                         },
-                        max_tokens = 16384,
-                        temperature = 0.2
+                        ["max_tokens"] = 16384
                     };
-                    var jsonContent = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(requestBody), System.Text.Encoding.UTF8, "application/json");
+
+                    if (!isProxyReasoningModel)
+                    {
+                        requestPayload["temperature"] = 0.2;
+                    }
+
                     var requestUrl = $"{proxyBaseUrl}/chat/completions";
-                    
-                    using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, requestUrl);
-                    requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
-                    requestMessage.Content = jsonContent;
-                    
-                    var response = await httpClient.SendAsync(requestMessage, ct);
-                    
-                    var responseString = await response.Content.ReadAsStringAsync();
+                    HttpResponseMessage? response = null;
+                    string responseString = string.Empty;
+
+                    for (int subTry = 0; subTry < 2; subTry++)
+                    {
+                        var jsonContent = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(requestPayload), System.Text.Encoding.UTF8, "application/json");
+                        using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, requestUrl);
+                        requestMessage.Headers.Add("Authorization", $"Bearer {keyToUse}");
+                        requestMessage.Content = jsonContent;
+                        
+                        response = await httpClient.SendAsync(requestMessage, ct);
+                        responseString = await response.Content.ReadAsStringAsync();
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            break;
+                        }
+
+                        if ((int)response.StatusCode == 400 && subTry == 0)
+                        {
+                            bool adjusted = false;
+                            if (responseString.Contains("temperature", StringComparison.OrdinalIgnoreCase) && requestPayload.ContainsKey("temperature"))
+                            {
+                                _logger.LogInformation("Proxy modeli {Model} temperature kabul etmedi. Parametre kaldırılarak deneniyor...", geminiModel);
+                                requestPayload.Remove("temperature");
+                                adjusted = true;
+                            }
+                            if (responseString.Contains("max_tokens", StringComparison.OrdinalIgnoreCase) || responseString.Contains("tokens", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogInformation("Proxy modeli {Model} max_tokens sınırına takıldı. 8192 olarak deneniyor...", geminiModel);
+                                requestPayload["max_tokens"] = 8192;
+                                adjusted = true;
+                            }
+                            if (adjusted) continue;
+                        }
+
+                        break;
+                    }
                     if (response.IsSuccessStatusCode)
                     {
                         using var jsonDoc = System.Text.Json.JsonDocument.Parse(responseString);
@@ -429,7 +512,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
         if (!string.IsNullOrWhiteSpace(groqKey))
         {
-            var preferredGroqModel = settings != null && !string.IsNullOrWhiteSpace(settings.GroqModel) ? settings.GroqModel : "openai/gpt-oss-120b";
+            var preferredGroqModel = settings != null ? GetTargetModel(settings) : "openai/gpt-oss-120b";
             var candidateModels = new[] { preferredGroqModel, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b" }
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -450,7 +533,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                     try
                     {
                         _logger.LogInformation("Groq Cloud LLM ({Model}) ile sentez çağrısı yapılıyor (Prompt: {Len} krk)...", groqModel, groqPrompt.Length);
-                        using var groqClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+                        using var groqClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(10) };
                         var groqBody = new
                         {
                             model = groqModel,
@@ -607,25 +690,25 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     public async Task<string> ExtractClaimsAsync(string text, CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.ClaimExtractionPrompt, text);
-        return await CallLlmAsync(prompt, ct);
+        return await CallLlmAsync(prompt, ct, taskType: "qc");
     }
 
     public async Task<string> VerifyClaimAsync(string claim, string contextData, CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.QcVerificationPrompt, claim, contextData);
-        return await CallLlmAsync(prompt, ct);
+        return await CallLlmAsync(prompt, ct, taskType: "qc");
     }
 
     public async Task<string> BatchQualityCheckAsync(string summaryText, string contextData, int claimCount = 8, CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.BatchQcPrompt, claimCount, summaryText, contextData);
-        return await CallLlmAsync(prompt, ct);
+        return await CallLlmAsync(prompt, ct, taskType: "qc");
     }
 
     public async Task<string> ReviseContentAsync(string originalContent, string revisionInstruction, string contentType, string topic, string contextData = "", CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.RevisionPrompt, contentType, originalContent, revisionInstruction, topic, contextData);
-        var raw = await CallLlmAsync(prompt, ct);
+        var raw = await CallLlmAsync(prompt, ct, taskType: "videoplan");
         bool isPlan = contentType.Contains("Plan", StringComparison.OrdinalIgnoreCase);
         return NormalizeMarkdownOutput(raw, isVideoPlan: isPlan);
     }
@@ -634,7 +717,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     {
         var prevReport = string.IsNullOrWhiteSpace(previousQcReportJson) ? "Önceki QC raporu bulunmuyor (İlk denetim)." : previousQcReportJson;
         var prompt = string.Format(PromptTemplates.ReQcVerificationPrompt, claimCount, currentContent, contextData, prevReport);
-        return await CallLlmAsync(prompt, ct);
+        return await CallLlmAsync(prompt, ct, taskType: "qc");
     }
 
     public async Task<string> AnalyzeTopicAsync(string topic, string allSourcesData, CancellationToken ct = default)
@@ -684,6 +767,6 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     public async Task<string> ExtractSourceTopicsAsync(string kaynakAdi, string metin, int parcaNo, int parcaSayisi, CancellationToken ct = default)
     {
         var prompt = string.Format(PromptTemplates.SourceTopicExtractionPrompt, kaynakAdi, parcaNo, parcaSayisi, metin);
-        return await CallLlmAsync(prompt, ct);
+        return await CallLlmAsync(prompt, ct, taskType: "summary");
     }
 }

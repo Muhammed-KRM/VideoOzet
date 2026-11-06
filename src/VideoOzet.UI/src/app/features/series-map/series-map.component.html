@@ -74,9 +74,14 @@
           {{ durumEtiketi(b.durum) }}
         </span>
       </div>
-      <button *ngIf="b.durum === 'Tamamlandi'" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors">
-        Görüntüle
-      </button>
+      <div class="flex items-center gap-1.5">
+        <button *ngIf="b.durum === 'Hata'" (click)="retryBolum($event, b.bolumNo)" class="text-xs text-white bg-rose-600 hover:bg-rose-500 px-2.5 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1 shadow-sm">
+          <span>🔄</span> Yeniden Dene
+        </button>
+        <button *ngIf="b.durum === 'Tamamlandi'" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors">
+          Görüntüle
+        </button>
+      </div>
     </div>
   </div>
 

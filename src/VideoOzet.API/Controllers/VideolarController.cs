@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Data.Enums;
 
 namespace VideoOzet.API.Controllers;
 
@@ -22,9 +24,19 @@ public class VideolarController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("{id:guid}/icerik")]
+    public async Task<IActionResult> GetVideoIcerik(Guid egitimId, Guid id)
+    {
+        var icerik = await _videoService.GetVideoIcerikDetayAsync(id);
+        if (icerik == null)
+            return NotFound("Video içeriği bulunamadı.");
+
+        return Ok(icerik);
+    }
+
     [HttpPost("upload")]
     [RequestSizeLimit(1024L * 1024L * 1024L * 2L)] // 2GB limit
-    public async Task<IActionResult> UploadVideo(Guid egitimId, IFormFile file)
+    public async Task<IActionResult> UploadVideo(Guid egitimId, IFormFile file, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
     {
         if (file == null || file.Length == 0)
             return BadRequest("Dosya yüklenemedi.");
@@ -36,7 +48,8 @@ public class VideolarController : ControllerBase
             EgitimId = egitimId,
             FileName = file.FileName,
             ContentType = file.ContentType,
-            FileStream = stream
+            FileStream = stream,
+            KullanimTuru = kullanimTuru
         };
 
         var result = await _videoService.UploadVideoAsync(dto);

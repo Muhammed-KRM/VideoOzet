@@ -20,6 +20,7 @@ public class VideoConfiguration : IEntityTypeConfiguration<Video>
         builder.Property(v => v.Sira).HasColumnName("sira").HasDefaultValue(0).IsRequired();
         builder.Property(v => v.DosyaBoyutu).HasColumnName("dosya_boyutu").HasDefaultValue(0).IsRequired();
         builder.Property(v => v.IslemDurumu).HasColumnName("islem_durumu").HasDefaultValue(VideoOzet.Data.Enums.VideoIslemDurumu.Bekliyor).IsRequired();
+        builder.Property(v => v.KullanimTuru).HasColumnName("kullanim_turu").HasDefaultValue(VideoOzet.Data.Enums.KaynakKullanimTuru.DogrudanReferans).IsRequired();
         builder.Property(v => v.OlusturmaTarihi).HasColumnName("olusturma_tarihi").HasDefaultValueSql("now()").HasColumnType("timestamptz").IsRequired();
         builder.Property(v => v.IslemTamamlanmaTarihi).HasColumnName("islem_tamamlanma_tarihi").HasColumnType("timestamptz");
 

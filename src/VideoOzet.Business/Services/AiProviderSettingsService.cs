@@ -92,11 +92,20 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             OpenRouterApiKey = _config["OpenRouter:ApiKey"] ?? _config["OPENROUTER_API_KEY"] ?? "",
             OpenRouterBaseUrl = _config["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1",
             OpenRouterModel = _config["OpenRouter:Model"] ?? "google/gemini-3.8-flash",
+            OpenRouterSummaryModel = _config["OpenRouter:SummaryModel"] ?? "google/gemini-3.8-flash",
+            OpenRouterVideoPlanModel = _config["OpenRouter:VideoPlanModel"] ?? "anthropic/claude-3.7-sonnet",
+            OpenRouterQcModel = _config["OpenRouter:QcModel"] ?? "google/gemini-3.8-flash",
             GroqApiKey = _config["GROQ_API_KEY"] ?? _config["Groq:ApiKey"] ?? "",
             GroqModel = _config["GROQ_MODEL"] ?? "openai/gpt-oss-120b",
+            GroqSummaryModel = _config["Groq:SummaryModel"] ?? "openai/gpt-oss-120b",
+            GroqVideoPlanModel = _config["Groq:VideoPlanModel"] ?? "openai/gpt-oss-120b",
+            GroqQcModel = _config["Groq:QcModel"] ?? "openai/gpt-oss-120b",
             AntigravityProxyUrl = _config["Antigravity:ProxyUrl"] ?? "http://localhost:8045/v1",
             AntigravityProxyKey = _config["GEMINI_API_KEY"] ?? "",
-            AntigravityProxyModel = _config["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered"
+            AntigravityProxyModel = _config["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered",
+            AntigravityProxySummaryModel = _config["Antigravity:SummaryModel"] ?? "gemini-3.8-flash-tiered",
+            AntigravityProxyVideoPlanModel = _config["Antigravity:VideoPlanModel"] ?? "gemini-3.8-flash-tiered",
+            AntigravityProxyQcModel = _config["Antigravity:QcModel"] ?? "gemini-3.8-flash-tiered"
         };
 
         return defaultSettings;
@@ -112,11 +121,20 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             OpenRouterApiKey = (settings.OpenRouterApiKey ?? "").Trim(),
             OpenRouterBaseUrl = string.IsNullOrWhiteSpace(settings.OpenRouterBaseUrl) ? current.OpenRouterBaseUrl : settings.OpenRouterBaseUrl.Trim(),
             OpenRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? current.OpenRouterModel : NormalizeModelId(settings.OpenRouterModel),
+            OpenRouterSummaryModel = !string.IsNullOrWhiteSpace(settings.OpenRouterSummaryModel) ? NormalizeModelId(settings.OpenRouterSummaryModel) : current.OpenRouterSummaryModel,
+            OpenRouterVideoPlanModel = !string.IsNullOrWhiteSpace(settings.OpenRouterVideoPlanModel) ? NormalizeModelId(settings.OpenRouterVideoPlanModel) : current.OpenRouterVideoPlanModel,
+            OpenRouterQcModel = !string.IsNullOrWhiteSpace(settings.OpenRouterQcModel) ? NormalizeModelId(settings.OpenRouterQcModel) : current.OpenRouterQcModel,
             GroqApiKey = (settings.GroqApiKey ?? "").Trim(),
             GroqModel = string.IsNullOrWhiteSpace(settings.GroqModel) ? current.GroqModel : settings.GroqModel.Trim(),
+            GroqSummaryModel = !string.IsNullOrWhiteSpace(settings.GroqSummaryModel) ? settings.GroqSummaryModel.Trim() : current.GroqSummaryModel,
+            GroqVideoPlanModel = !string.IsNullOrWhiteSpace(settings.GroqVideoPlanModel) ? settings.GroqVideoPlanModel.Trim() : current.GroqVideoPlanModel,
+            GroqQcModel = !string.IsNullOrWhiteSpace(settings.GroqQcModel) ? settings.GroqQcModel.Trim() : current.GroqQcModel,
             AntigravityProxyUrl = string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl) ? current.AntigravityProxyUrl : settings.AntigravityProxyUrl.Trim(),
             AntigravityProxyKey = (settings.AntigravityProxyKey ?? "").Trim(),
-            AntigravityProxyModel = string.IsNullOrWhiteSpace(settings.AntigravityProxyModel) ? current.AntigravityProxyModel : settings.AntigravityProxyModel.Trim()
+            AntigravityProxyModel = string.IsNullOrWhiteSpace(settings.AntigravityProxyModel) ? current.AntigravityProxyModel : settings.AntigravityProxyModel.Trim(),
+            AntigravityProxySummaryModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxySummaryModel) ? settings.AntigravityProxySummaryModel.Trim() : current.AntigravityProxySummaryModel,
+            AntigravityProxyVideoPlanModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxyVideoPlanModel) ? settings.AntigravityProxyVideoPlanModel.Trim() : current.AntigravityProxyVideoPlanModel,
+            AntigravityProxyQcModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxyQcModel) ? settings.AntigravityProxyQcModel.Trim() : current.AntigravityProxyQcModel
         };
 
         _memoryFallback = updated;
@@ -329,7 +347,15 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                             }
 
                             if (proxyModels.Count > 0)
-                                return proxyModels;
+                            {
+                                var sortedProxy = proxyModels
+                                    .OrderBy(m => m.Id.Equals("gemini-3.8-flash-tiered", StringComparison.OrdinalIgnoreCase) || m.Id.Equals("gemini-3.8-flash", StringComparison.OrdinalIgnoreCase) ? 0
+                                        : m.Id.Equals("argon", StringComparison.OrdinalIgnoreCase) ? 1
+                                        : 2)
+                                    .ThenBy(m => m.Name)
+                                    .ToList();
+                                return sortedProxy;
+                            }
                         }
                     }
                 }
@@ -341,10 +367,23 @@ public class AiProviderSettingsService : IAiProviderSettingsService
 
             return new List<ModelOptionDto>
             {
-                new() { Id = "gemini-3.8-flash-tiered", Name = "Gemini 3.8 Flash Tiered (Varsayılan)", Category = "Antigravity Proxy", Description = "VideoOzet varsayılan yüksek hızlı Gemini modeli" },
+                new() { Id = "gemini-3.8-flash-tiered", Name = "⚡ Gemini 3.8 Flash Tiered (Varsayılan)", Category = "Antigravity Proxy", Description = "VideoOzet varsayılan yüksek hızlı Gemini modeli" },
+                new() { Id = "argon", Name = "🧠 Argon (Maksimum Muhakeme & Güçlü Planlama)", Category = "Antigravity Proxy", Description = "Video planı ve senaryo sentezi için en güçlü akıl yürütme modeli" },
+                new() { Id = "gemini-3.8-flash", Name = "⚡ Gemini 3.8 Flash (Standart)", Category = "Antigravity Proxy", Description = "VideoOzet yüksek hızlı Gemini 3.8 modeli" },
+                new() { Id = "claude-3-7-sonnet", Name = "Claude 3.7 Sonnet (Antigravity)", Category = "Antigravity Proxy", Description = "Yüksek kaliteli metin sentezi ve senaryo" },
+                new() { Id = "claude-3-7-sonnet-tiered", Name = "Claude 3.7 Sonnet Tiered", Category = "Antigravity Proxy", Description = "Kademeli Claude 3.7 Sonnet modeli" },
+                new() { Id = "claude-3-5-sonnet", Name = "Claude 3.5 Sonnet", Category = "Antigravity Proxy", Description = "Yüksek kaliteli içerik ve kod sentezi" },
+                new() { Id = "claude-3-5-haiku", Name = "Claude 3.5 Haiku", Category = "Antigravity Proxy", Description = "Hızlı ve ekonomik Claude modeli" },
+                new() { Id = "gpt-4o", Name = "GPT-4o (Antigravity)", Category = "Antigravity Proxy", Description = "Çok yönlü gelişmiş model" },
+                new() { Id = "gpt-4o-mini", Name = "GPT-4o Mini", Category = "Antigravity Proxy", Description = "Hafif ve hızlı GPT modeli" },
+                new() { Id = "o3-mini", Name = "o3-mini (Akıl Yürütme)", Category = "Antigravity Proxy", Description = "İleri düzey muhakeme modeli" },
+                new() { Id = "o1", Name = "o1 (Derin Muhakeme)", Category = "Antigravity Proxy", Description = "En güçlü akıl yürütme modeli" },
                 new() { Id = "gemini-2.5-pro", Name = "Gemini 2.5 Pro (Antigravity)", Category = "Antigravity Proxy", Description = "Derin analiz ve uzun bağlam modeli" },
                 new() { Id = "gemini-2.5-flash", Name = "Gemini 2.5 Flash (Antigravity)", Category = "Antigravity Proxy", Description = "Hızlı özetleme ve transkript modeli" },
-                new() { Id = "claude-3-7-sonnet", Name = "Claude 3.7 Sonnet (Antigravity)", Category = "Antigravity Proxy", Description = "Yüksek kaliteli metin sentezi" }
+                new() { Id = "deepseek-r1", Name = "DeepSeek R1 (Antigravity)", Category = "Antigravity Proxy", Description = "Akıl yürütme ve mantık modeli" },
+                new() { Id = "deepseek-chat", Name = "DeepSeek V3 (Antigravity)", Category = "Antigravity Proxy", Description = "Genel amaçlı güçlü sohbet modeli" },
+                new() { Id = "llama-3.3-70b-instruct", Name = "Llama 3.3 70B Instruct", Category = "Antigravity Proxy", Description = "Açık kaynak amiral gemisi model" },
+                new() { Id = "qwen-2.5-72b-instruct", Name = "Qwen 2.5 72B Instruct", Category = "Antigravity Proxy", Description = "Gelişmiş açık kaynak muhakeme modeli" }
             };
         }
 

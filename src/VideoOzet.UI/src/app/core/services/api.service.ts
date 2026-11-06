@@ -55,6 +55,18 @@ export class ApiService {
     return this.http.delete<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/dokumanlar/${dokumanId}`);
   }
 
+  updateKaynakKullanimTuru(egitimId: string, tip: 'video' | 'dokuman', id: string, kullanimTuru: number): Observable<any> {
+    return this.http.patch<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/${tip}/${id}/kullanim-turu`, { kullanimTuru });
+  }
+
+  getVideoIcerik(egitimId: string, videoId: string): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/${videoId}/icerik`);
+  }
+
+  getDokumanIcerik(egitimId: string, dokumanId: string): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/dokumanlar/${dokumanId}/icerik`);
+  }
+
   updateEgitim(id: string, egitim: any): Observable<any> {
     return this.http.put<any>(`${this.baseUrl}/egitimler/${id}`, egitim);
   }
@@ -119,5 +131,9 @@ export class ApiService {
 
   reviseEpisode(id: string, bolumNo: number, dto: any): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions`, dto);
+  }
+
+  retryEpisode(id: string, bolumNo: number): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/retry`, {});
   }
 }
