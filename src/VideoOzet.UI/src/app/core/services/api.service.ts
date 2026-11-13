@@ -47,6 +47,14 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/${videoId}/retry`, {});
   }
 
+  retryDokuman(egitimId: string, dokumanId: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/dokumanlar/${dokumanId}/retry`, {});
+  }
+
+  recoverProblematicFiles(egitimId: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/dosyalar/sorunlulari-kurtar`, {});
+  }
+
   resetQueue(egitimId: string): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/reset-queue`, {});
   }

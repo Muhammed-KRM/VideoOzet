@@ -19,6 +19,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
 
     public Action<int, int>? OnProgress { get; set; }
     public string? LastDetectedLanguage { get; private set; }
+    public string? LastUsedModel { get; private set; }
 
     public CompositeSttProvider(
         GroqWhisperSttProvider groqProvider,
@@ -86,6 +87,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                 if (!string.IsNullOrWhiteSpace(result))
                 {
                     LastDetectedLanguage = _groqProvider.LastDetectedLanguage;
+                    LastUsedModel = "groq-whisper-large-v3-turbo";
                     _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars, Lang: {Lang}).", result.Length, LastDetectedLanguage ?? "auto");
                     progressCallback?.Invoke(2, 2);
                     return result;
@@ -107,6 +109,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                     if (!string.IsNullOrWhiteSpace(localRes))
                     {
                         LastDetectedLanguage = _localWhisperProvider.LastDetectedLanguage;
+                        LastUsedModel = "faster-whisper-large-v3-turbo";
                         _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars, Lang: {Lang}).", localRes.Length, LastDetectedLanguage ?? "auto");
                         return localRes;
                     }
@@ -119,11 +122,12 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
 
             memoryStream.Position = 0;
             _logger.LogInformation("Transcribing via Gemini Parallel STT Provider...");
+            LastUsedModel = "gemini-audio-stt";
             return await _geminiProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
         }
 
-        // 3. Local Whisper mode (Only if explicitly requested)
-        if (providerPref.Equals("Local", StringComparison.OrdinalIgnoreCase))
+        // 3. Local Whisper mode (Local or Auto when Groq key is absent)
+        if (!providerPref.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
@@ -133,7 +137,9 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                     var result = await _localWhisperProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
                     if (!string.IsNullOrWhiteSpace(result))
                     {
-                        _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars).", result.Length);
+                        LastDetectedLanguage = _localWhisperProvider.LastDetectedLanguage;
+                        LastUsedModel = "faster-whisper-large-v3-turbo";
+                        _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars, Lang: {Lang}).", result.Length, LastDetectedLanguage ?? "auto");
                         return result;
                     }
                 }
@@ -147,6 +153,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
         }
 
         _logger.LogInformation("Transcribing via Gemini Parallel STT Provider (Final Fallback)...");
+        LastUsedModel = "gemini-audio-stt";
         return await _geminiProvider.TranscribeAsync(memoryStream, fileName, progressCallback, cancellationToken);
     }
 }

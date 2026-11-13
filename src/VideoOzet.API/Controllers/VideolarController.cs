@@ -11,10 +11,12 @@ namespace VideoOzet.API.Controllers;
 public class VideolarController : ControllerBase
 {
     private readonly IVideoService _videoService;
+    private readonly IDokumanService? _dokumanService;
 
-    public VideolarController(IVideoService videoService)
+    public VideolarController(IVideoService videoService, IDokumanService? dokumanService = null)
     {
         _videoService = videoService;
+        _dokumanService = dokumanService;
     }
 
     [HttpGet]
@@ -93,9 +95,13 @@ public class VideolarController : ControllerBase
             try { await client.DeleteAsync($"http://localhost:15673/api/queues/%2f/{q}/contents"); } catch { }
         }
 
-        // 2. Eğitimdeki videoları yeniden kuyruğa ekle
+        // 2. Eğitimdeki tamamlanmamış tüm video ve dokümanları yeniden kuyruğa ekle
         await _videoService.ResetQueueForEgitimAsync(egitimId);
+        if (_dokumanService != null)
+        {
+            await _dokumanService.ResetDokumanQueueForEgitimAsync(egitimId);
+        }
         
-        return Ok(new { message = "Kuyruk sıfırlandı ve eğitimdeki videolar yeniden sıraya alındı." });
+        return Ok(new { message = "Kuyruk sıfırlandı; tamamlanmamış tüm video ve dokümanlar yeniden sıraya alındı." });
     }
 }

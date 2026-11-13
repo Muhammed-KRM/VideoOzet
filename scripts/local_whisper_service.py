@@ -113,18 +113,28 @@ class WhisperRequestHandler(BaseHTTPRequestHandler):
                 self.send_error_response(503, "Whisper model not initialized yet.")
                 return
 
+            headers_sent = False
             try:
                 base_name = os.path.basename(file_path)
                 print(f"[*] Queued request for '{base_name}' (stream={stream_mode}, beam={beam_size}). Waiting for GPU lock...")
+
+                if stream_mode:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    headers_sent = True
+                    queued_evt = json.dumps({"type": "status", "state": "queued"}) + "\n"
+                    self.wfile.write(queued_evt.encode("utf-8"))
+                    self.wfile.flush()
+
                 with GPU_LOCK:
                     t0 = time.time()
                     print(f"[*] Acquired GPU lock. Starting transcription for '{base_name}' (model={MODEL_NAME}, lang={language}, beam={beam_size})...")
-                    
                     if stream_mode:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
-                        self.send_header("Connection", "close")
-                        self.end_headers()
+                        started_evt = json.dumps({"type": "status", "state": "started"}) + "\n"
+                        self.wfile.write(started_evt.encode("utf-8"))
+                        self.wfile.flush()
 
                     segments, info = GLOBAL_MODEL.transcribe(
                         file_path,
@@ -191,7 +201,7 @@ class WhisperRequestHandler(BaseHTTPRequestHandler):
 
             except Exception as e:
                 print(f"[-] Transcription error: {e}")
-                if not stream_mode:
+                if not stream_mode or not headers_sent:
                     self.send_error_response(500, f"Transcription failed: {str(e)}")
                 else:
                     err_evt = json.dumps({"type": "done", "success": False, "error": str(e)}) + "\n"

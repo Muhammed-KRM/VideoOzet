@@ -64,6 +64,8 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   private subs: any[] = [];
 
   private pollIntervalId: any;
+  isRecovering: boolean = false;
+  recoveryFeedback: string = '';
   videoProgressMap: { [videoId: string]: { yuzde?: number, mevcutAdim?: number, toplamAdim?: number, mesaj?: string, sonAsama?: string, durum?: string } } = {};
 
   ngOnInit() {
@@ -102,6 +104,10 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
                 video.durum = this.videoProgressMap[data.videoId].durum;
                 video.mesaj = this.videoProgressMap[data.videoId].mesaj;
                 video.hataMesaji = isError ? data.mesaj : null;
+                if (!isError) {
+                  video.takiliMi = false;
+                  video.takilmaNedeni = null;
+                }
                 video.yuzde = this.videoProgressMap[data.videoId].yuzde;
                 video.mevcutAdim = this.videoProgressMap[data.videoId].mevcutAdim;
                 video.toplamAdim = this.videoProgressMap[data.videoId].toplamAdim;
@@ -111,12 +117,12 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
         })
       );
 
-      // İşlem gören videolar varken her 3 saniyede bir otomatik senkronize et
+      // Tamamlanmamış dosyalar varken her 4 saniyede bir otomatik senkronize et (takılma & ilerleme kontrolü)
       this.pollIntervalId = setInterval(() => {
-        if (this.egitimId && this.hasActiveProcessing) {
+        if (this.egitimId && this.needsPolling) {
           this.loadEgitim(true);
         }
-      }, 3000);
+      }, 4000);
       
       // Klasik mod SignalR bildirimleri
       this.subs.push(
@@ -178,9 +184,21 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.subs.forEach(s => s?.unsubscribe?.());
   }
 
+  isItemCompleted(v: any): boolean {
+    return v?.islemDurumu === 'Tamamlandi' || v?.durum === 'Tamamlandi' || v?.islemDurumu === 8;
+  }
+
+  isItemError(v: any): boolean {
+    return v?.islemDurumu === 'Hata' || v?.durum === 'Hata' || v?.islemDurumu === 9;
+  }
+
+  isItemStalled(v: any): boolean {
+    return !this.isItemCompleted(v) && !this.isItemError(v) && !!v?.takiliMi;
+  }
+
   get completedVideosCount(): number {
     if (!this.egitim || !this.egitim.videos) return 0;
-    return this.egitim.videos.filter((v: any) => v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8).length;
+    return this.egitim.videos.filter((v: any) => this.isItemCompleted(v)).length;
   }
 
   get totalVideosCount(): number {
@@ -192,17 +210,36 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     return Math.round((this.completedVideosCount / this.totalVideosCount) * 100);
   }
 
+  get stalledItemsCount(): number {
+    if (!this.egitim || !this.egitim.videos) return 0;
+    return this.egitim.videos.filter((v: any) => this.isItemStalled(v)).length;
+  }
+
+  get failedItemsCount(): number {
+    if (!this.egitim || !this.egitim.videos) return 0;
+    return this.egitim.videos.filter((v: any) => this.isItemError(v)).length;
+  }
+
+  get problematicItemsCount(): number {
+    return this.stalledItemsCount + this.failedItemsCount;
+  }
+
   get hasActiveProcessing(): boolean {
     if (!this.egitim || !this.egitim.videos) return false;
-    return this.egitim.videos.some((v: any) => 
-      v.islemDurumu !== 'Tamamlandi' && v.islemDurumu !== 'Hata' && v.islemDurumu !== 8 && v.islemDurumu !== 9 &&
-      v.durum !== 'Tamamlandi' && v.durum !== 'Hata'
+    return this.egitim.videos.some((v: any) =>
+      !this.isItemCompleted(v) && !this.isItemError(v) && !v.takiliMi
     );
   }
 
+  get needsPolling(): boolean {
+    if (!this.egitim || !this.egitim.videos) return false;
+    return this.completedVideosCount < this.totalVideosCount;
+  }
+
   getVideoStatusText(v: any): string {
-    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return 'Tamamlandı';
-    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return 'Hata';
+    if (this.isItemCompleted(v)) return 'Tamamlandı';
+    if (this.isItemError(v)) return 'Hata';
+    if (this.isItemStalled(v)) return '⚠️ Takılı Kaldı';
     if (v.sonAsama) return v.sonAsama;
     if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return 'Ses Çözümleniyor (STT)';
     if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4) return 'STT Bitti';
@@ -213,8 +250,13 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   }
 
   getVideoDetailSubtitle(v: any): string {
-    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return '✅ İndekslendi (RAG Hazır)';
-    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return '❌ İşlem Başarısız';
+    if (this.isItemCompleted(v)) return '✅ İndekslendi (RAG Hazır)';
+    if (this.isItemError(v)) {
+      return '❌ ' + (v.hataMesaji || 'İşlem başarısız oldu — yeniden başlatabilirsiniz.');
+    }
+    if (this.isItemStalled(v)) {
+      return '⚠️ ' + (v.takilmaNedeni || 'Arka plan işlemi yanıt vermiyor — tek tıkla kurtarabilirsiniz.');
+    }
     const cached = this.videoProgressMap[v.id];
     if (v.mesaj) return v.mesaj;
     if (cached?.mesaj) return cached.mesaj;
@@ -225,8 +267,8 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   }
 
   getVideoPercentage(v: any): number {
-    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return 100;
-    if (v.islemDurumu === 'Hata' || v.durum === 'Hata' || v.islemDurumu === 9) return 0;
+    if (this.isItemCompleted(v)) return 100;
+    if (this.isItemError(v)) return 0;
     const cached = this.videoProgressMap[v.id];
     const yuzde = v.yuzde ?? cached?.yuzde;
     if (yuzde !== undefined && yuzde !== null && yuzde > 0) return yuzde;
@@ -241,7 +283,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   }
 
   getVideoProgressText(v: any): string {
-    if (v.islemDurumu === 'Tamamlandi' || v.durum === 'Tamamlandi' || v.islemDurumu === 8) return '100%';
+    if (this.isItemCompleted(v)) return '100%';
     const cached = this.videoProgressMap[v.id];
     const mevcut = v.mevcutAdim ?? cached?.mevcutAdim;
     const toplam = v.toplamAdim ?? cached?.toplamAdim;
@@ -272,8 +314,13 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
           return new Date(b.olusturmaTarihi).getTime() - new Date(a.olusturmaTarihi).getTime();
         });
 
-        // Per-video live progress retention
+        // Per-item live progress retention without overriding server-side stalled/error/completed state
         allItems.forEach((item: any) => {
+          if (item.takiliMi || this.isItemCompleted(item) || this.isItemError(item)) {
+            delete this.videoProgressMap[item.id];
+            return;
+          }
+
           const cached = this.videoProgressMap[item.id];
           if (cached) {
             if (cached.yuzde !== undefined) item.yuzde = cached.yuzde;
@@ -457,17 +504,25 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  retryVideo(item: any) {
-    if (item.tip !== 'video') return;
-    
+  retryItem(item: any) {
+    if (!item) return;
+
+    delete this.videoProgressMap[item.id];
+    item.takiliMi = false;
+    item.takilmaNedeni = null;
+    item.hataMesaji = null;
     item.durum = 'Bekliyor';
     item.islemDurumu = 'Bekliyor';
-    item.sonAsama = 'Yeniden Başlatılıyor';
-    item.hataMesaji = null;
-    
-    this.apiService.retryVideo(this.egitimId, item.id).subscribe({
+    item.sonAsama = 'Kuyruğa Alındı';
+    item.mesaj = '⏳ Yeniden başlatıldı, sıra bekleniyor...';
+
+    const obs = item.tip === 'dokuman'
+      ? this.apiService.retryDokuman(this.egitimId, item.id)
+      : this.apiService.retryVideo(this.egitimId, item.id);
+
+    obs.subscribe({
       next: () => {
-        // Backend'den eventler gelecek
+        this.loadEgitim(true);
       },
       error: (err) => {
         console.error('Yeniden başlatma hatası:', err);
@@ -476,25 +531,45 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  retryAllFailed() {
-    if (!this.egitim || !this.egitim.videos) return;
-    
-    const failedVideos = this.egitim.videos.filter((v: any) => v.tip === 'video' && (v.islemDurumu === 'Hata' || v.durum === 'Hata'));
-    
-    if (failedVideos.length === 0) {
-      alert('Yeniden başlatılacak hatalı video bulunamadı.');
-      return;
-    }
-    
-    if (!confirm(`${failedVideos.length} adet hatalı videoyu kaldığı yerden yeniden başlatmak istiyor musunuz?`)) return;
-    
-    failedVideos.forEach((v: any) => {
-      this.retryVideo(v);
+  retryVideo(item: any) {
+    this.retryItem(item);
+  }
+
+  recoverProblematicItems() {
+    if (this.isRecovering) return;
+    this.isRecovering = true;
+    this.recoveryFeedback = '';
+
+    this.apiService.recoverProblematicFiles(this.egitimId).subscribe({
+      next: (res) => {
+        this.isRecovering = false;
+        this.recoveryFeedback = res?.message || 'Sorunlu dosyalar yeniden sıraya alındı.';
+        if (this.egitim?.videos) {
+          this.egitim.videos.forEach((v: any) => {
+            if (this.isItemError(v) || this.isItemStalled(v)) {
+              delete this.videoProgressMap[v.id];
+            }
+          });
+        }
+        this.loadEgitim(true);
+        setTimeout(() => {
+          this.recoveryFeedback = '';
+        }, 8000);
+      },
+      error: (err) => {
+        this.isRecovering = false;
+        console.error('Toplu kurtarma hatası:', err);
+        alert('Sorunlu dosyalar kurtarılırken bir hata oluştu.');
+      }
     });
   }
 
+  retryAllFailed() {
+    this.recoverProblematicItems();
+  }
+
   resetQueue() {
-    if (!confirm('RabbitMQ kuyruğu boşaltılacak ve eğitimdeki (Tamamlanmamış) tüm videolar yeniden sıraya eklenecektir. Bu işlem eski tıkanıklıkları çözer. Onaylıyor musunuz?')) return;
+    if (!confirm('RabbitMQ kuyruğu boşaltılacak ve eğitimdeki (Tamamlanmamış) tüm video ve dokümanlar yeniden sıraya eklenecektir. Bu işlem eski tıkanıklıkları çözer. Onaylıyor musunuz?')) return;
     
     this.apiService.resetQueue(this.egitimId).subscribe({
       next: (res) => {

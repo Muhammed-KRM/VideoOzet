@@ -138,6 +138,51 @@ public class DosyalarController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("dokumanlar/{id:guid}/retry")]
+    public async Task<IActionResult> RetryDokuman(Guid egitimId, Guid id)
+    {
+        await _dokumanService.RetryDokumanAsync(id);
+        return Ok(new { message = "Doküman yeniden sıraya alındı." });
+    }
+
+    [HttpPost("sorunlulari-kurtar")]
+    public async Task<IActionResult> RecoverProblematicFiles(Guid egitimId)
+    {
+        var videos = await _videoService.GetVideosByEgitimIdAsync(egitimId);
+        var docs = await _dokumanService.GetDokumanlarByEgitimIdAsync(egitimId);
+
+        int recoveredVideos = 0;
+        foreach (var v in videos)
+        {
+            if (v.IslemDurumu == VideoIslemDurumu.Hata || v.TakiliMi)
+            {
+                await _videoService.RetryVideoAsync(v.Id);
+                recoveredVideos++;
+            }
+        }
+
+        int recoveredDocs = 0;
+        foreach (var d in docs)
+        {
+            if (d.IslemDurumu == VideoIslemDurumu.Hata || d.TakiliMi)
+            {
+                await _dokumanService.RetryDokumanAsync(d.Id);
+                recoveredDocs++;
+            }
+        }
+
+        var total = recoveredVideos + recoveredDocs;
+        return Ok(new
+        {
+            kurtarilanToplam = total,
+            kurtarilanVideoSayisi = recoveredVideos,
+            kurtarilanDokumanSayisi = recoveredDocs,
+            message = total > 0
+                ? $"{total} sorunlu dosya ({recoveredVideos} video, {recoveredDocs} doküman) kaldığı aşamadan yeniden sıraya alındı."
+                : "Kurtarılacak takılı veya hatalı dosya bulunamadı."
+        });
+    }
+
     [HttpGet("dokumanlar")]
     public async Task<IActionResult> GetDokumanlar(Guid egitimId)
     {

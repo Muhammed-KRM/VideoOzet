@@ -29,6 +29,7 @@ public class VideoManager : IVideoService
     private readonly IMapper _mapper;
     private readonly ILogger<VideoManager> _logger;
     private readonly ICacheService? _cacheService;
+    private readonly IPipelineStateTracker? _stateTracker;
 
     public VideoManager(
         IRepository<Video> videoRepository,
@@ -38,8 +39,9 @@ public class VideoManager : IVideoService
         IPublishEndpoint publishEndpoint,
         IMapper mapper,
         ILogger<VideoManager> logger,
-        ICacheService? cacheService = null)
-        : this(null!, videoRepository, egitimRepository, transcriptRepository, fileStorageService, publishEndpoint, mapper, logger, cacheService)
+        ICacheService? cacheService = null,
+        IPipelineStateTracker? stateTracker = null)
+        : this(null!, videoRepository, egitimRepository, transcriptRepository, fileStorageService, publishEndpoint, mapper, logger, cacheService, stateTracker)
     {
     }
 
@@ -52,7 +54,8 @@ public class VideoManager : IVideoService
         IPublishEndpoint publishEndpoint,
         IMapper mapper,
         ILogger<VideoManager> logger,
-        ICacheService? cacheService = null)
+        ICacheService? cacheService = null,
+        IPipelineStateTracker? stateTracker = null)
     {
         _dbContext = dbContext;
         _videoRepository = videoRepository;
@@ -63,6 +66,7 @@ public class VideoManager : IVideoService
         _mapper = mapper;
         _logger = logger;
         _cacheService = cacheService;
+        _stateTracker = stateTracker;
     }
 
     public async Task<VideoListDto> UploadVideoAsync(VideoUploadDto dto)
@@ -95,6 +99,11 @@ public class VideoManager : IVideoService
         await _videoRepository.SaveChangesAsync();
 
         _logger.LogInformation("Video {VideoId} uploaded and saved to DB.", video.Id);
+
+        if (_stateTracker != null)
+        {
+            await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Bekliyor", "Kuyruğa alındı, ses ayrıştırma ve STT sırası bekleniyor...");
+        }
 
         // Publish Event to RabbitMQ
         await _publishEndpoint.Publish(new VideoUploadedEvent
@@ -132,7 +141,25 @@ public class VideoManager : IVideoService
             videolar = await _videoRepository.FindAsync(v => v.EgitimId == egitimId);
         }
 
-        return _mapper.Map<IEnumerable<VideoListDto>>(videolar);
+        var dtos = _mapper.Map<List<VideoListDto>>(videolar);
+        if (_stateTracker != null)
+        {
+            foreach (var dto in dtos)
+            {
+                var health = await _stateTracker.EvaluateItemHealthAsync(dto.Id, "video", dto.IslemDurumu, dto.OlusturmaTarihi);
+                dto.SonAsama = health.SonAsama;
+                dto.Mesaj = health.Mesaj;
+                dto.HataMesaji = health.HataMesaji;
+                dto.Yuzde = health.Yuzde;
+                dto.MevcutAdim = health.MevcutAdim;
+                dto.ToplamAdim = health.ToplamAdim;
+                dto.TakiliMi = health.TakiliMi;
+                dto.TakilmaNedeni = health.TakilmaNedeni;
+                dto.SonGuncellemeTarihi = health.UpdatedAtUtc;
+            }
+        }
+
+        return dtos;
     }
 
     public async Task DeleteVideoAsync(Guid id)
@@ -153,10 +180,35 @@ public class VideoManager : IVideoService
             _egitimRepository.Update(egitim);
         }
 
+        if (_dbContext != null)
+        {
+            var orphanChunks = await _dbContext.VideoChunkDocuments
+                .Where(c => c.VideoId == id)
+                .ToListAsync();
+            if (orphanChunks.Count > 0)
+                _contextRemoveChunks(orphanChunks);
+
+            var orphanTopics = await _dbContext.KaynakKonuCikarimlari
+                .Where(k => k.KaynakId == id)
+                .ToListAsync();
+            if (orphanTopics.Count > 0)
+                _dbContext.KaynakKonuCikarimlari.RemoveRange(orphanTopics);
+        }
+
         _videoRepository.Delete(video);
         await _videoRepository.SaveChangesAsync();
 
+        if (_stateTracker != null)
+        {
+            await _stateTracker.ClearStateAsync(id);
+        }
+
         _logger.LogInformation("Video {VideoId} deleted.", id);
+    }
+
+    private void _contextRemoveChunks(List<VideoChunkDocument> chunks)
+    {
+        _dbContext.VideoChunkDocuments.RemoveRange(chunks);
     }
 
     public async Task RetryVideoAsync(Guid id)
@@ -165,20 +217,52 @@ public class VideoManager : IVideoService
         if (video == null)
             throw new NotFoundException("Video", id);
 
-        // Zaten transkript var mı kontrol et
-        var transcripts = await _transcriptRepository.FindAsync(t => t.VideoId == id);
-        var transcript = System.Linq.Enumerable.FirstOrDefault(transcripts);
-
         if (_cacheService != null)
         {
             await _cacheService.RemoveAsync($"lock:stt:{id}");
         }
 
-        if (transcript != null)
+        VideoSummary? summary = null;
+        if (_dbContext != null)
         {
-            video.IslemDurumu = VideoIslemDurumu.Bekliyor; // Arayüzde tekrar bekliyor görünsün
+            summary = await _dbContext.VideoSummaries.FirstOrDefaultAsync(s => s.VideoId == id);
+        }
+
+        if (summary != null && !string.IsNullOrWhiteSpace(summary.OzetMetni))
+        {
+            video.IslemDurumu = VideoIslemDurumu.OzetlemeTamamlandi;
             _videoRepository.Update(video);
             await _videoRepository.SaveChangesAsync();
+
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Indeksleme", "Özet hazır, vektör indeksleme kuyruğuna alındı...");
+            }
+
+            await _publishEndpoint.Publish(new SummaryReadyEvent
+            {
+                VideoId = video.Id,
+                EgitimId = video.EgitimId,
+                SummaryId = summary.Id
+            });
+
+            _logger.LogInformation("Retry triggered from Index stage (Summary exists) for Video {VideoId}", video.Id);
+            return;
+        }
+
+        var transcripts = await _transcriptRepository.FindAsync(t => t.VideoId == id);
+        var transcript = Enumerable.FirstOrDefault(transcripts);
+
+        if (transcript != null && !string.IsNullOrWhiteSpace(transcript.HamMetin))
+        {
+            video.IslemDurumu = VideoIslemDurumu.SttTamamlandi;
+            _videoRepository.Update(video);
+            await _videoRepository.SaveChangesAsync();
+
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Ozetleme", "Transkript hazır, özetleme kuyruğuna alındı...");
+            }
 
             await _publishEndpoint.Publish(new TranscriptReadyEvent
             {
@@ -186,7 +270,7 @@ public class VideoManager : IVideoService
                 EgitimId = video.EgitimId,
                 TranscriptId = transcript.Id
             });
-            
+
             _logger.LogInformation("Retry triggered from Summarize stage (Transcript exists) for Video {VideoId}", video.Id);
         }
         else
@@ -195,6 +279,11 @@ public class VideoManager : IVideoService
             _videoRepository.Update(video);
             await _videoRepository.SaveChangesAsync();
 
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Bekliyor", "Yeniden başlatıldı, STT kuyruğuna alındı...");
+            }
+
             await _publishEndpoint.Publish(new VideoUploadedEvent
             {
                 VideoId = video.Id,
@@ -202,7 +291,7 @@ public class VideoManager : IVideoService
                 DosyaYolu = video.DosyaYolu,
                 UploadedAt = DateTime.UtcNow
             });
-            
+
             _logger.LogInformation("Retry triggered from beginning for Video {VideoId}", video.Id);
         }
     }
@@ -210,40 +299,10 @@ public class VideoManager : IVideoService
     public async Task ResetQueueForEgitimAsync(Guid egitimId)
     {
         var videos = await _videoRepository.FindAsync(v => v.EgitimId == egitimId && v.IslemDurumu != VideoIslemDurumu.Tamamlandi);
-        
         foreach (var video in videos)
         {
-            if (_cacheService != null)
-            {
-                await _cacheService.RemoveAsync($"lock:stt:{video.Id}");
-            }
-
-            var transcripts = await _transcriptRepository.FindAsync(t => t.VideoId == video.Id);
-            var transcript = System.Linq.Enumerable.FirstOrDefault(transcripts);
-
-            video.IslemDurumu = VideoIslemDurumu.Bekliyor;
-            _videoRepository.Update(video);
-
-            if (transcript != null)
-            {
-                await _publishEndpoint.Publish(new TranscriptReadyEvent
-                {
-                    VideoId = video.Id,
-                    EgitimId = video.EgitimId,
-                    TranscriptId = transcript.Id
-                });
-            }
-            else
-            {
-                await _publishEndpoint.Publish(new VideoUploadedEvent
-                {
-                    VideoId = video.Id,
-                    EgitimId = video.EgitimId,
-                    DosyaYolu = video.DosyaYolu
-                });
-            }
+            await RetryVideoAsync(video.Id);
         }
-        await _videoRepository.SaveChangesAsync();
     }
 
     public async Task UpdateKullanimTuruAsync(Guid id, KaynakKullanimTuru kullanimTuru)

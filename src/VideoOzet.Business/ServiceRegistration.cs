@@ -49,7 +49,7 @@ public static class ServiceRegistration
         });
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.LocalFasterWhisperSttProvider>(client =>
         {
-            client.Timeout = TimeSpan.FromMinutes(30);
+            client.Timeout = TimeSpan.FromHours(2);
         });
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GeminiAudioSttProvider>(client =>
         {
@@ -68,7 +68,10 @@ public static class ServiceRegistration
         else
         {
             services.AddScoped<ISttProvider, VideoOzet.Business.Infrastructure.AI.CompositeSttProvider>();
-            services.AddScoped<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OllamaEmbeddingProvider>();
+            services.AddHttpClient<IEmbeddingProvider, VideoOzet.Business.Infrastructure.AI.OllamaEmbeddingProvider>(client =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(5);
+            });
         }
 
         services.AddScoped<ISynthesisProvider, VideoOzet.Business.Infrastructure.AI.ClaudeSynthesisProvider>();
@@ -78,6 +81,7 @@ public static class ServiceRegistration
         services.AddScoped<ILogService, LogManager>();
         services.AddHttpClient();
         services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
+        services.AddSingleton<IPipelineStateTracker, PipelineStateTracker>();
 
         if (isStandalone)
         {
@@ -107,6 +111,7 @@ public static class ServiceRegistration
                         r.Exponential(3, TimeSpan.FromSeconds(3), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(3));
                         r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>();
                         r.Ignore<System.Text.Json.JsonException>();
+                        r.Ignore<VideoOzet.Business.Exceptions.BusinessException>();
                     });
                     cfg.ConfigureEndpoints(context);
                 });
@@ -130,6 +135,7 @@ public static class ServiceRegistration
                         r.Exponential(5, TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(3), TimeSpan.FromSeconds(5));
                         r.Ignore<Microsoft.EntityFrameworkCore.DbUpdateException>();
                         r.Ignore<System.Text.Json.JsonException>();
+                        r.Ignore<VideoOzet.Business.Exceptions.BusinessException>();
                     });
                     
                     cfg.ConfigureEndpoints(context);

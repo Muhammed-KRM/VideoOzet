@@ -92,13 +92,13 @@ builder.Services.AddBusinessLayer(builder.Configuration, x =>
 
     if (isStandalone)
     {
-        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractTranscriptConsumer>();
-        x.AddConsumer<VideoOzet.Worker.Consumers.SummarizeVideoConsumer>();
-        x.AddConsumer<VideoOzet.Worker.Consumers.IndexSummaryConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractTranscriptConsumer>(typeof(VideoOzet.Worker.Consumers.ExtractTranscriptConsumerDefinition));
+        x.AddConsumer<VideoOzet.Worker.Consumers.SummarizeVideoConsumer>(typeof(VideoOzet.Worker.Consumers.SummarizeVideoConsumerDefinition));
+        x.AddConsumer<VideoOzet.Worker.Consumers.IndexSummaryConsumer>(typeof(VideoOzet.Worker.Consumers.IndexSummaryConsumerDefinition));
         x.AddConsumer<VideoOzet.Worker.Consumers.GenerateContentConsumer>();
         x.AddConsumer<VideoOzet.Worker.Consumers.QualityCheckConsumer>();
-        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractDokumanTextConsumer>();
-        x.AddConsumer<VideoOzet.Worker.Consumers.IndexDokumanConsumer>();
+        x.AddConsumer<VideoOzet.Worker.Consumers.ExtractDokumanTextConsumer>(typeof(VideoOzet.Worker.Consumers.ExtractDokumanTextConsumerDefinition));
+        x.AddConsumer<VideoOzet.Worker.Consumers.IndexDokumanConsumer>(typeof(VideoOzet.Worker.Consumers.IndexDokumanConsumerDefinition));
         x.AddConsumer<VideoOzet.Worker.Consumers.TopicAnalysisConsumer>();
         x.AddConsumer<VideoOzet.Worker.Consumers.TopicAnalysisCompletedConsumer>();
         x.AddConsumer<VideoOzet.Worker.Consumers.SeriesPlanConsumer>();

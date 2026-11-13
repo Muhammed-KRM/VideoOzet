@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using System.Threading.Tasks;
 using VideoOzet.API.Hubs;
 using VideoOzet.Business.Events;
+using VideoOzet.Business.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace VideoOzet.API.Consumers;
@@ -19,17 +20,27 @@ public class PipelineProgressConsumer :
 {
     private readonly IHubContext<PipelineHub> _hubContext;
     private readonly ILogger<PipelineProgressConsumer> _logger;
+    private readonly IPipelineStateTracker? _stateTracker;
 
-    public PipelineProgressConsumer(IHubContext<PipelineHub> hubContext, ILogger<PipelineProgressConsumer> logger)
+    public PipelineProgressConsumer(
+        IHubContext<PipelineHub> hubContext,
+        ILogger<PipelineProgressConsumer> logger,
+        IPipelineStateTracker? stateTracker = null)
     {
         _hubContext = hubContext;
         _logger = logger;
+        _stateTracker = stateTracker;
     }
 
     public async Task Consume(ConsumeContext<PipelineProgressEvent> context)
     {
         var evt = context.Message;
         _logger.LogInformation("Pipeline Progress: {Asama} - {Durum} - {Mesaj}", evt.Asama, evt.Durum, evt.Mesaj);
+
+        if (_stateTracker != null)
+        {
+            await _stateTracker.RecordProgressAsync(evt);
+        }
 
         // Önyüze SignalR üzerinden olayı gönder
         await _hubContext.Clients.All.SendAsync("ReceiveProgress", evt);

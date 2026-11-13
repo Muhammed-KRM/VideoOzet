@@ -58,13 +58,13 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddBusinessLayer(configuration, mt =>
         {
             // Register Consumers
-            mt.AddConsumer<ExtractTranscriptConsumer>();
-            mt.AddConsumer<SummarizeVideoConsumer>();
-            mt.AddConsumer<IndexSummaryConsumer>();
+            mt.AddConsumer<ExtractTranscriptConsumer>(typeof(ExtractTranscriptConsumerDefinition));
+            mt.AddConsumer<SummarizeVideoConsumer>(typeof(SummarizeVideoConsumerDefinition));
+            mt.AddConsumer<IndexSummaryConsumer>(typeof(IndexSummaryConsumerDefinition));
             mt.AddConsumer<GenerateContentConsumer>();
             mt.AddConsumer<QualityCheckConsumer>();
-            mt.AddConsumer<ExtractDokumanTextConsumer>();
-            mt.AddConsumer<IndexDokumanConsumer>();
+            mt.AddConsumer<ExtractDokumanTextConsumer>(typeof(ExtractDokumanTextConsumerDefinition));
+            mt.AddConsumer<IndexDokumanConsumer>(typeof(IndexDokumanConsumerDefinition));
             
             // Phase 3 Consumers
             mt.AddConsumer<TopicAnalysisConsumer>();

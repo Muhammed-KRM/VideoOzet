@@ -31,7 +31,7 @@ public static class ConsumerFailureGuard
     {
         try
         {
-            dbContext.ChangeTracker.Clear();
+            dbContext.ChangeTracker?.Clear();
             await markAction(dbContext, CancellationToken.None);
             await dbContext.SaveChangesAsync(CancellationToken.None);
         }
@@ -41,7 +41,7 @@ public static class ConsumerFailureGuard
         }
         finally
         {
-            dbContext.ChangeTracker.Clear();
+            dbContext.ChangeTracker?.Clear();
         }
     }
 

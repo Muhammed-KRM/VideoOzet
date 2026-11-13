@@ -1,16 +1,18 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using MassTransit;
-using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Infrastructure.AI;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -23,6 +25,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
     private readonly ISttProvider _sttProvider;
     private readonly AppDbContext _dbContext;
     private readonly IPublishEndpoint _publishEndpoint;
+    private readonly IPipelineStateTracker? _stateTracker;
 
     public ExtractTranscriptConsumer(
         ILogger<ExtractTranscriptConsumer> logger,
@@ -31,7 +34,8 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
         IAudioExtractor audioExtractor,
         ISttProvider sttProvider,
         AppDbContext dbContext,
-        IPublishEndpoint publishEndpoint)
+        IPublishEndpoint publishEndpoint,
+        IPipelineStateTracker? stateTracker = null)
     {
         _logger = logger;
         _cacheService = cacheService;
@@ -40,6 +44,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
         _sttProvider = sttProvider;
         _dbContext = dbContext;
         _publishEndpoint = publishEndpoint;
+        _stateTracker = stateTracker;
     }
 
     public async Task Consume(ConsumeContext<VideoUploadedEvent> context)
@@ -47,49 +52,91 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
         var message = context.Message;
         _logger.LogInformation("Received VideoUploadedEvent for VideoId: {VideoId}", message.VideoId);
 
-        // Idempotency check: Ensure we only process this event once
+        // Kısa TTL'li kilit + heartbeat ile otomatik yenileme (consumer çökerse 90 sn sonra kilit otomatik kalkar)
         var lockKey = $"lock:stt:{message.VideoId}";
-        var lockAcquired = await _cacheService.SetIfNotExistsAsync(lockKey, "1", TimeSpan.FromHours(1));
+        var lockAcquired = await _cacheService.SetIfNotExistsAsync(lockKey, "1", TimeSpan.FromSeconds(90));
 
         if (!lockAcquired)
         {
-            _logger.LogWarning("VideoId: {VideoId} is already being processed or has been processed.", message.VideoId);
+            _logger.LogWarning("VideoId: {VideoId} is already actively locked in STT.", message.VideoId);
             return;
         }
 
         var tempVideoPath = string.Empty;
         var tempAudioPath = string.Empty;
         var sttStopwatch = new Stopwatch();
+        await using var heartbeat = _stateTracker?.StartHeartbeat(message.VideoId, "Video İşleme (STT)", lockKey);
 
         try
         {
-            // Update Video Status
-            var video = await _dbContext.Videolar.FindAsync(new object[] { message.VideoId }, context.CancellationToken);
-            if (video == null)
+            var videoEntity = await _dbContext.Videolar.FindAsync(new object[] { message.VideoId }, context.CancellationToken);
+            if (videoEntity == null)
             {
                 _logger.LogError("Video not found in DB: {VideoId}", message.VideoId);
                 return;
             }
 
-            video.IslemDurumu = VideoIslemDurumu.SttBasladi;
+            if (videoEntity.IslemDurumu == VideoIslemDurumu.Tamamlandi)
+            {
+                _logger.LogInformation("VideoId {VideoId} is already completed. Skipping STT.", message.VideoId);
+                return;
+            }
+
+            // Zaten transkript çıkarılmışsa gereksiz GPU STT tekrarını atla ve özetleme aşamasına aktar
+            VideoTranscript? existingReadyTranscript = null;
+            if (_dbContext.VideoTranscripts != null)
+            {
+                existingReadyTranscript = await _dbContext.VideoTranscripts
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.VideoId == message.VideoId, context.CancellationToken);
+            }
+
+            if (existingReadyTranscript != null && !string.IsNullOrWhiteSpace(existingReadyTranscript.HamMetin))
+            {
+                videoEntity.IslemDurumu = VideoIslemDurumu.SttTamamlandi;
+                await _dbContext.SaveChangesAsync(context.CancellationToken);
+
+                var skipEvt = new PipelineProgressEvent
+                {
+                    VideoId = message.VideoId,
+                    EgitimId = videoEntity.EgitimId,
+                    Asama = "Ozetleme",
+                    Durum = "Bekliyor",
+                    Mesaj = "Transkript zaten mevcut, özetleme kuyruğuna aktarılıyor...",
+                    Yuzde = 100
+                };
+                if (_stateTracker != null) await _stateTracker.RecordProgressAsync(skipEvt);
+                await _publishEndpoint.Publish(skipEvt, context.CancellationToken);
+
+                await _publishEndpoint.Publish(new TranscriptReadyEvent
+                {
+                    VideoId = message.VideoId,
+                    EgitimId = message.EgitimId,
+                    TranscriptId = existingReadyTranscript.Id
+                }, context.CancellationToken);
+                return;
+            }
+
+            videoEntity.IslemDurumu = VideoIslemDurumu.SttBasladi;
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
-            await _publishEndpoint.Publish(new PipelineProgressEvent
+            var startEvt = new PipelineProgressEvent
             {
                 VideoId = message.VideoId,
-                EgitimId = video.EgitimId,
+                EgitimId = videoEntity.EgitimId,
                 Asama = "Video İşleme (STT)",
                 Durum = VideoIslemDurumu.SttBasladi.ToString(),
                 Mesaj = "Videodan ses çıkarılıyor ve metne dökülüyor...",
                 Yuzde = 5,
                 MevcutAdim = 0,
                 ToplamAdim = 1
-            }, context.CancellationToken);
+            };
+            if (_stateTracker != null) await _stateTracker.RecordProgressAsync(startEvt);
+            await _publishEndpoint.Publish(startEvt, context.CancellationToken);
 
-            // Create temp paths
             var tempDir = Path.Combine(Path.GetTempPath(), "VideoOzet");
             Directory.CreateDirectory(tempDir);
-            
+
             var safeVideoName = $"{message.VideoId}{Path.GetExtension(message.DosyaYolu)}";
             tempVideoPath = Path.Combine(tempDir, safeVideoName);
             tempAudioPath = Path.Combine(tempDir, $"{message.VideoId}.mp3");
@@ -98,7 +145,6 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             _logger.LogInformation("Downloading video from storage: {DosyaYolu}", message.DosyaYolu);
             using (var fileStream = new FileStream(tempVideoPath, FileMode.Create, FileAccess.Write))
             {
-                // MinioFileService implementation of DownloadFileAsync returns a Stream, so we copy it.
                 var storageStream = await _fileStorageService.DownloadFileAsync(message.DosyaYolu);
                 await storageStream.CopyToAsync(fileStream, context.CancellationToken);
                 storageStream.Dispose();
@@ -109,34 +155,53 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             var extracted = await _audioExtractor.ExtractAudioAsync(tempVideoPath, tempAudioPath, context.CancellationToken);
             if (!extracted)
             {
-                throw new Exception("FFmpeg audio extraction failed.");
+                throw new Exception("FFmpeg ses ayrıştırma işlemi başarısız oldu.");
             }
 
             // 3. Transcribe Audio using STT Provider
             _logger.LogInformation("Sending audio to STT Provider");
             sttStopwatch.Start();
 
+            long lastProgressPublishTicks = 0;
             if (_sttProvider is ISupportsProgress progressiveProvider)
             {
                 progressiveProvider.OnProgress = (done, total) =>
                 {
-                    var percent = total > 0 ? (int)Math.Round((double)done / total * 100) : 0;
-                    string progressMsg = $"Transkript çıkarılıyor: {done}/{total} parça (%{percent})";
+                    var nowTicks = DateTime.UtcNow.Ticks;
+                    if (done < total && nowTicks - Interlocked.Read(ref lastProgressPublishTicks) < TimeSpan.FromSeconds(2).Ticks)
+                    {
+                        return;
+                    }
+                    Interlocked.Exchange(ref lastProgressPublishTicks, nowTicks);
 
-                    _ = _publishEndpoint.Publish(new PipelineProgressEvent
+                    var percent = total > 0 ? Math.Clamp((int)Math.Round((double)done / total * 100), 0, 99) : 0;
+                    if (done >= total && total > 0) percent = 100;
+                    string progressMsg = $"Transkript çıkarılıyor: {done}/{total} sn (%{percent})";
+
+                    var progEvt = new PipelineProgressEvent
                     {
                         VideoId = message.VideoId,
-                        EgitimId = video.EgitimId,
+                        EgitimId = videoEntity.EgitimId,
                         Asama = "STT",
                         Durum = VideoIslemDurumu.SttBasladi.ToString(),
                         Mesaj = progressMsg,
                         Yuzde = percent,
                         MevcutAdim = done,
                         ToplamAdim = total
+                    };
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (_stateTracker != null) await _stateTracker.RecordProgressAsync(progEvt);
+                            await _publishEndpoint.Publish(progEvt);
+                        }
+                        catch { }
                     });
                 };
             }
-            
+
             string transcriptText;
             using (var audioStream = new FileStream(tempAudioPath, FileMode.Open, FileAccess.Read))
             {
@@ -146,7 +211,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
 
             if (string.IsNullOrWhiteSpace(transcriptText))
             {
-                throw new Exception("STT Provider returned empty transcript.");
+                throw new Exception("STT sağlayıcısı boş transkript döndürdü.");
             }
 
             // 4. Save Transcript to Database (Upsert)
@@ -161,6 +226,8 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 else if (l.Length >= 2) detectedLang = l.Substring(0, 2);
             }
 
+            var usedModel = (_sttProvider as CompositeSttProvider)?.LastUsedModel ?? "faster-whisper-large-v3-turbo";
+
             var existingTranscript = await _dbContext.VideoTranscripts
                 .FirstOrDefaultAsync(t => t.VideoId == message.VideoId, context.CancellationToken);
 
@@ -170,7 +237,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 existingTranscript.HamMetin = transcriptText;
                 existingTranscript.KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
                 existingTranscript.Dil = detectedLang;
-                existingTranscript.SttModel = "gemini-3.8-flash-tiered";
+                existingTranscript.SttModel = usedModel;
                 existingTranscript.SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds;
                 existingTranscript.OlusturmaTarihi = DateTime.UtcNow;
                 transcript = existingTranscript;
@@ -183,27 +250,29 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                     HamMetin = transcriptText,
                     KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length,
                     Dil = detectedLang,
-                    SttModel = "gemini-3.8-flash-tiered",
+                    SttModel = usedModel,
                     SttSuresiMs = (int)sttStopwatch.ElapsedMilliseconds,
                     OlusturmaTarihi = DateTime.UtcNow
                 };
                 _dbContext.VideoTranscripts.Add(transcript);
             }
-            
-            video.IslemDurumu = VideoIslemDurumu.SttTamamlandi; // STT bitti
+
+            videoEntity.IslemDurumu = VideoIslemDurumu.SttTamamlandi;
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
-            await _publishEndpoint.Publish(new PipelineProgressEvent
+            var doneEvt = new PipelineProgressEvent
             {
                 VideoId = message.VideoId,
-                EgitimId = video.EgitimId,
+                EgitimId = videoEntity.EgitimId,
                 Asama = "Video İşleme (STT)",
                 Durum = VideoIslemDurumu.SttTamamlandi.ToString(),
-                Mesaj = "Videodan metin çıkarma tamamlandı.",
+                Mesaj = "Videodan metin çıkarma tamamlandı, özetleme kuyruğuna alındı.",
                 Yuzde = 100,
                 MevcutAdim = 1,
                 ToplamAdim = 1
-            }, context.CancellationToken);
+            };
+            if (_stateTracker != null) await _stateTracker.RecordProgressAsync(doneEvt);
+            await _publishEndpoint.Publish(doneEvt, context.CancellationToken);
 
             _logger.LogInformation("Transcript saved successfully for VideoId: {VideoId}", message.VideoId);
 
@@ -214,41 +283,68 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 EgitimId = message.EgitimId,
                 TranscriptId = transcript.Id
             }, context.CancellationToken);
-
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing VideoUploadedEvent for VideoId: {VideoId}", message.VideoId);
-            
-            // Revert status to Error
-            var video = await _dbContext.Videolar.FindAsync(new object[] { message.VideoId }, context.CancellationToken);
-            if (video != null)
+
+            await ConsumerFailureGuard.TryPersistFailureStateAsync(_dbContext, _logger, async (db, ct) =>
             {
-                video.IslemDurumu = VideoIslemDurumu.Hata;
-                await _dbContext.SaveChangesAsync(context.CancellationToken);
+                var video = await db.Videolar.FindAsync(new object[] { message.VideoId }, ct);
+                if (video != null)
+                {
+                    video.IslemDurumu = VideoIslemDurumu.Hata;
+                }
+            });
+
+            var errMessage = $"STT işlemi sırasında hata oluştu: {ex.Message}";
+            if (_stateTracker != null)
+            {
+                await ConsumerFailureGuard.TryRunAsync(_logger, "RecordErrorAsync",
+                    () => _stateTracker.RecordErrorAsync(message.VideoId, message.EgitimId, "Video İşleme (STT)", errMessage));
             }
 
-            await _publishEndpoint.Publish(new PipelineProgressEvent
-            {
-                VideoId = message.VideoId,
-                Asama = "Video İşleme (STT)",
-                Durum = VideoIslemDurumu.Hata.ToString(),
-                Mesaj = $"STT işlemi sırasında hata oluştu: {ex.Message}"
-            }, context.CancellationToken);
+            await ConsumerFailureGuard.TryRunAsync(_logger, "PublishSttError", () =>
+                _publishEndpoint.Publish(new PipelineProgressEvent
+                {
+                    VideoId = message.VideoId,
+                    EgitimId = message.EgitimId,
+                    Asama = "Video İşleme (STT)",
+                    Durum = VideoIslemDurumu.Hata.ToString(),
+                    Mesaj = errMessage
+                }, CancellationToken.None));
 
-            // Remove lock so it can be retried later if desired
-            await _cacheService.RemoveAsync(lockKey);
-            
-            throw; // Re-throw to let MassTransit handle retries or dead-letter queue
+            throw;
         }
         finally
         {
-            // Cleanup temp files
+            await _cacheService.RemoveAsync(lockKey);
+
             if (!string.IsNullOrEmpty(tempVideoPath) && File.Exists(tempVideoPath))
-                File.Delete(tempVideoPath);
-                
+            {
+                try { File.Delete(tempVideoPath); } catch { }
+            }
+
             if (!string.IsNullOrEmpty(tempAudioPath) && File.Exists(tempAudioPath))
-                File.Delete(tempAudioPath);
+            {
+                try { File.Delete(tempAudioPath); } catch { }
+            }
         }
+    }
+}
+
+public class ExtractTranscriptConsumerDefinition : ConsumerDefinition<ExtractTranscriptConsumer>
+{
+    public ExtractTranscriptConsumerDefinition()
+    {
+        ConcurrentMessageLimit = 1;
+    }
+
+    protected override void ConfigureConsumer(
+        IReceiveEndpointConfigurator endpointConfigurator,
+        IConsumerConfigurator<ExtractTranscriptConsumer> consumerConfigurator,
+        IRegistrationContext context)
+    {
+        endpointConfigurator.PrefetchCount = 1;
     }
 }

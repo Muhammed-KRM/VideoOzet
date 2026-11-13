@@ -67,14 +67,12 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
 
         try
         {
-            progressCallback?.Invoke(1, 4);
             _logger.LogInformation("Saving audio stream to temp file for local Whisper: {TempFile}", tempFile);
             using (var fs = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 await audioStream.CopyToAsync(fs, cancellationToken);
             }
 
-            progressCallback?.Invoke(2, 4);
             _logger.LogInformation("Sending transcription request to local Faster-Whisper service at {BaseUrl}...", baseUrl);
 
             var payload = new
@@ -92,7 +90,7 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
             );
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromMinutes(30));
+            cts.CancelAfter(TimeSpan.FromHours(2));
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/transcribe")
             {

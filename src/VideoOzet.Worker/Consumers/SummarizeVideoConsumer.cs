@@ -1,13 +1,15 @@
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
-using System.Linq;
-using Microsoft.EntityFrameworkCore;
-using System;
+using VideoOzet.Data.Enums;
+using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
 
@@ -17,14 +19,21 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
     private readonly AppDbContext _context;
     private readonly IGeminiProvider _geminiProvider;
     private readonly IPublishEndpoint _publishEndpoint;
-    private static readonly System.Threading.SemaphoreSlim _throttle = new System.Threading.SemaphoreSlim(2, 2);
+    private readonly IPipelineStateTracker? _stateTracker;
+    private static readonly SemaphoreSlim _throttle = new(2, 2);
 
-    public SummarizeVideoConsumer(ILogger<SummarizeVideoConsumer> logger, AppDbContext context, IGeminiProvider geminiProvider, IPublishEndpoint publishEndpoint)
+    public SummarizeVideoConsumer(
+        ILogger<SummarizeVideoConsumer> logger,
+        AppDbContext context,
+        IGeminiProvider geminiProvider,
+        IPublishEndpoint publishEndpoint,
+        IPipelineStateTracker? stateTracker = null)
     {
         _logger = logger;
         _context = context;
         _geminiProvider = geminiProvider;
         _publishEndpoint = publishEndpoint;
+        _stateTracker = stateTracker;
     }
 
     public async Task Consume(ConsumeContext<TranscriptReadyEvent> context)
@@ -32,43 +41,56 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
         var evt = context.Message;
         _logger.LogInformation("SummarizeVideoConsumer started for Video: {VideoId}", evt.VideoId);
 
+        await using var heartbeat = _stateTracker?.StartHeartbeat(evt.VideoId, "Ozetleme");
+
         int maxRetries = 4;
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
             try
             {
-                // Kuyruğa girdiğini bildir
-                await _publishEndpoint.Publish(new PipelineProgressEvent
+                var queuedEvt = new PipelineProgressEvent
                 {
                     VideoId = evt.VideoId,
                     EgitimId = evt.EgitimId,
                     Asama = "Ozetleme",
                     Durum = "Bekliyor",
-                    Mesaj = attempt > 1 
-                        ? $"Yapay zeka tekrar deniyor ({attempt}/{maxRetries}). Sıra bekleniyor..." 
+                    Mesaj = attempt > 1
+                        ? $"Yapay zeka tekrar deniyor ({attempt}/{maxRetries}). Sıra bekleniyor..."
                         : "Yapay zeka kuyruğuna girdi, sıra bekleniyor..."
-                });
+                };
+                if (_stateTracker != null) await _stateTracker.RecordProgressAsync(queuedEvt);
+                await _publishEndpoint.Publish(queuedEvt, context.CancellationToken);
 
-                var transcript = await _context.VideoTranscripts.FirstOrDefaultAsync(t => t.Id == evt.TranscriptId);
+                var transcript = await _context.VideoTranscripts.FirstOrDefaultAsync(t => t.Id == evt.TranscriptId, context.CancellationToken);
                 if (transcript == null)
                 {
                     _logger.LogWarning("Transcript not found: {TranscriptId}", evt.TranscriptId);
                     return;
                 }
 
+                var videoEntity = _context.Videolar != null
+                    ? await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken)
+                    : null;
+                if (videoEntity != null && videoEntity.IslemDurumu != VideoIslemDurumu.Tamamlandi)
+                {
+                    videoEntity.IslemDurumu = VideoIslemDurumu.OzetlemeBasladi;
+                }
+
                 string jsonResponse;
-                await _throttle.WaitAsync(); // Sadece 2 tanesi geçebilir
+                await _throttle.WaitAsync(context.CancellationToken);
                 try
                 {
-                    // Sıra geldi, işlemi başlat
-                    await _publishEndpoint.Publish(new PipelineProgressEvent
+                    var startEvt = new PipelineProgressEvent
                     {
                         VideoId = evt.VideoId,
                         EgitimId = evt.EgitimId,
                         Asama = "Ozetleme",
                         Durum = "Basladi",
-                        Mesaj = "Sıra geldi, yapay zeka transkripti özetliyor..."
-                    });
+                        Mesaj = "Sıra geldi, yapay zeka transkripti özetliyor...",
+                        Yuzde = 70
+                    };
+                    if (_stateTracker != null) await _stateTracker.RecordProgressAsync(startEvt);
+                    await _publishEndpoint.Publish(startEvt, context.CancellationToken);
 
                     _logger.LogInformation("Calling Gemini API for Video: {VideoId}, transcript length: {Length}", evt.VideoId, transcript.HamMetin?.Length ?? 0);
                     jsonResponse = await _geminiProvider.SummarizeAsync(transcript.HamMetin);
@@ -78,7 +100,7 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 {
                     _throttle.Release();
                 }
-                
+
                 string ozetMetni = jsonResponse;
                 string? cevrilmisOzetMetni = null;
                 string detectedLang = transcript.Dil ?? "tr";
@@ -90,7 +112,7 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     var parsed = VideoOzet.Business.Helpers.LlmJson.Deserialize<SummaryLlmResponse>(jsonResponse);
                     if (parsed != null)
                     {
-                        ozetMetni = parsed.OzetMetni ?? jsonResponse; // Fallback
+                        ozetMetni = parsed.OzetMetni ?? jsonResponse;
                         if (!string.IsNullOrWhiteSpace(parsed.Dil))
                         {
                             detectedLang = parsed.Dil.Trim().ToLowerInvariant();
@@ -104,7 +126,6 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     _logger.LogWarning(ex, "LLM json parse failed. Using raw response as summary. Raw: {Raw}", jsonResponse);
                 }
 
-                // Normalize language code
                 if (detectedLang.Length > 2 && (detectedLang.StartsWith("en") || detectedLang == "english")) detectedLang = "en";
                 else if (detectedLang.Length > 2 && (detectedLang.StartsWith("de") || detectedLang == "german")) detectedLang = "de";
                 else if (detectedLang.Length > 2 && (detectedLang.StartsWith("tr") || detectedLang == "turkish")) detectedLang = "tr";
@@ -112,19 +133,21 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
 
                 transcript.Dil = detectedLang;
 
-                // Eğer kaynak yabancı dildeyse ("tr" değilse), terim korumalı Türkçe çeviri hattını çalıştır
                 if (!detectedLang.Equals("tr", StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation("Video {VideoId} yabancı dilde tespit edildi ({Lang}). Terim korumalı Türkçe çeviri başlatılıyor...", evt.VideoId, detectedLang);
-                    
-                    await _publishEndpoint.Publish(new PipelineProgressEvent
+
+                    var trEvt = new PipelineProgressEvent
                     {
                         VideoId = evt.VideoId,
                         EgitimId = evt.EgitimId,
                         Asama = "Ceviri",
                         Durum = "Basladi",
-                        Mesaj = $"Yabancı içerik ({detectedLang.ToUpperInvariant()}) tespit edildi. Terim korumalı Türkçe çevirisi hazırlanıyor..."
-                    });
+                        Mesaj = $"Yabancı içerik ({detectedLang.ToUpperInvariant()}) tespit edildi. Terim korumalı Türkçe çevirisi hazırlanıyor...",
+                        Yuzde = 80
+                    };
+                    if (_stateTracker != null) await _stateTracker.RecordProgressAsync(trEvt);
+                    await _publishEndpoint.Publish(trEvt, context.CancellationToken);
 
                     cevrilmisOzetMetni = await _geminiProvider.TranslateDistilledSummaryToTurkishAsync(ozetMetni, detectedLang);
                     _logger.LogInformation("Video {VideoId} Türkçe çevirisi tamamlandı. Çeviri uzunluğu: {Length}", evt.VideoId, cevrilmisOzetMetni?.Length ?? 0);
@@ -153,12 +176,17 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                         OzetMetni = ozetMetni,
                         CevrilmisOzetMetni = cevrilmisOzetMetni,
                         OrijinalDil = detectedLang,
-                        KonuBasliklari = konuBasliklariJson, 
+                        KonuBasliklari = konuBasliklariJson,
                         KonuEtiketleri = konuEtiketleriJson,
                         LlmModel = string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName) ? "gemini-3.8-flash-tiered" : _geminiProvider.ActiveModelName,
                         OlusturmaTarihi = DateTime.UtcNow
                     };
                     _context.VideoSummaries.Add(summary);
+                }
+
+                if (videoEntity != null && videoEntity.IslemDurumu != VideoIslemDurumu.Tamamlandi)
+                {
+                    videoEntity.IslemDurumu = VideoIslemDurumu.OzetlemeTamamlandi;
                 }
 
                 await _context.SaveChangesAsync(context.CancellationToken);
@@ -170,70 +198,76 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                     VideoId = evt.VideoId,
                     EgitimId = evt.EgitimId,
                     SummaryId = summary.Id
-                });
+                }, context.CancellationToken);
 
-                await _publishEndpoint.Publish(new PipelineProgressEvent
+                var doneEvt = new PipelineProgressEvent
                 {
                     VideoId = evt.VideoId,
                     EgitimId = evt.EgitimId,
                     Asama = "Ozetleme",
                     Durum = "Tamamlandi",
-                    Mesaj = "Özetleme tamamlandı, indekslemeye geçiliyor."
-                });
-                
-                return; // Başarılı, çık
+                    Mesaj = "Özetleme tamamlandı, vektör indekslemeye geçiliyor.",
+                    Yuzde = 85
+                };
+                if (_stateTracker != null) await _stateTracker.RecordProgressAsync(doneEvt);
+                await _publishEndpoint.Publish(doneEvt, context.CancellationToken);
+
+                return;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "SummarizeVideo HATA for VideoId: {VideoId}. Attempt: {Attempt}/{MaxRetries}. Exception: {ExType}: {ExMsg}", 
+                _logger.LogError(ex, "SummarizeVideo HATA for VideoId: {VideoId}. Attempt: {Attempt}/{MaxRetries}. Exception: {ExType}: {ExMsg}",
                     evt.VideoId, attempt, maxRetries, ex.GetType().Name, ex.Message);
-                
+
                 if (attempt == maxRetries)
                 {
-                    // Son deneme de başarısız, veritabanında Hata olarak işaretle
-                    try
+                    await ConsumerFailureGuard.TryPersistFailureStateAsync(_context, _logger, async (db, ct) =>
                     {
-                        var video = await _context.Videolar.FindAsync(new object[] { evt.VideoId });
+                        var video = await db.Videolar.FindAsync(new object[] { evt.VideoId }, ct);
                         if (video != null)
                         {
-                            video.IslemDurumu = VideoOzet.Data.Enums.VideoIslemDurumu.Hata;
-                            await _context.SaveChangesAsync();
+                            video.IslemDurumu = VideoIslemDurumu.Hata;
                         }
-                    }
-                    catch (Exception dbEx)
+                    });
+
+                    var errMessage = $"Özetleme hatası: {ex.Message}";
+                    if (_stateTracker != null)
                     {
-                        _logger.LogError(dbEx, "DB update for Hata status also failed for VideoId: {VideoId}", evt.VideoId);
+                        await ConsumerFailureGuard.TryRunAsync(_logger, "RecordErrorAsync",
+                            () => _stateTracker.RecordErrorAsync(evt.VideoId, evt.EgitimId, "Ozetleme", errMessage));
                     }
 
-                    await _publishEndpoint.Publish(new PipelineProgressEvent
-                    {
-                        VideoId = evt.VideoId,
-                        EgitimId = evt.EgitimId,
-                        Asama = "Ozetleme",
-                        Durum = "Hata",
-                        Mesaj = $"Özetleme hatası: {ex.GetType().Name}: {ex.Message}"
-                    });
-                    
-                    throw; // MassTransit error kuyruğuna atsın
+                    await ConsumerFailureGuard.TryRunAsync(_logger, "PublishSummarizeError", () =>
+                        _publishEndpoint.Publish(new PipelineProgressEvent
+                        {
+                            VideoId = evt.VideoId,
+                            EgitimId = evt.EgitimId,
+                            Asama = "Ozetleme",
+                            Durum = "Hata",
+                            Mesaj = errMessage
+                        }, CancellationToken.None));
+
+                    throw;
                 }
 
-                // Hız sınırı veya hata için geri sayımlı bekleme ve arayüze anlık bildirim
-                int waitSeconds = 30 * attempt; // Her denemede daha uzun bekle
+                int waitSeconds = 30 * attempt;
                 _logger.LogInformation("Waiting {WaitSeconds}s before retry for VideoId: {VideoId}", waitSeconds, evt.VideoId);
-                
+
                 for (int i = waitSeconds; i > 0; i -= 5)
                 {
-                    await _publishEndpoint.Publish(new PipelineProgressEvent
+                    var waitEvt = new PipelineProgressEvent
                     {
                         VideoId = evt.VideoId,
                         EgitimId = evt.EgitimId,
                         Asama = "Ozetleme",
                         Durum = "Bekliyor",
-                        Mesaj = $"Hata (Limit): {i} saniye sonra devam edilecek..."
-                    });
-                    
+                        Mesaj = $"Hata (Limit): {i} saniye sonra tekrar denenecek..."
+                    };
+                    if (_stateTracker != null) await _stateTracker.RecordProgressAsync(waitEvt);
+                    await _publishEndpoint.Publish(waitEvt, context.CancellationToken);
+
                     int delay = Math.Min(5, i);
-                    await Task.Delay(TimeSpan.FromSeconds(delay));
+                    await Task.Delay(TimeSpan.FromSeconds(delay), context.CancellationToken);
                 }
             }
         }
@@ -242,8 +276,24 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
     private class SummaryLlmResponse
     {
         public string? Dil { get; set; }
-        public string OzetMetni { get; set; }
-        public string[] KonuBasliklari { get; set; }
-        public string[] KonuEtiketleri { get; set; }
+        public string OzetMetni { get; set; } = string.Empty;
+        public string[]? KonuBasliklari { get; set; }
+        public string[]? KonuEtiketleri { get; set; }
+    }
+}
+
+public class SummarizeVideoConsumerDefinition : ConsumerDefinition<SummarizeVideoConsumer>
+{
+    public SummarizeVideoConsumerDefinition()
+    {
+        ConcurrentMessageLimit = 2;
+    }
+
+    protected override void ConfigureConsumer(
+        IReceiveEndpointConfigurator endpointConfigurator,
+        IConsumerConfigurator<SummarizeVideoConsumer> consumerConfigurator,
+        IRegistrationContext context)
+    {
+        endpointConfigurator.PrefetchCount = 2;
     }
 }
