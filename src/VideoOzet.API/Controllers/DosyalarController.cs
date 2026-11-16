@@ -27,7 +27,7 @@ public class DosyalarController : ControllerBase
     [HttpPost("upload")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue, ValueLengthLimit = int.MaxValue)]
-    public async Task<IActionResult> UploadFile(Guid egitimId, IFormFile file, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
+    public async Task<IActionResult> UploadFile(Guid egitimId, IFormFile file, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans, [FromForm] IndekslemeTuru indekslemeTuru = IndekslemeTuru.HamKaynak)
     {
         if (file == null || file.Length == 0)
             return BadRequest("Dosya yüklenemedi.");
@@ -44,14 +44,15 @@ public class DosyalarController : ControllerBase
                 FileName = file.FileName,
                 ContentType = file.ContentType,
                 FileStream = stream,
-                KullanimTuru = kullanimTuru
+                KullanimTuru = kullanimTuru,
+                IndekslemeTuru = indekslemeTuru
             };
             var result = await _videoService.UploadVideoAsync(dto);
             return Ok(new { tip = "video", id = result.Id });
         }
         else if (ext == ".pdf" || ext == ".docx" || ext == ".pptx" || ext == ".txt")
         {
-            var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru);
+            var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru, indekslemeTuru);
             return Ok(new { tip = "dokuman", id = result });
         }
         else
@@ -63,7 +64,7 @@ public class DosyalarController : ControllerBase
     [HttpPost("upload-batch")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue, ValueLengthLimit = int.MaxValue)]
-    public async Task<IActionResult> UploadBatch(Guid egitimId, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
+    public async Task<IActionResult> UploadBatch(Guid egitimId, [FromForm] KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans, [FromForm] IndekslemeTuru indekslemeTuru = IndekslemeTuru.HamKaynak)
     {
         var files = Request.Form.Files;
         if (files == null || files.Count == 0)
@@ -86,14 +87,15 @@ public class DosyalarController : ControllerBase
                     FileName = file.FileName,
                     ContentType = file.ContentType,
                     FileStream = stream,
-                    KullanimTuru = kullanimTuru
+                    KullanimTuru = kullanimTuru,
+                    IndekslemeTuru = indekslemeTuru
                 };
                 var result = await _videoService.UploadVideoAsync(dto);
                 results.Add(new { tip = "video", fileName = file.FileName, id = result.Id });
             }
             else if (ext == ".pdf" || ext == ".docx" || ext == ".pptx" || ext == ".txt")
             {
-                var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru);
+                var result = await _dokumanService.UploadDokumanAsync(egitimId, file.FileName, file.ContentType, stream, kullanimTuru, indekslemeTuru);
                 results.Add(new { tip = "dokuman", fileName = file.FileName, id = result });
             }
         }
@@ -180,6 +182,24 @@ public class DosyalarController : ControllerBase
             message = total > 0
                 ? $"{total} sorunlu dosya ({recoveredVideos} video, {recoveredDocs} doküman) kaldığı aşamadan yeniden sıraya alındı."
                 : "Kurtarılacak takılı veya hatalı dosya bulunamadı."
+        });
+    }
+
+    [HttpPost("yeniden-indeksle")]
+    public async Task<IActionResult> ReindexAll(Guid egitimId)
+    {
+        var queuedDocs = await _dokumanService.ReindexAllByEgitimIdAsync(egitimId);
+        var queuedVideos = await _videoService.ReindexAllByEgitimIdAsync(egitimId);
+        var total = queuedDocs + queuedVideos;
+
+        return Accepted(new
+        {
+            kuyrugaAlinanToplam = total,
+            kuyrugaAlinanDokumanSayisi = queuedDocs,
+            kuyrugaAlinanVideoSayisi = queuedVideos,
+            message = total > 0
+                ? $"{total} kaynak ({queuedDocs} doküman, {queuedVideos} video) ham metin / zaman damgalı transkriptle yeniden indekslenmek üzere sıraya alındı."
+                : "Yeniden indekslenebilecek hazır ham metin veya transkript bulunamadı."
         });
     }
 

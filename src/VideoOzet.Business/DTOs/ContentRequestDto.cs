@@ -45,12 +45,25 @@ public class ReviseContentRequestDto
     public string HedefAlan { get; set; } = "hepsi"; // "hepsi", "ozet", "plan"
 }
 
+public class UsedSourceChunkDto
+{
+    public string KanitKodu { get; set; } = string.Empty;
+    public Guid ChunkId { get; set; }
+    public string KaynakTipi { get; set; } = "Dokuman";
+    public string KaynakBaslik { get; set; } = string.Empty;
+    public string? BolumBasligi { get; set; }
+    public string? ZamanAraligi { get; set; }
+    public string KaynakDil { get; set; } = "tr";
+    public string KullanimTuru { get; set; } = "DogrudanReferans";
+}
+
 public class GeneratedContentDto
 {
     public Guid Id { get; set; }
     public string ArastirmaOzeti { get; set; } = string.Empty;
     public string VideoPlani { get; set; } = string.Empty;
     public string KullanilanKaynaklar { get; set; } = string.Empty;
+    public List<UsedSourceChunkDto> KullanilanKaynakDetaylari { get; set; } = new();
     public string LlmModel { get; set; } = string.Empty;
     public int TokenKullanimi { get; set; }
     public int UretimSuresiMs { get; set; }

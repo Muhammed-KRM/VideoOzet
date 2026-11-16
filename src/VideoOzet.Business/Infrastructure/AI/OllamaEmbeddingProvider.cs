@@ -25,8 +25,12 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
         HttpClient? httpClient = null)
     {
         _logger = logger;
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        _ollamaUrl = configuration["OLLAMA_URL"] ?? configuration["Ollama:Url"] ?? "http://localhost:11435";
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        if (_httpClient.Timeout < TimeSpan.FromMinutes(2))
+        {
+            try { _httpClient.Timeout = TimeSpan.FromMinutes(3); } catch { }
+        }
+        _ollamaUrl = configuration["OLLAMA_URL"] ?? configuration["Ollama:Url"] ?? configuration["Ollama:BaseUrl"] ?? "http://localhost:11435";
         _defaultModel = configuration["OLLAMA_EMBED_MODEL"] ?? "bge-m3";
         _isStandalone = string.Equals(configuration["StandaloneMode"], "true", StringComparison.OrdinalIgnoreCase);
     }
@@ -79,13 +83,23 @@ public class OllamaEmbeddingProvider : IEmbeddingProvider
                 return result;
             }
 
-            _logger.LogWarning("Ollama embed yanıtında 'embeddings' bulunamadı.");
-            return texts.Select(_ => new float[1024]).ToList();
+            _logger.LogError("Ollama embed yanıtında geçerli 'embeddings' dizisi bulunamadı (Model: {Model}).", model);
+            if (_isStandalone)
+            {
+                return texts.Select(CreateLocalFallbackEmbedding).ToList();
+            }
+            throw new InvalidOperationException($"Ollama embed yanıtında 'embeddings' bulunamadı (Model: {model}).");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Ollama servisine ulaşılamadı (Model: {Model}), yerel metin vektör yedeği kullanılıyor: {Message}", model, ex.Message);
-            return texts.Select(CreateLocalFallbackEmbedding).ToList();
+            if (_isStandalone)
+            {
+                _logger.LogWarning(ex, "Standalone modda Ollama servisine ulaşılamadı (Model: {Model}), yerel vektör yedeği kullanılıyor.", model);
+                return texts.Select(CreateLocalFallbackEmbedding).ToList();
+            }
+
+            _logger.LogError(ex, "Ollama embedding üretimi başarısız (Model: {Model}): {Message}", model, ex.Message);
+            throw new InvalidOperationException($"Ollama embedding servisi başarısız oldu (Model: {model}): {ex.Message}", ex);
         }
     }
 

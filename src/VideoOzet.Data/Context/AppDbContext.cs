@@ -33,26 +33,25 @@ public class AppDbContext : DbContext
     public virtual DbSet<SeriBolum> SeriBolumler { get; set; } = null!;
     public virtual DbSet<BolumRevizyonu> BolumRevizyonlari { get; set; } = null!;
     public virtual DbSet<KaynakKonuCikarimi> KaynakKonuCikarimlari { get; set; } = null!;
+    public virtual DbSet<StudioQaMessage> StudioQaMessages { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         
-        // Add pgvector extension if using PostgreSQL
+        // Add pgvector and pg_trgm extensions if using PostgreSQL
         if (Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
             modelBuilder.HasPostgresExtension("vector");
+            modelBuilder.HasPostgresExtension("pg_trgm");
         }
         // Apply all configurations in this assembly
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
         ConfigureClientGeneratedGuidKeys(modelBuilder);
 
-        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
-        {
-            modelBuilder.Ignore<VideoChunkDocument>();
-        }
-        else if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory" ||
+            Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
             ConfigureSqliteCompatibility(modelBuilder);
         }

@@ -24,9 +24,10 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   pollInterval: any;
 
   revizyonTalimati = '';
-  hedefAlan: 'VideoPlani' | 'ArastirmaOzeti' | 'Hepsi' = 'VideoPlani';
+  hedefAlan: 'VideoPlani' | 'ArastirmaOzeti' | 'Hepsi' = 'Hepsi';
   seciliRevizyonId: string | null = null;
   isRevising = false;
+  isCancelling = false;
   
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -105,6 +106,26 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
         // Polling'i durdurmuyoruz, geçici ağ gecikmelerinde kurtarsın
       }
     });
+  }
+
+  getBaglamSorunlari(): string[] {
+    const raw = this.episode?.baglamSorunlariJson;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map((x: any) => String(x));
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map((x: any) => typeof x === 'string' ? x : (x?.mesaj || x?.aciklama || JSON.stringify(x)));
+        if (typeof parsed === 'object' && parsed !== null) {
+          return [parsed.mesaj || parsed.aciklama || JSON.stringify(parsed)];
+        }
+      } catch {
+        return [trimmed];
+      }
+    }
+    return [];
   }
 
   startPolling() {
@@ -190,6 +211,29 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
         console.error('Yeniden üretim başarısız', err);
         this.isRevising = false;
         alert('Yeniden üretim isteği başarısız oldu.');
+      }
+    });
+  }
+
+  onReQcCompleted() {
+    this.loadData();
+  }
+
+  cancelProcess() {
+    if (!this.contentRequestId || this.isCancelling) return;
+    if (!confirm('Devam eden bölüm üretim/revizyon işlemini durdurmak istediğinize emin misiniz?')) return;
+
+    this.isCancelling = true;
+    this.apiService.cancelSeriesProcess(this.contentRequestId).subscribe({
+      next: () => {
+        this.isCancelling = false;
+        this.isRevising = false;
+        this.loadData();
+      },
+      error: (err) => {
+        console.error('İşlem durdurma hatası', err);
+        this.isCancelling = false;
+        alert('İşlem durdurulamadı: ' + (err.error?.mesaj || err.message));
       }
     });
   }

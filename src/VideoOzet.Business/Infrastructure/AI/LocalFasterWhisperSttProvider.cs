@@ -19,6 +19,7 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
 
     public Action<int, int>? OnProgress { get; set; }
     public string? LastDetectedLanguage { get; private set; }
+    public string? LastSegmentsJson { get; private set; }
 
     public LocalFasterWhisperSttProvider(
         HttpClient httpClient,
@@ -137,6 +138,9 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                                 {
                                     LastDetectedLanguage = langProp.GetString()?.Trim().ToLowerInvariant();
                                 }
+                                LastSegmentsJson = root.TryGetProperty("segments", out var segProp) && segProp.ValueKind == JsonValueKind.Array
+                                    ? segProp.GetRawText()
+                                    : null;
                             }
                             else
                             {
@@ -156,6 +160,9 @@ public class LocalFasterWhisperSttProvider : ISttProvider, ISupportsProgress
                         {
                             LastDetectedLanguage = langProp.GetString()?.Trim().ToLowerInvariant();
                         }
+                        LastSegmentsJson = root.TryGetProperty("segments", out var directSegProp) && directSegProp.ValueKind == JsonValueKind.Array
+                            ? directSegProp.GetRawText()
+                            : null;
                     }
                 }
                 catch (JsonException)

@@ -25,6 +25,12 @@ public class AiProviderSettingsService : IAiProviderSettingsService
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<AiProviderSettingsService> _logger;
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+
     private static AiProviderSettingsDto? _memoryFallback;
 
     public AiProviderSettingsService(
@@ -46,10 +52,10 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             var json = await _cache.GetAsync(CacheKey);
             if (!string.IsNullOrWhiteSpace(json))
             {
-                var cached = JsonSerializer.Deserialize<AiProviderSettingsDto>(json);
+                var cached = JsonSerializer.Deserialize<AiProviderSettingsDto>(json, JsonOptions);
                 if (cached is not null)
                 {
-                    cached.OpenRouterModel = NormalizeModelId(cached.OpenRouterModel);
+                    NormalizeAndSyncDto(cached);
                     _memoryFallback = cached;
                     return cached;
                 }
@@ -68,10 +74,10 @@ public class AiProviderSettingsService : IAiProviderSettingsService
                 var fileJson = await File.ReadAllTextAsync(SharedFilePath, ct);
                 if (!string.IsNullOrWhiteSpace(fileJson))
                 {
-                    var fromFile = JsonSerializer.Deserialize<AiProviderSettingsDto>(fileJson);
+                    var fromFile = JsonSerializer.Deserialize<AiProviderSettingsDto>(fileJson, JsonOptions);
                     if (fromFile is not null)
                     {
-                        fromFile.OpenRouterModel = NormalizeModelId(fromFile.OpenRouterModel);
+                        NormalizeAndSyncDto(fromFile);
                         _memoryFallback = fromFile;
                         return fromFile;
                     }
@@ -84,7 +90,15 @@ public class AiProviderSettingsService : IAiProviderSettingsService
         }
 
         if (_memoryFallback is not null)
+        {
+            NormalizeAndSyncDto(_memoryFallback);
             return _memoryFallback;
+        }
+
+        var defaultProxyModel = _config["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered";
+        var defaultProxySummary = _config["Antigravity:SummaryModel"] ?? defaultProxyModel;
+        var defaultProxyPlan = _config["Antigravity:VideoPlanModel"] ?? defaultProxyModel;
+        var defaultProxyQc = _config["Antigravity:QcModel"] ?? defaultProxyPlan;
 
         var defaultSettings = new AiProviderSettingsDto
         {
@@ -102,12 +116,17 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             GroqQcModel = _config["Groq:QcModel"] ?? "openai/gpt-oss-120b",
             AntigravityProxyUrl = _config["Antigravity:ProxyUrl"] ?? "http://localhost:8045/v1",
             AntigravityProxyKey = _config["GEMINI_API_KEY"] ?? "",
-            AntigravityProxyModel = _config["GEMINI_MODEL"] ?? "gemini-3.8-flash-tiered",
-            AntigravityProxySummaryModel = _config["Antigravity:SummaryModel"] ?? "gemini-3.8-flash-tiered",
-            AntigravityProxyVideoPlanModel = _config["Antigravity:VideoPlanModel"] ?? "gemini-3.8-flash-tiered",
-            AntigravityProxyQcModel = _config["Antigravity:QcModel"] ?? "gemini-3.8-flash-tiered"
+            AntigravityProxyModel = defaultProxyModel,
+            AntigravityProxySummaryModel = defaultProxySummary,
+            AntigravitySummaryModel = defaultProxySummary,
+            AntigravityProxyVideoPlanModel = defaultProxyPlan,
+            AntigravityVideoPlanModel = defaultProxyPlan,
+            AntigravityProxyQcModel = defaultProxyQc,
+            AntigravityQcModel = defaultProxyQc,
+            AllowFallbackToSecondaryProvider = bool.TryParse(_config["AI_ALLOW_FALLBACK"], out var allowFallback) && allowFallback
         };
 
+        NormalizeAndSyncDto(defaultSettings);
         return defaultSettings;
     }
 
@@ -115,30 +134,75 @@ public class AiProviderSettingsService : IAiProviderSettingsService
     {
         var current = await GetSettingsAsync(ct);
 
+        var resolvedOpenRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel)
+            ? current.OpenRouterModel
+            : NormalizeModelId(settings.OpenRouterModel);
+        var resolvedOpenRouterSummary = !string.IsNullOrWhiteSpace(settings.OpenRouterSummaryModel)
+            ? NormalizeModelId(settings.OpenRouterSummaryModel)
+            : (!string.IsNullOrWhiteSpace(current.OpenRouterSummaryModel) ? current.OpenRouterSummaryModel : resolvedOpenRouterModel);
+        var resolvedOpenRouterPlan = !string.IsNullOrWhiteSpace(settings.OpenRouterVideoPlanModel)
+            ? NormalizeModelId(settings.OpenRouterVideoPlanModel)
+            : (!string.IsNullOrWhiteSpace(current.OpenRouterVideoPlanModel) ? current.OpenRouterVideoPlanModel : resolvedOpenRouterModel);
+        var resolvedOpenRouterQc = !string.IsNullOrWhiteSpace(settings.OpenRouterQcModel)
+            ? NormalizeModelId(settings.OpenRouterQcModel)
+            : (!string.IsNullOrWhiteSpace(current.OpenRouterQcModel) ? current.OpenRouterQcModel : resolvedOpenRouterPlan);
+
+        var resolvedGroqModel = string.IsNullOrWhiteSpace(settings.GroqModel) ? current.GroqModel : settings.GroqModel.Trim();
+        var resolvedGroqSummary = !string.IsNullOrWhiteSpace(settings.GroqSummaryModel) ? settings.GroqSummaryModel.Trim() : (!string.IsNullOrWhiteSpace(current.GroqSummaryModel) ? current.GroqSummaryModel : resolvedGroqModel);
+        var resolvedGroqPlan = !string.IsNullOrWhiteSpace(settings.GroqVideoPlanModel) ? settings.GroqVideoPlanModel.Trim() : (!string.IsNullOrWhiteSpace(current.GroqVideoPlanModel) ? current.GroqVideoPlanModel : resolvedGroqModel);
+        var resolvedGroqQc = !string.IsNullOrWhiteSpace(settings.GroqQcModel) ? settings.GroqQcModel.Trim() : (!string.IsNullOrWhiteSpace(current.GroqQcModel) ? current.GroqQcModel : resolvedGroqPlan);
+
+        var resolvedProxyBaseModel = string.IsNullOrWhiteSpace(settings.AntigravityProxyModel)
+            ? current.AntigravityProxyModel
+            : settings.AntigravityProxyModel.Trim();
+
+        var resolvedProxySummary = ResolveSyncedModel(
+            settings.GetRawAntigravityProxySummaryModel(),
+            settings.GetRawAntigravitySummaryModel(),
+            current.AntigravityProxySummaryModel,
+            resolvedProxyBaseModel);
+
+        var resolvedProxyPlan = ResolveSyncedModel(
+            settings.GetRawAntigravityProxyVideoPlanModel(),
+            settings.GetRawAntigravityVideoPlanModel(),
+            current.AntigravityProxyVideoPlanModel,
+            resolvedProxyBaseModel);
+
+        var resolvedProxyQc = ResolveSyncedModel(
+            settings.GetRawAntigravityProxyQcModel(),
+            settings.GetRawAntigravityQcModel(),
+            current.AntigravityProxyQcModel,
+            resolvedProxyPlan);
+
         var updated = new AiProviderSettingsDto
         {
             ActiveProvider = string.IsNullOrWhiteSpace(settings.ActiveProvider) ? current.ActiveProvider : settings.ActiveProvider.Trim().ToLowerInvariant(),
             OpenRouterApiKey = (settings.OpenRouterApiKey ?? "").Trim(),
             OpenRouterBaseUrl = string.IsNullOrWhiteSpace(settings.OpenRouterBaseUrl) ? current.OpenRouterBaseUrl : settings.OpenRouterBaseUrl.Trim(),
-            OpenRouterModel = string.IsNullOrWhiteSpace(settings.OpenRouterModel) ? current.OpenRouterModel : NormalizeModelId(settings.OpenRouterModel),
-            OpenRouterSummaryModel = !string.IsNullOrWhiteSpace(settings.OpenRouterSummaryModel) ? NormalizeModelId(settings.OpenRouterSummaryModel) : current.OpenRouterSummaryModel,
-            OpenRouterVideoPlanModel = !string.IsNullOrWhiteSpace(settings.OpenRouterVideoPlanModel) ? NormalizeModelId(settings.OpenRouterVideoPlanModel) : current.OpenRouterVideoPlanModel,
-            OpenRouterQcModel = !string.IsNullOrWhiteSpace(settings.OpenRouterQcModel) ? NormalizeModelId(settings.OpenRouterQcModel) : current.OpenRouterQcModel,
+            OpenRouterModel = resolvedOpenRouterModel,
+            OpenRouterSummaryModel = resolvedOpenRouterSummary,
+            OpenRouterVideoPlanModel = resolvedOpenRouterPlan,
+            OpenRouterQcModel = resolvedOpenRouterQc,
             GroqApiKey = (settings.GroqApiKey ?? "").Trim(),
-            GroqModel = string.IsNullOrWhiteSpace(settings.GroqModel) ? current.GroqModel : settings.GroqModel.Trim(),
-            GroqSummaryModel = !string.IsNullOrWhiteSpace(settings.GroqSummaryModel) ? settings.GroqSummaryModel.Trim() : current.GroqSummaryModel,
-            GroqVideoPlanModel = !string.IsNullOrWhiteSpace(settings.GroqVideoPlanModel) ? settings.GroqVideoPlanModel.Trim() : current.GroqVideoPlanModel,
-            GroqQcModel = !string.IsNullOrWhiteSpace(settings.GroqQcModel) ? settings.GroqQcModel.Trim() : current.GroqQcModel,
+            GroqModel = resolvedGroqModel,
+            GroqSummaryModel = resolvedGroqSummary,
+            GroqVideoPlanModel = resolvedGroqPlan,
+            GroqQcModel = resolvedGroqQc,
             AntigravityProxyUrl = string.IsNullOrWhiteSpace(settings.AntigravityProxyUrl) ? current.AntigravityProxyUrl : settings.AntigravityProxyUrl.Trim(),
             AntigravityProxyKey = (settings.AntigravityProxyKey ?? "").Trim(),
-            AntigravityProxyModel = string.IsNullOrWhiteSpace(settings.AntigravityProxyModel) ? current.AntigravityProxyModel : settings.AntigravityProxyModel.Trim(),
-            AntigravityProxySummaryModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxySummaryModel) ? settings.AntigravityProxySummaryModel.Trim() : current.AntigravityProxySummaryModel,
-            AntigravityProxyVideoPlanModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxyVideoPlanModel) ? settings.AntigravityProxyVideoPlanModel.Trim() : current.AntigravityProxyVideoPlanModel,
-            AntigravityProxyQcModel = !string.IsNullOrWhiteSpace(settings.AntigravityProxyQcModel) ? settings.AntigravityProxyQcModel.Trim() : current.AntigravityProxyQcModel
+            AntigravityProxyModel = resolvedProxyBaseModel,
+            AntigravityProxySummaryModel = resolvedProxySummary,
+            AntigravitySummaryModel = resolvedProxySummary,
+            AntigravityProxyVideoPlanModel = resolvedProxyPlan,
+            AntigravityVideoPlanModel = resolvedProxyPlan,
+            AntigravityProxyQcModel = resolvedProxyQc,
+            AntigravityQcModel = resolvedProxyQc,
+            AllowFallbackToSecondaryProvider = settings.AllowFallbackToSecondaryProvider
         };
 
+        NormalizeAndSyncDto(updated);
         _memoryFallback = updated;
-        var serialized = JsonSerializer.Serialize(updated);
+        var serialized = JsonSerializer.Serialize(updated, JsonOptions);
 
         try
         {
@@ -158,9 +222,68 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             _logger.LogWarning(ex, "Yerel AI Provider ayar dosyasına yazılamadı.");
         }
 
-        _logger.LogInformation("AI Provider ayarları güncellendi. Aktif Sağlayıcı: {Provider}", updated.ActiveProvider);
+        _logger.LogInformation(
+            "AI Provider ayarları güncellendi. Aktif Sağlayıcı: {Provider}, Plan Modeli: {PlanModel}, Özet Modeli: {SummaryModel}, Fallbackİzni: {AllowFallback}",
+            updated.ActiveProvider,
+            updated.GetEffectiveVideoPlanModel(),
+            updated.GetEffectiveSummaryModel(),
+            updated.AllowFallbackToSecondaryProvider);
 
         return updated;
+    }
+
+    private static void NormalizeAndSyncDto(AiProviderSettingsDto dto)
+    {
+        dto.OpenRouterModel = NormalizeModelId(dto.OpenRouterModel);
+        if (!string.IsNullOrWhiteSpace(dto.OpenRouterSummaryModel))
+            dto.OpenRouterSummaryModel = NormalizeModelId(dto.OpenRouterSummaryModel);
+        else
+            dto.OpenRouterSummaryModel = dto.OpenRouterModel;
+
+        if (!string.IsNullOrWhiteSpace(dto.OpenRouterVideoPlanModel))
+            dto.OpenRouterVideoPlanModel = NormalizeModelId(dto.OpenRouterVideoPlanModel);
+        else
+            dto.OpenRouterVideoPlanModel = dto.OpenRouterModel;
+
+        if (!string.IsNullOrWhiteSpace(dto.OpenRouterQcModel))
+            dto.OpenRouterQcModel = NormalizeModelId(dto.OpenRouterQcModel);
+        else
+            dto.OpenRouterQcModel = dto.OpenRouterVideoPlanModel;
+
+        if (string.IsNullOrWhiteSpace(dto.GroqModel))
+            dto.GroqModel = "openai/gpt-oss-120b";
+        if (string.IsNullOrWhiteSpace(dto.GroqSummaryModel))
+            dto.GroqSummaryModel = dto.GroqModel;
+        if (string.IsNullOrWhiteSpace(dto.GroqVideoPlanModel))
+            dto.GroqVideoPlanModel = dto.GroqModel;
+        if (string.IsNullOrWhiteSpace(dto.GroqQcModel))
+            dto.GroqQcModel = dto.GroqVideoPlanModel;
+
+        dto.SyncAntigravityModelAliases(dto.AntigravityProxyModel);
+    }
+
+    private static string ResolveSyncedModel(string? rawPrimary, string? rawAlias, string? currentVal, string fallbackModel)
+    {
+        var p = string.IsNullOrWhiteSpace(rawPrimary) ? null : rawPrimary.Trim();
+        var a = string.IsNullOrWhiteSpace(rawAlias) ? null : rawAlias.Trim();
+        var cur = string.IsNullOrWhiteSpace(currentVal) ? null : currentVal.Trim();
+
+        string? chosen;
+        if (p is not null && a is not null)
+        {
+            if (string.Equals(p, a, StringComparison.Ordinal))
+                chosen = p;
+            else if (cur is not null && string.Equals(p, cur, StringComparison.Ordinal))
+                chosen = a;
+            else
+                chosen = p;
+        }
+        else
+        {
+            chosen = p ?? a ?? cur;
+        }
+
+        return !string.IsNullOrWhiteSpace(chosen) ? chosen : fallbackModel;
     }
 
     public async Task<TestConnectionResultDto> TestConnectionAsync(AiProviderSettingsDto settings, CancellationToken ct = default)

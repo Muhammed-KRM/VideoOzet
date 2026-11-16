@@ -2,15 +2,19 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { ApiService } from '../../core/services/api.service';
+import { ApiService, CourseSourceCardDto } from '../../core/services/api.service';
 import { SignalRService } from '../../core/services/signalr.service';
 import { SeriesMapComponent } from '../series-map/series-map.component';
-import { Subscription } from 'rxjs';
+import { StudioQaPanelComponent } from '../../shared/components/studio-qa-panel/studio-qa-panel.component';
+import { Subscription, forkJoin, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
+
+export type TopicFilterState = 'normal' | 'zorunlu' | 'haric';
 
 @Component({
   selector: 'app-series-planner',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, SeriesMapComponent],
+  imports: [CommonModule, FormsModule, RouterModule, SeriesMapComponent, StudioQaPanelComponent],
   templateUrl: './series-planner.component.html'
 })
 export class SeriesPlannerComponent implements OnInit, OnDestroy {
@@ -23,11 +27,33 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
   data: any = null;
   isLoading = true;
   isPolling = false;
+  isCancelling = false;
+  isQaOpen = false;
+  plannerOrnekSorular = [
+    'Atanmayan kaynakları neden hiçbir bölüme dahil etmedin, hangi bölüme eklenebilir?',
+    'Bölümler arası konu akışı ve geçişlerde herhangi bir kopukluk veya tekrar var mı?',
+    'İslam düşüncesi ve modern algoritmik kuşatma dengesi bölümlere nasıl dağıtıldı?'
+  ];
   pollInterval: any;
   currentStatusMessage: string = '';
 
+  // Eğitimdeki tüm kaynaklar (API'den veya fallback olarak eğitim uçlarından)
+  egitimKaynaklari: CourseSourceCardDto[] = [];
+  private loadedFallbackEgitimId: string | null = null;
+
+  // Beklenen konular için 3 durumlu filtre: normal -> zorunlu -> haric
+  topicFilterStates: Record<string, TopicFilterState> = {};
+
+  // Ayrıştırılmış analiz ve plan listeleri
+  kaynaktaOlmayanlar: string[] = [];
+  disaridaBirakilanlar: string[] = [];
+
   // Taslak Form
-  draftOptions = {
+  draftOptions: {
+    videoSayisi: number | null;
+    varsayilanSureDk: number | null;
+    talimat: string;
+  } = {
     videoSayisi: null,
     varsayilanSureDk: null,
     talimat: ''
@@ -124,16 +150,9 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
         this.data = res;
         this.isLoading = false;
 
-        if (this.data?.konuAnalizi?.beklenenKonularJson) {
-          try {
-            this.data.konuAnalizi.beklenenKonular = JSON.parse(this.data.konuAnalizi.beklenenKonularJson);
-          } catch {
-            this.data.konuAnalizi.beklenenKonular = [];
-          }
-        }
+        this.parseAnalysisAndPlanLists();
+        this.syncEgitimKaynaklari();
 
-        // NOT: API tüm enum'ları global JsonStringEnumConverter ile STRING olarak döner
-        // ("Bekliyor", "Olusturuluyor", "OnayBekliyor" ...). Sayısal karşılaştırma asla eşleşmez.
         if (this.isStillProcessing()) {
           if (!this.isPolling) this.startPolling();
         } else {
@@ -144,9 +163,195 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
       error: (err) => {
         console.warn('Plan yükleme hatası (arka planda periyodik olarak tekrar denenecek):', err);
         this.isLoading = false;
-        // Polling'i ASLA durdurmuyoruz! Geçici ağ veya sunucu yanıt gecikmelerinde
-        // polling kesilirse kullanıcı ekranda takılı kalır.
       }
+    });
+  }
+
+  private parseStringList(raw: any): string[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) {
+      return raw.map(item => (typeof item === 'string' ? item.trim() : (item?.konu || item?.baslik || JSON.stringify(item)))).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map(item => (typeof item === 'string' ? item.trim() : (item?.konu || item?.baslik || JSON.stringify(item)))).filter(Boolean);
+        }
+      } catch {
+        return trimmed.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  }
+
+  private parseAnalysisAndPlanLists() {
+    const analiz = this.data?.konuAnalizi;
+    if (analiz) {
+      analiz.beklenenKonular = this.parseStringList(analiz.beklenenKonular ?? analiz.beklenenKonularJson);
+      this.kaynaktaOlmayanlar = this.parseStringList(analiz.kaynaktaOlmayanlar ?? analiz.kaynaktaOlmayanlarJson);
+
+      for (const k of analiz.beklenenKonular) {
+        if (!this.topicFilterStates[k]) {
+          this.topicFilterStates[k] = 'normal';
+        }
+      }
+    } else {
+      this.kaynaktaOlmayanlar = [];
+    }
+
+    const plan = this.data?.guncelPlan;
+    if (plan) {
+      this.disaridaBirakilanlar = this.parseStringList(plan.disaridaBirakilanlar ?? plan.disaridaBirakilanlarJson);
+    } else {
+      this.disaridaBirakilanlar = [];
+    }
+  }
+
+  private syncEgitimKaynaklari() {
+    const rawList = this.data?.egitimKaynaklari ?? this.data?.kaynaklar;
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      this.egitimKaynaklari = rawList.map((k: any) => ({
+        kaynakId: String(k.kaynakId || k.id || ''),
+        kaynakTuru: k.kaynakTuru || k.tip || 'Kaynak',
+        baslik: k.baslik || k.dosyaAdi || 'İsimsiz Kaynak',
+        dil: k.dil || k.orijinalDil || 'tr',
+        kullanimTuru: String(k.kullanimTuru ?? 'DogrudanReferans'),
+        tahminiToplamSureDk: k.tahminiToplamSureDk,
+        konular: Array.isArray(k.konular) ? k.konular : [],
+        ozetBilgi: k.ozetBilgi || ''
+      }));
+      return;
+    }
+
+    const egitimId = this.data?.egitimId;
+    if (egitimId && this.loadedFallbackEgitimId !== egitimId) {
+      this.loadedFallbackEgitimId = egitimId;
+      forkJoin({
+        videos: this.apiService.getEgitimVideos(egitimId).pipe(catchError(() => of([]))),
+        docs: this.apiService.getEgitimDokumanlar(egitimId).pipe(catchError(() => of([])))
+      }).subscribe(({ videos, docs }) => {
+        if (this.data?.egitimKaynaklari?.length) return;
+        const combined: CourseSourceCardDto[] = [];
+        for (const v of videos || []) {
+          combined.push({
+            kaynakId: String(v.id),
+            kaynakTuru: 'Video',
+            baslik: v.baslik || v.dosyaAdi || 'Video',
+            dil: v.orijinalDil || 'tr',
+            kullanimTuru: v.kullanimTuru === 1 || v.kullanimTuru === 'SadeceArgumanVeMantik' ? 'SadeceArgumanVeMantik' : 'DogrudanReferans'
+          });
+        }
+        for (const d of docs || []) {
+          combined.push({
+            kaynakId: String(d.id),
+            kaynakTuru: 'Dokuman',
+            baslik: d.dosyaAdi || d.baslik || 'Doküman',
+            dil: d.orijinalDil || 'tr',
+            kullanimTuru: d.kullanimTuru === 1 || d.kullanimTuru === 'SadeceArgumanVeMantik' ? 'SadeceArgumanVeMantik' : 'DogrudanReferans'
+          });
+        }
+        this.egitimKaynaklari = combined;
+      });
+    }
+  }
+
+  // ── Beklenen Konular Tıklanabilir Durum Yönetimi ──
+
+  toggleTopicState(konu: string) {
+    const current = this.topicFilterStates[konu] || 'normal';
+    if (current === 'normal') {
+      this.topicFilterStates[konu] = 'zorunlu';
+    } else if (current === 'zorunlu') {
+      this.topicFilterStates[konu] = 'haric';
+    } else {
+      this.topicFilterStates[konu] = 'normal';
+    }
+  }
+
+  getTopicState(konu: string): TopicFilterState {
+    return this.topicFilterStates[konu] || 'normal';
+  }
+
+  get zorunluKonular(): string[] {
+    return Object.entries(this.topicFilterStates)
+      .filter(([_, state]) => state === 'zorunlu')
+      .map(([k]) => k);
+  }
+
+  get haricKonular(): string[] {
+    return Object.entries(this.topicFilterStates)
+      .filter(([_, state]) => state === 'haric')
+      .map(([k]) => k);
+  }
+
+  // ── Kaynak Kapsam Özeti Hesaplamaları ──
+
+  private getAssignedSourceIdsAndTitles(): { ids: Set<string>; titles: Set<string> } {
+    const ids = new Set<string>();
+    const titles = new Set<string>();
+    const bolumler = this.data?.guncelPlan?.seriBolumler || [];
+
+    for (const b of bolumler) {
+      const rawList = b.atananKaynakIdleri ?? b.atananKaynaklar ?? b.atananKaynaklarJson;
+      let items: any[] = [];
+      if (Array.isArray(rawList)) {
+        items = rawList;
+      } else if (typeof rawList === 'string' && rawList.trim()) {
+        try {
+          const parsed = JSON.parse(rawList);
+          if (Array.isArray(parsed)) items = parsed;
+        } catch {}
+      }
+
+      for (const item of items) {
+        if (typeof item === 'string') {
+          const clean = item.trim();
+          if (clean) {
+            ids.add(clean.toLowerCase());
+            titles.add(clean.toLowerCase());
+          }
+        } else if (item && typeof item === 'object') {
+          const id = String(item.kaynakId || item.id || '').trim().toLowerCase();
+          const title = String(item.baslik || item.dosyaAdi || '').trim().toLowerCase();
+          if (id) ids.add(id);
+          if (title) titles.add(title);
+        }
+      }
+    }
+
+    return { ids, titles };
+  }
+
+  get toplamKaynakSayisi(): number {
+    return this.egitimKaynaklari.length;
+  }
+
+  get atananKaynakSayisi(): number {
+    const { ids, titles } = this.getAssignedSourceIdsAndTitles();
+    if (this.egitimKaynaklari.length === 0) {
+      return ids.size;
+    }
+    let matched = 0;
+    for (const src of this.egitimKaynaklari) {
+      const idMatch = src.kaynakId && ids.has(src.kaynakId.toLowerCase());
+      const titleMatch = src.baslik && titles.has(src.baslik.toLowerCase());
+      if (idMatch || titleMatch) {
+        matched++;
+      }
+    }
+    return matched;
+  }
+
+  get atanmayanKaynaklar(): CourseSourceCardDto[] {
+    if (this.egitimKaynaklari.length === 0) return [];
+    const { ids, titles } = this.getAssignedSourceIdsAndTitles();
+    return this.egitimKaynaklari.filter(src => {
+      const idMatch = src.kaynakId && ids.has(src.kaynakId.toLowerCase());
+      const titleMatch = src.baslik && titles.has(src.baslik.toLowerCase());
+      return !idMatch && !titleMatch;
     });
   }
 
@@ -155,10 +360,8 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     const d = this.data;
     if (!d) return true;
 
-    // Kullanıcı yeni bir taslak talep ettiyse
     if (this.isDrafting) return true;
 
-    // Genel istek durumu aktif bölüm/QC üretimindeyse
     if (d.durum === 'IcerikUretiliyor' || d.durum === 'QcYapiliyor') {
       return true;
     }
@@ -176,7 +379,6 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
 
     const plan = d.guncelPlan;
     if (!plan) {
-      // Analiz tamamlanmışsa plan oluşturulması bekleniyor demektir
       return analiz.durum !== 'Hata';
     }
     if (plan.durum === 'Hata') {
@@ -187,7 +389,6 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
       return true;
     }
 
-    // Plan onaylandıysa bölüm üretimi sürüyor olabilir
     if (plan.onaylandi) {
       const bolumler = plan.seriBolumler || [];
       const anyPendingOrProcessing = bolumler.some(
@@ -196,7 +397,6 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
       return anyPendingOrProcessing;
     }
 
-    // Plan OnayBekliyor durumunda ve kullanıcı aksiyonu bekleniyor
     return false;
   }
 
@@ -205,15 +405,12 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     if (!d) return true;
     if (this.isDrafting) return true;
 
-    // Konu analizi henüz tamamlanmadıysa
     if (!d.konuAnalizi || d.konuAnalizi.durum === 'Isleniyor' || d.konuAnalizi.durum === 'Bekliyor') {
       return true;
     }
 
-    // Analiz başarısız olduysa ve plan da yoksa
     if (d.konuAnalizi.durum === 'Hata' && !d.guncelPlan) return false;
 
-    // Plan henüz kaydedilmediyse veya oluşturuluyorsa / hiç bölüm yoksa
     return !d.guncelPlan || d.guncelPlan.durum === 'Olusturuluyor' || d.guncelPlan.durum === 'Taslak' || (d.guncelPlan.seriBolumler?.length ?? 0) === 0;
   }
 
@@ -221,17 +418,14 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     const d = this.data;
     if (!d) return false;
 
-    // Eğer güncel planda en az 1 bölüm başarıyla üretilmişse KESİNLİKLE planlama hatası değildir!
     if (d.guncelPlan && (d.guncelPlan.seriBolumler?.length ?? 0) > 0) {
       return false;
     }
 
-    // Eğer bir işlem aktif olarak sürüyorsa hata ekranı açma
     if (this.isDrafting || this.isPlanGenerating || this.isStillProcessing()) {
       return false;
     }
 
-    // Sadece hiçbir geçerli plan yokken ve işlem kalıcı hataya düştüğünde
     return d.durum === 'Hata' || d.konuAnalizi?.durum === 'Hata' || d.guncelPlan?.durum === 'Hata';
   }
 
@@ -256,11 +450,43 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     }
   }
 
+  cancelProcess() {
+    if (!this.contentRequestId || this.isCancelling) return;
+    if (!confirm('Devam eden işlemi durdurmak istediğinize emin misiniz?')) return;
+
+    this.isCancelling = true;
+    this.apiService.cancelSeriesProcess(this.contentRequestId).subscribe({
+      next: () => {
+        this.isCancelling = false;
+        this.isDrafting = false;
+        this.isApproving = false;
+        this.stopPolling();
+        this.currentStatusMessage = 'İşlem kullanıcı tarafından durduruldu.';
+        this.loadData();
+      },
+      error: (err) => {
+        console.error('İşlem durdurma hatası', err);
+        this.isCancelling = false;
+        alert('İşlem durdurulamadı: ' + (err.error?.mesaj || err.message));
+      }
+    });
+  }
+
   requestNewDraft() {
     if (!this.data || this.isDrafting) return;
     this.isDrafting = true;
-    this.currentStatusMessage = 'Yeni plan taslağı isteniyor...';
-    this.apiService.generatePlanDraft(this.contentRequestId, this.draftOptions).subscribe({
+    this.currentStatusMessage = 'Seçilen kısıtlar ve konu filtreleriyle yeni plan taslağı oluşturuluyor...';
+
+    const payload = {
+      videoSayisi: this.draftOptions.videoSayisi,
+      varsayilanSureDk: this.draftOptions.varsayilanSureDk,
+      talimat: this.draftOptions.talimat || '',
+      revizyonTalimati: this.draftOptions.talimat || '',
+      zorunluKonular: this.zorunluKonular,
+      haricKonular: this.haricKonular
+    };
+
+    this.apiService.generatePlanDraft(this.contentRequestId, payload).subscribe({
       next: () => {
         this.startPolling();
         this.loadData();
@@ -296,7 +522,6 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
   printToPdf() {
     if (!this.data || !this.data.guncelPlan) return;
     
-    // Yalnızca yazdırılabilir HTML üretelim ve yeni pencerede açıp yazdıralım.
     const plan = this.data.guncelPlan;
     const analiz = this.data.konuAnalizi;
     
@@ -336,6 +561,9 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
         html += `<div class="episode">`;
         html += `<h3>Bölüm ${b.bolumNo}: ${b.calismaBasligi}</h3>`;
         html += `<p><strong>Hedef Süre:</strong> ~${b.hedefSureDk} dk<br>`;
+        if (b.kanca) {
+          html += `<strong>Açılış Kancası:</strong> ${b.kanca}<br>`;
+        }
         html += `<strong>Durum:</strong> ${b.durum}<br>`;
         html += `<strong>Ana Fikir:</strong> ${b.anaFikir || '-'}</p>`;
         
@@ -432,6 +660,14 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
                   new TextRun({ text: `~${b.hedefSureDk} dk` })
                 ]
               }));
+              if (b.kanca) {
+                children.push(new Paragraph({
+                  children: [
+                    new TextRun({ text: "Açılış Kancası: ", bold: true }),
+                    new TextRun({ text: b.kanca })
+                  ]
+                }));
+              }
               children.push(new Paragraph({
                 children: [
                   new TextRun({ text: "Durum: ", bold: true }),
@@ -458,7 +694,6 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
                   }));
                 });
               }
-              // Bos bir satir ekle
               children.push(new Paragraph({ text: "" }));
             });
           }
@@ -479,55 +714,57 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     let mimeType = 'text/plain;charset=utf-8';
     let extension = format;
     
-    // MD ve TXT için düz metin formatı
     if (format === 'md') mimeType = 'text/markdown;charset=utf-8';
       
-      content = format === 'md' ? `# Video Serisi Planı\n\n` : `VIDEO SERISI PLANI\n==================\n\n`;
+    content = format === 'md' ? `# Video Serisi Planı\n\n` : `VIDEO SERISI PLANI\n==================\n\n`;
 
-      if (analiz) {
-        content += format === 'md' ? `## AI İçerik Analizi\n\n` : `AI Icerik Analizi\n-----------------\n\n`;
-        content += format === 'md' ? `**Ana Fikir:**\n${analiz.anaFikir || '-'}\n\n` : `Ana Fikir:\n${analiz.anaFikir || '-'}\n\n`;
-        
-        if (analiz.beklenenKonular && analiz.beklenenKonular.length > 0) {
-          content += format === 'md' ? `**Beklenen Konular:**\n` : `Beklenen Konular:\n`;
-          analiz.beklenenKonular.forEach((k: string) => {
-            content += `- ${k}\n`;
-          });
-          content += `\n`;
-        }
-
-        if (analiz.oneriGerekcesi) {
-          content += format === 'md' ? `**AI Önerisi:**\n${analiz.oneriGerekcesi}\n\n` : `AI Onerisi:\n${analiz.oneriGerekcesi}\n\n`;
-        }
-        content += `---\n\n`;
-      }
-
-      content += format === 'md' ? `## Bölümler\n\n` : `Bolumler\n--------\n\n`;
-
-      if (bolumler.length === 0) {
-        content += `Henüz bölüm bulunmuyor.\n`;
-      } else {
-        bolumler.forEach((b: any) => {
-          content += format === 'md' ? `### Bölüm ${b.bolumNo}: ${b.calismaBasligi}\n` : `[ Bolum ${b.bolumNo}: ${b.calismaBasligi} ]\n`;
-          content += format === 'md' ? `- **Hedef Süre:** ~${b.hedefSureDk} dk\n` : `- Hedef Sure: ~${b.hedefSureDk} dk\n`;
-          content += format === 'md' ? `- **Durum:** ${b.durum}\n` : `- Durum: ${b.durum}\n`;
-          content += format === 'md' ? `- **Ana Fikir:** ${b.anaFikir || '-'}\n` : `- Ana Fikir: ${b.anaFikir || '-'}\n`;
-          
-          let konular: string[] = [];
-          if (b.konularJson) {
-            try {
-              konular = JSON.parse(b.konularJson);
-            } catch {}
-          }
-          if (konular.length > 0) {
-            content += format === 'md' ? `- **Konular:**\n` : `- Konular:\n`;
-            konular.forEach(k => {
-              content += `  - ${k}\n`;
-            });
-          }
-          content += `\n`;
+    if (analiz) {
+      content += format === 'md' ? `## AI İçerik Analizi\n\n` : `AI Icerik Analizi\n-----------------\n\n`;
+      content += format === 'md' ? `**Ana Fikir:**\n${analiz.anaFikir || '-'}\n\n` : `Ana Fikir:\n${analiz.anaFikir || '-'}\n\n`;
+      
+      if (analiz.beklenenKonular && analiz.beklenenKonular.length > 0) {
+        content += format === 'md' ? `**Beklenen Konular:**\n` : `Beklenen Konular:\n`;
+        analiz.beklenenKonular.forEach((k: string) => {
+          content += `- ${k}\n`;
         });
+        content += `\n`;
       }
+
+      if (analiz.oneriGerekcesi) {
+        content += format === 'md' ? `**AI Önerisi:**\n${analiz.oneriGerekcesi}\n\n` : `AI Onerisi:\n${analiz.oneriGerekcesi}\n\n`;
+      }
+      content += `---\n\n`;
+    }
+
+    content += format === 'md' ? `## Bölümler\n\n` : `Bolumler\n--------\n\n`;
+
+    if (bolumler.length === 0) {
+      content += `Henüz bölüm bulunmuyor.\n`;
+    } else {
+      bolumler.forEach((b: any) => {
+        content += format === 'md' ? `### Bölüm ${b.bolumNo}: ${b.calismaBasligi}\n` : `[ Bolum ${b.bolumNo}: ${b.calismaBasligi} ]\n`;
+        content += format === 'md' ? `- **Hedef Süre:** ~${b.hedefSureDk} dk\n` : `- Hedef Sure: ~${b.hedefSureDk} dk\n`;
+        if (b.kanca) {
+          content += format === 'md' ? `- **Açılış Kancası:** ${b.kanca}\n` : `- Acilis Kancasi: ${b.kanca}\n`;
+        }
+        content += format === 'md' ? `- **Durum:** ${b.durum}\n` : `- Durum: ${b.durum}\n`;
+        content += format === 'md' ? `- **Ana Fikir:** ${b.anaFikir || '-'}\n` : `- Ana Fikir: ${b.anaFikir || '-'}\n`;
+        
+        let konular: string[] = [];
+        if (b.konularJson) {
+          try {
+            konular = JSON.parse(b.konularJson);
+          } catch {}
+        }
+        if (konular.length > 0) {
+          content += format === 'md' ? `- **Konular:**\n` : `- Konular:\n`;
+          konular.forEach(k => {
+            content += `  - ${k}\n`;
+          });
+        }
+        content += `\n`;
+      });
+    }
     const blob = new Blob([content], { type: mimeType });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

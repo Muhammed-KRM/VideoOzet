@@ -403,6 +403,81 @@ export function cleanPrompterParagraphs(lines: string[]): string[] {
   }).filter(p => p.length > 0);
 }
 
+const VISUAL_DIRECTIVE_HEADING_REGEX =
+  /^(?:#{2,5}\s*)?(?:\d+\.?\s*)?(?:\*\*|\[)?\s*(?:Görsel\s*(?:&|ve|\/)?\s*(?:Edit|Kurgu)|Kamera\s*(?:Açısı|ve|&)|Kurgu\s*(?:ve|&)?\s*Görsel|Reji\s*(?:ve|&)?\s*Görsel|Teknik\s*Yönerge|B-Roll\s*ve\s*Kurgu)/i;
+
+const PROMPTER_HEADING_REGEX =
+  /^(?:#{2,5}\s*)?(?:[-*]\s*)?(?:\d+\.?\s*)?(?:\*\*|\[)?\s*Prompter(?:\s*(?:Metni|Konuşma\s*Metni|Okuma\s*Metni|Anlatım\s*Metni|Konuşması))?(?:\s*\([^)]*\))?\s*(?:\]|:\*\*|\*\*|:)/i;
+
+const PROMPTER_STANDALONE_HEADING_REGEX =
+  /^#{2,5}\s*(?:\d+\.?\s*)?\[?\s*Prompter(?:\s*(?:Metni|Konuşma|Okuma|Anlatım))?[^\n]*$/i;
+
+const DIRECTIVE_BULLET_LINE_REGEX =
+  /^\s*(?:[-*]\s*)?\*\*(?:Kamera(?:\s*Açısı)?(?:\s*&\s*Kadraj)?|Görsel(?:,\s*B-Roll)?(?:\s*ve\s*Kurgu)?|B-Roll|Metin\s*Grafiği|On-Screen\s*Text|Müzik(?:\s*&\s*Ses(?:\s*Efekti)?)?|Ses\s*Efekti|Kurgu\s*Notu|Süre\s*\/?\s*Zaman|Zaman\s*Aral[ıi][gğ][ıi])\s*:?\*\*/i;
+
+const TIME_LINE_REGEX =
+  /^\s*(?:[-*]\s*)?(?:\*\*|\[)?(?:Zaman\s*Aral[ıi][gğ][ıi]|Hedef\s*Süre|Sahne\s*Süresi|Süre)\s*:?(?:\*\*|\])?\s*(.+)$/i;
+
+function isSceneHeadingLine(trimmed: string): string | null {
+  if (!trimmed.startsWith('#')) return null;
+  if (PROMPTER_HEADING_REGEX.test(trimmed) || PROMPTER_STANDALONE_HEADING_REGEX.test(trimmed)) return null;
+  if (VISUAL_DIRECTIVE_HEADING_REGEX.test(trimmed)) return null;
+
+  // H2, H3 veya H4 başlıklarını kontrol et
+  const match = trimmed.match(/^(#{2,4})\s+(.+)$/);
+  if (!match) return null;
+
+  const hashes = match[1];
+  const rawTitle = match[2].trim().replace(/\s*#+\s*$/, '').trim();
+  if (!rawTitle) return null;
+
+  // Belge üst bilgi veya araştırma özeti ayraç başlıklarını sahne sanma
+  if (/^(?:Video\s*Tipi|Hedef\s*Süre|Genel\s*Konu|Kapsamlı\s*Araştırma\s*Özeti|Referans\s*Kaynaklar)$/i.test(rawTitle)) {
+    return null;
+  }
+
+  // H2 ve H3 doğrudan sahne/bölüm başlığı olabilir (## Sahne 1, ### GİRİŞ, ### 1.1 ..., ## 2. Gelişme vb.)
+  if (hashes.length <= 3) {
+    return rawTitle;
+  }
+
+  // H4 (####) ise: Sahne, Giriş/Gelişme/Kapanış/Sonuç/Açılış, Bölüm veya 1.1 / 1. gibi numaralı alt sahne ise kabul et
+  if (
+    /^(?:Sahne\b|\d+\.?\s*Sahne\b|Bölüm\b|(?:Giriş|Gelişme|Kapanış|Sonuç|Açılış|Özet)\b|\d+(?:\.\d+)+\.?\s+\S+|\d+\.\s+\S+)/i.test(
+      rawTitle
+    )
+  ) {
+    return rawTitle;
+  }
+
+  return null;
+}
+
+function extractInlinePrompterRemainder(trimmed: string): string | null {
+  // Örn: "**Prompter Metni (Aynen Okunacak):** Merhaba..." veya "[Prompter Metni]: Merhaba..."
+  const m = trimmed.match(
+    /^(?:#{2,5}\s*)?(?:[-*]\s*)?(?:\d+\.?\s*)?(?:\*\*\[?|\[\*\*|\*\*|\[)\s*Prompter[^\]*\n]*(?:\]\*\*|\*\*\]|\*\*|\])\s*:?\s*(.+)$/i
+  );
+  if (m && m[1]) {
+    const rem = m[1].replace(/^[:\-–—\s]+/, '').trim();
+    if (rem.length > 0 && !/^(\(Aynen\s*Okunacak\)|\(Sunucu\s*İçin\))$/i.test(rem)) {
+      return rem;
+    }
+  }
+  return null;
+}
+
+function extractTimeFromSceneTitle(title: string): { cleanTitle: string; timeRange?: string } {
+  const m = title.match(/^(.*?)\s*[\(\[]\s*(\d{1,2}:\d{2}\s*[-–—]\s*\d{1,2}:\d{2}(?:\s*dk)?)[\)\]]\s*$/i);
+  if (m) {
+    return {
+      cleanTitle: m[1].trim() || title,
+      timeRange: m[2].trim()
+    };
+  }
+  return { cleanTitle: title };
+}
+
 function extractFallbackPrompter(markdown: string): PrompterScene[] {
   if (!markdown) return [];
   const lines = markdown.split(/\r?\n/);
@@ -413,14 +488,20 @@ function extractFallbackPrompter(markdown: string): PrompterScene[] {
 
   const finish = () => {
     if (currentSceneTitle && sceneLines.length > 0) {
-      const nonBulletLines = sceneLines.filter(l => {
-        const t = l.trim();
-        if (!t) return true;
-        if (t.startsWith('-') || t.startsWith('*') || t.startsWith('#')) return false;
-        if (t.startsWith('---') || t.startsWith('===')) return false;
-        return true;
-      });
-      const paragraphs = cleanPrompterParagraphs(nonBulletLines);
+      // Önce blockquote (>) satırları varsa onları tercih et, yoksa yönerge olmayan düz paragrafları al
+      const quoteLines = sceneLines.filter(l => /^\s*>\s*/.test(l));
+      const candidateLines = quoteLines.length > 0
+        ? quoteLines
+        : sceneLines.filter(l => {
+            const t = l.trim();
+            if (!t) return true;
+            if (DIRECTIVE_BULLET_LINE_REGEX.test(t)) return false;
+            if (VISUAL_DIRECTIVE_HEADING_REGEX.test(t)) return false;
+            if (t.startsWith('-') || t.startsWith('*') || t.startsWith('#')) return false;
+            if (t.startsWith('---') || t.startsWith('===')) return false;
+            return true;
+          });
+      const paragraphs = cleanPrompterParagraphs(candidateLines);
       if (paragraphs.length > 0) {
         scenes.push({
           sceneTitle: currentSceneTitle,
@@ -434,15 +515,16 @@ function extractFallbackPrompter(markdown: string): PrompterScene[] {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const sceneMatch = trimmed.match(/^#{2,3}\s+(Sahne\b.*|\d+\.?\s*Sahne\b.*|(?:Giriş|Gelişme|Kapanış|Sonuç)\s*Sahnesi\b.*)/i);
-    if (sceneMatch) {
+    const detectedTitle = isSceneHeadingLine(trimmed);
+    if (detectedTitle) {
       finish();
-      currentSceneTitle = sceneMatch[1].trim();
-      currentTimeRange = null;
+      const parsed = extractTimeFromSceneTitle(detectedTitle);
+      currentSceneTitle = parsed.cleanTitle;
+      currentTimeRange = parsed.timeRange || null;
       continue;
     }
-    const timeMatch = trimmed.match(/^\*\*Zaman\s*Aral[ıi][gğ][ıi]:?\*\*\s*(.+)$/i);
-    if (timeMatch) {
+    const timeMatch = trimmed.match(TIME_LINE_REGEX);
+    if (timeMatch && currentSceneTitle && sceneLines.length === 0) {
       currentTimeRange = timeMatch[1].trim().replace(/\*+/g, '');
       continue;
     }
@@ -464,10 +546,15 @@ export function extractPrompterScenes(videoPlanMarkdown: string): PrompterScene[
   let currentTimeRange: string | null = null;
   let inPrompter = false;
   let currentPrompterRawLines: string[] = [];
+  let currentSceneQuoteFallbackLines: string[] = [];
 
   const finishCurrentScene = () => {
-    if (currentSceneTitle || currentPrompterRawLines.length > 0) {
-      const paragraphs = cleanPrompterParagraphs(currentPrompterRawLines);
+    const rawSource = currentPrompterRawLines.length > 0
+      ? currentPrompterRawLines
+      : currentSceneQuoteFallbackLines;
+
+    if (currentSceneTitle || rawSource.length > 0) {
+      const paragraphs = cleanPrompterParagraphs(rawSource);
       if (paragraphs.length > 0) {
         scenes.push({
           sceneTitle: currentSceneTitle || `Sahne ${scenes.length + 1}`,
@@ -477,6 +564,7 @@ export function extractPrompterScenes(videoPlanMarkdown: string): PrompterScene[
       }
     }
     currentPrompterRawLines = [];
+    currentSceneQuoteFallbackLines = [];
     inPrompter = false;
   };
 
@@ -484,44 +572,64 @@ export function extractPrompterScenes(videoPlanMarkdown: string): PrompterScene[
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Sahne Başlığı
-    const sceneMatch = trimmed.match(/^#{2,3}\s+(Sahne\b.*|\d+\.?\s*Sahne\b.*|(?:Giriş|Gelişme|Kapanış|Sonuç)\s*Sahnesi\b.*)/i);
-    if (sceneMatch) {
-      finishCurrentScene();
-      currentSceneTitle = sceneMatch[1].trim();
-      currentTimeRange = null;
+    // 1. Görsel / Kurgu Yönergesi Başlığı geldiyse prompter modundan çık (sahneyi kapatma!)
+    if (VISUAL_DIRECTIVE_HEADING_REGEX.test(trimmed)) {
+      inPrompter = false;
       continue;
     }
 
-    // Zaman Aralığı
-    const timeMatch = trimmed.match(/^\*\*Zaman\s*Aral[ıi][gğ][ıi]:?\*\*\s*(.+)$/i);
-    if (timeMatch) {
+    // 2. Prompter Metni Başlığı veya Satır İçi Etiketi
+    const isPrompterHeading =
+      PROMPTER_HEADING_REGEX.test(trimmed) ||
+      PROMPTER_STANDALONE_HEADING_REGEX.test(trimmed);
+
+    if (isPrompterHeading) {
+      inPrompter = true;
+      const remainder = extractInlinePrompterRemainder(trimmed);
+      if (remainder) {
+        currentPrompterRawLines.push(remainder);
+      }
+      continue;
+    }
+
+    // 3. Sahne Başlığı (## Sahne 1, ### GİRİŞ, ### 1.1 ..., #### Sahne ...)
+    const detectedSceneTitle = isSceneHeadingLine(trimmed);
+    if (detectedSceneTitle) {
+      finishCurrentScene();
+      const parsed = extractTimeFromSceneTitle(detectedSceneTitle);
+      currentSceneTitle = parsed.cleanTitle;
+      currentTimeRange = parsed.timeRange || null;
+      continue;
+    }
+
+    // 4. Zaman Aralığı Satırı (**Zaman Aralığı:** 00:00 - 03:00 vb.)
+    const timeMatch = trimmed.match(TIME_LINE_REGEX);
+    if (timeMatch && !inPrompter) {
       currentTimeRange = timeMatch[1].trim().replace(/\*+/g, '');
       continue;
     }
 
-    // Prompter Metni Başlığı
-    const isPrompterHeading =
-      /^#{3,4}\s*(?:2\.?\s*)?\[?Prompter/i.test(trimmed) ||
-      /^\*\*Prompter\s*(?:Metni|Konuşma)?/i.test(trimmed) ||
-      /^#{2,4}\s+.*Prompter\s*Metni/i.test(trimmed);
-
-    if (isPrompterHeading) {
-      inPrompter = true;
-      continue;
-    }
-
-    // Başka bir bölüm başlığı veya ayraç geldiyse prompter'ı durdur
+    // 5. Prompter bloğu içindeyken satırları topla
     if (inPrompter) {
-      const isOtherHeading = /^#{2,4}\s+/.test(trimmed) && !isPrompterHeading;
-      const isDivider = /^---+$/.test(trimmed) || /^===/.test(trimmed);
-
-      if (isOtherHeading || isDivider) {
+      const isDivider = /^---+$/.test(trimmed) || /^===+/.test(trimmed);
+      if (isDivider) {
         inPrompter = false;
         continue;
       }
 
+      // Eğer yeni bir görsel/kamera madde satırı başladıysa prompter bitti demektir
+      if (DIRECTIVE_BULLET_LINE_REGEX.test(trimmed)) {
+        inPrompter = false;
+        if (timeMatch && !currentTimeRange) {
+          currentTimeRange = timeMatch[1].trim().replace(/\*+/g, '');
+        }
+        continue;
+      }
+
       currentPrompterRawLines.push(line);
+    } else if (currentSceneTitle && /^\s*>\s*\S+/.test(line)) {
+      // Sahne içinde açık "Prompter Metni" alt başlığı unutulmuş ama `> "..."` alıntı bloğu yazılmışsa yedek olarak tut
+      currentSceneQuoteFallbackLines.push(line);
     }
   }
 

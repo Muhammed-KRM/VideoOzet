@@ -110,9 +110,9 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 try
                 {
                     var parsed = VideoOzet.Business.Helpers.LlmJson.Deserialize<SummaryLlmResponse>(jsonResponse);
-                    if (parsed != null)
+                    if (parsed != null && !string.IsNullOrWhiteSpace(parsed.OzetMetni))
                     {
-                        ozetMetni = parsed.OzetMetni ?? jsonResponse;
+                        ozetMetni = parsed.OzetMetni;
                         if (!string.IsNullOrWhiteSpace(parsed.Dil))
                         {
                             detectedLang = parsed.Dil.Trim().ToLowerInvariant();
@@ -120,16 +120,33 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                         konuBasliklariJson = parsed.KonuBasliklari != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuBasliklari) : "[]";
                         konuEtiketleriJson = parsed.KonuEtiketleri != null ? System.Text.Json.JsonSerializer.Serialize(parsed.KonuEtiketleri) : "[]";
                     }
+                    else
+                    {
+                        var recovered = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.TryParseOrRecoverSummary(jsonResponse ?? string.Empty, transcript.HamMetin);
+                        if (!string.IsNullOrWhiteSpace(recovered.OzetMetni))
+                            ozetMetni = recovered.OzetMetni;
+                        if (!string.IsNullOrWhiteSpace(recovered.Dil))
+                            detectedLang = recovered.Dil;
+                        if (recovered.KonuBasliklari != null)
+                            konuBasliklariJson = System.Text.Json.JsonSerializer.Serialize(recovered.KonuBasliklari);
+                        if (recovered.KonuEtiketleri != null)
+                            konuEtiketleriJson = System.Text.Json.JsonSerializer.Serialize(recovered.KonuEtiketleri);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "LLM json parse failed. Using raw response as summary. Raw: {Raw}", jsonResponse);
+                    _logger.LogWarning(ex, "LLM json parse failed. Recovering summary & language from raw response. Raw: {Raw}", jsonResponse);
+                    var recovered = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.TryParseOrRecoverSummary(jsonResponse ?? string.Empty, transcript.HamMetin);
+                    if (!string.IsNullOrWhiteSpace(recovered.OzetMetni))
+                        ozetMetni = recovered.OzetMetni;
+                    if (!string.IsNullOrWhiteSpace(recovered.Dil))
+                        detectedLang = recovered.Dil;
                 }
 
-                if (detectedLang.Length > 2 && (detectedLang.StartsWith("en") || detectedLang == "english")) detectedLang = "en";
-                else if (detectedLang.Length > 2 && (detectedLang.StartsWith("de") || detectedLang == "german")) detectedLang = "de";
-                else if (detectedLang.Length > 2 && (detectedLang.StartsWith("tr") || detectedLang == "turkish")) detectedLang = "tr";
-                else if (detectedLang.Length > 2) detectedLang = detectedLang.Substring(0, 2);
+                detectedLang = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.DetectLanguageReliably(
+                    transcript.HamMetin,
+                    ozetMetni,
+                    detectedLang);
 
                 transcript.Dil = detectedLang;
 

@@ -39,6 +39,15 @@
                 {{ problematicItemsCount }}
               </span>
             </button>
+            <button (click)="reindexAllFiles()"
+                    [disabled]="isReindexing"
+                    title="Tüm tamamlanmış video ve dokümanları ham metinle yeniden indeksle"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 disabled:opacity-50 bg-indigo-500/20 text-indigo-300 border-indigo-400/40 hover:bg-indigo-500/30 cursor-pointer">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" [ngClass]="{'animate-spin': isReindexing}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+              <span>{{ isReindexing ? 'İndeksleniyor...' : 'Ham Metinle Yeniden İndeksle' }}</span>
+            </button>
           </div>
         </div>
         
@@ -133,6 +142,14 @@
                     <span>{{ isArgumanMode(v) ? '🛡️ Dış Kaynak' : '📌 Doğrudan Referans' }}</span>
                   </button>
 
+                  <!-- İndeksleme Türü Rozeti (Ham vs Özet) -->
+                  <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0"
+                        [ngClass]="(v.indekslemeTuru === 1 || v.indekslemeTuru === 'OzetKaynak')
+                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                          : 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60'">
+                    {{ (v.indekslemeTuru === 1 || v.indekslemeTuru === 'OzetKaynak') ? '⚡ Özet Kaynak' : '📄 Ham Kaynak' }}
+                  </span>
+
                   <!-- Orijinal Dil Rozeti (Yabancı dil ise) -->
                   <span *ngIf="v.orijinalDil && v.orijinalDil.toLowerCase() !== 'tr'" 
                         class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/50 shrink-0"
@@ -182,7 +199,17 @@
                 </span>
               </div>
 
-              <!-- Metin & Özet İnceleme Butonu (İşlem Tamamlanmışsa) -->
+              <!-- Metin & Özet İnceleme ve Soru Sor Butonları (İşlem Tamamlanmışsa) -->
+              <button 
+                *ngIf="isItemCompleted(v)"
+                (click)="openKaynakDetayModal(v, 'soru')" 
+                title="Bu Döküman / Video Hakkında Soru Sor" 
+                class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 hover:text-white transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <span>💬</span>
+                <span>Soru Sor</span>
+              </button>
+
               <button 
                 *ngIf="isItemCompleted(v)"
                 (click)="openKaynakDetayModal(v)" 
@@ -597,6 +624,15 @@
       >
         <span>🎙️ {{ kaynakDetay?.tip === 'video' ? 'Ham Transkript Metni' : 'Orijinal Döküman Metni' }}</span>
       </button>
+
+      <button 
+        type="button"
+        (click)="setKaynakTab('soru')"
+        [ngClass]="kaynakActiveTab === 'soru' ? 'border-emerald-500 text-emerald-300 bg-emerald-500/10 font-semibold' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'"
+        class="px-4 py-2 text-xs rounded-t-lg border-b-2 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+      >
+        <span>💬 Bu Kaynağa Sor</span>
+      </button>
     </div>
 
     <!-- İçerik Alanı -->
@@ -625,18 +661,33 @@
           </div>
         </div>
 
-        <!-- Metin İçeriği -->
-        <div *ngIf="activeKaynakText; else emptyTextTpl">
-          <!-- Markdown Formatlı Gösterim (Özet ve Çeviri için) -->
-          <div *ngIf="kaynakActiveTab === 'ozet' || kaynakActiveTab === 'cevirisi'" 
-               class="prose prose-invert max-w-none text-slate-200 text-sm leading-relaxed" 
-               [innerHTML]="formatMarkdown(activeKaynakText)">
-          </div>
+        <!-- Soru-Cevap Sekmesi -->
+        <div *ngIf="kaynakActiveTab === 'soru'">
+          <app-studio-qa-panel
+            kapsam="Kaynak"
+            [egitimId]="egitimId"
+            [kaynakId]="selectedKaynakId"
+            [baslik]="(kaynakDetay?.baslik || 'Kaynak') + ' — Soru-Cevap'"
+            altAciklama="Bu kaynağın tam metnini, damıtılmış özetini ve eğitimdeki diğer kaynaklarla / seri planıyla ilişkisini birlikte tarayarak yanıtlar."
+            placeholder="Bu döküman/video hakkında spesifik bir soru sorun..."
+            [ornekSorular]="kaynakOrnekSorular"
+          ></app-studio-qa-panel>
+        </div>
 
-          <!-- Ham Metin Gösterimi -->
-          <div *ngIf="kaynakActiveTab === 'ham'" 
-               class="text-slate-300 text-xs md:text-sm font-sans whitespace-pre-wrap leading-relaxed select-text bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono">
-            {{ activeKaynakText }}
+        <!-- Metin İçeriği -->
+        <div *ngIf="kaynakActiveTab !== 'soru'">
+          <div *ngIf="activeKaynakText; else emptyTextTpl">
+            <!-- Markdown Formatlı Gösterim (Özet ve Çeviri için) -->
+            <div *ngIf="kaynakActiveTab === 'ozet' || kaynakActiveTab === 'cevirisi'" 
+                 class="prose prose-invert max-w-none text-slate-200 text-sm leading-relaxed" 
+                 [innerHTML]="formatMarkdown(activeKaynakText)">
+            </div>
+
+            <!-- Ham Metin Gösterimi -->
+            <div *ngIf="kaynakActiveTab === 'ham'" 
+                 class="text-slate-300 text-xs md:text-sm font-sans whitespace-pre-wrap leading-relaxed select-text bg-slate-900/60 p-4 rounded-xl border border-slate-800 font-mono">
+              {{ activeKaynakText }}
+            </div>
           </div>
         </div>
 

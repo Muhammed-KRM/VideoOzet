@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
 using VideoOzet.Business.Interfaces;
@@ -12,11 +13,16 @@ public class VideolarController : ControllerBase
 {
     private readonly IVideoService _videoService;
     private readonly IDokumanService? _dokumanService;
+    private readonly IConfiguration? _configuration;
 
-    public VideolarController(IVideoService videoService, IDokumanService? dokumanService = null)
+    public VideolarController(
+        IVideoService videoService,
+        IDokumanService? dokumanService = null,
+        IConfiguration? configuration = null)
     {
         _videoService = videoService;
         _dokumanService = dokumanService;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -76,23 +82,37 @@ public class VideolarController : ControllerBase
     [HttpPost("reset-queue")]
     public async Task<IActionResult> ResetQueue(Guid egitimId)
     {
-        // 1. RabbitMQ kuyruklarını temizle (HTTP üzerinden)
-        using var client = new HttpClient();
-        var authBytes = System.Text.Encoding.ASCII.GetBytes("guest:guest");
+        // 1. RabbitMQ kuyruklarını temizle (HTTP üzerinden, IConfiguration'dan adres ve kimlik bilgileriyle)
+        var rabbitHost = _configuration?["RabbitMQ:Host"] ?? _configuration?["RABBITMQ_HOST"] ?? "localhost";
+        var managementPort = _configuration?["RabbitMQ:ManagementPort"] ?? _configuration?["RABBITMQ_MANAGEMENT_PORT"] ?? "15673";
+        var rabbitUser = _configuration?["RabbitMQ:Username"] ?? _configuration?["RABBITMQ_USER"] ?? "guest";
+        var rabbitPass = _configuration?["RabbitMQ:Password"] ?? _configuration?["RABBITMQ_PASSWORD"] ?? "guest";
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var authBytes = System.Text.Encoding.ASCII.GetBytes($"{rabbitUser}:{rabbitPass}");
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
         
-        var queues = new[] { 
-            "SummarizeVideo", "SummarizeVideo_error", 
-            "ExtractTranscript", "ExtractTranscript_error", 
-            "IndexSummary", "IndexSummary_error",
-            "QualityCheck", "QualityCheck_error",
-            "GenerateContent", "GenerateContent_error",
-            "ExtractDokumanText", "ExtractDokumanText_error",
-            "IndexDokuman", "IndexDokuman_error"
-        };
-        foreach(var q in queues)
+        var baseQueues = new[]
         {
-            try { await client.DeleteAsync($"http://localhost:15673/api/queues/%2f/{q}/contents"); } catch { }
+            "SummarizeVideo",
+            "ExtractTranscript",
+            "IndexSummary",
+            "QualityCheck",
+            "GenerateContent",
+            "ExtractDokumanText",
+            "IndexDokuman",
+            "TopicAnalysis",
+            "TopicAnalysisCompleted",
+            "SeriesPlan",
+            "SeriesVideoGeneration",
+            "SeriesVideoGenerated",
+            "SeriesVideoRevision"
+        };
+
+        foreach (var q in baseQueues)
+        {
+            try { await client.DeleteAsync($"http://{rabbitHost}:{managementPort}/api/queues/%2f/{q}/contents"); } catch { }
+            try { await client.DeleteAsync($"http://{rabbitHost}:{managementPort}/api/queues/%2f/{q}_error/contents"); } catch { }
         }
 
         // 2. Eğitimdeki tamamlanmamış tüm video ve dokümanları yeniden kuyruğa ekle

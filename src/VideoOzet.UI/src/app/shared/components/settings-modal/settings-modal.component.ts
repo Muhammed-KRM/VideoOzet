@@ -561,6 +561,38 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
                   </div>
                 </div>
               </div>
+
+              <!-- Kesin Sağlayıcı Kilidi / Yedek Sağlayıcı İzin Ayarı -->
+              <div class="p-3.5 rounded-xl border transition-all"
+                   [ngClass]="form().allowFallbackToSecondaryProvider
+                     ? 'bg-amber-950/30 border-amber-500/40'
+                     : 'bg-emerald-950/25 border-emerald-500/30'">
+                <label class="flex items-start justify-between gap-3 cursor-pointer">
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm">{{ form().allowFallbackToSecondaryProvider ? '⚠️' : '🔒' }}</span>
+                      <span class="text-xs font-semibold text-white">
+                        Ana model hata verirse yedek sağlayıcıya geçilmesine izin ver — kapalıyken seçtiğiniz model kilitlenir
+                      </span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 leading-relaxed">
+                      @if (!form().allowFallbackToSecondaryProvider) {
+                        <span class="text-emerald-300 font-medium">Kesin Model Kilidi Aktif (Önerilen):</span>
+                        Seçtiğiniz model hata veya yoğunluk döndürdüğünde kendi sağlayıcısı içinde yeniden dener; asla sessizce küçük/yedek bir modele düşüp kaynak metnini kırpmaz.
+                      } @else {
+                        <span class="text-amber-300 font-medium">Yedek Sağlayıcıya Geçiş Açık:</span>
+                        Seçili sağlayıcı tüm denemelere rağmen yanıt vermezse işlem yedek sağlayıcıya (örn. Groq) devredilebilir.
+                      }
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    [ngModel]="!!form().allowFallbackToSecondaryProvider"
+                    (ngModelChange)="updateField('allowFallbackToSecondaryProvider', $event)"
+                    class="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                  />
+                </label>
+              </div>
             </div>
 
             <!-- Bağlantı Test Sonucu -->
@@ -657,51 +689,82 @@ export class SettingsModalComponent {
     antigravityProxyUrl: 'http://localhost:8045/v1',
     antigravityProxyKey: '',
     antigravityProxyModel: 'gemini-3.8-flash-tiered',
+    antigravityProxySummaryModel: 'gemini-3.8-flash-tiered',
+    antigravityProxyVideoPlanModel: 'claude-3-7-sonnet-tiered',
+    antigravityProxyQcModel: 'gemini-3.8-flash-tiered',
     antigravitySummaryModel: 'gemini-3.8-flash-tiered',
     antigravityVideoPlanModel: 'claude-3-7-sonnet-tiered',
-    antigravityQcModel: 'gemini-3.8-flash-tiered'
+    antigravityQcModel: 'gemini-3.8-flash-tiered',
+    allowFallbackToSecondaryProvider: false
   });
 
   readonly activeSummaryModel = computed(() => {
     const f = this.form();
     if (f.activeProvider === 'openrouter') return f.openRouterSummaryModel || f.openRouterModel;
     if (f.activeProvider === 'groq') return f.groqSummaryModel || f.groqModel;
-    return f.antigravitySummaryModel || f.antigravityProxyModel;
+    return f.antigravityProxySummaryModel || f.antigravitySummaryModel || f.antigravityProxyModel;
   });
 
   readonly activeVideoPlanModel = computed(() => {
     const f = this.form();
     if (f.activeProvider === 'openrouter') return f.openRouterVideoPlanModel || f.openRouterModel;
     if (f.activeProvider === 'groq') return f.groqVideoPlanModel || f.groqModel;
-    return f.antigravityVideoPlanModel || f.antigravityProxyModel;
+    return f.antigravityProxyVideoPlanModel || f.antigravityVideoPlanModel || f.antigravityProxyModel;
   });
 
   readonly activeQcModel = computed(() => {
     const f = this.form();
     if (f.activeProvider === 'openrouter') return f.openRouterQcModel || f.openRouterModel;
     if (f.activeProvider === 'groq') return f.groqQcModel || f.groqModel;
-    return f.antigravityQcModel || f.antigravityProxyModel;
+    return f.antigravityProxyQcModel || f.antigravityQcModel || f.antigravityProxyModel;
   });
 
   updateSummaryModel(val: string): void {
     const p = this.form().activeProvider;
-    if (p === 'openrouter') this.updateField('openRouterSummaryModel', val);
-    else if (p === 'groq') this.updateField('groqSummaryModel', val);
-    else this.updateField('antigravitySummaryModel', val);
+    if (p === 'openrouter') {
+      this.updateField('openRouterSummaryModel', val);
+    } else if (p === 'groq') {
+      this.updateField('groqSummaryModel', val);
+    } else {
+      this.form.update(f => ({
+        ...f,
+        antigravityProxySummaryModel: val,
+        antigravitySummaryModel: val
+      }));
+      this.saveMessage.set('');
+    }
   }
 
   updateVideoPlanModel(val: string): void {
     const p = this.form().activeProvider;
-    if (p === 'openrouter') this.updateField('openRouterVideoPlanModel', val);
-    else if (p === 'groq') this.updateField('groqVideoPlanModel', val);
-    else this.updateField('antigravityVideoPlanModel', val);
+    if (p === 'openrouter') {
+      this.updateField('openRouterVideoPlanModel', val);
+    } else if (p === 'groq') {
+      this.updateField('groqVideoPlanModel', val);
+    } else {
+      this.form.update(f => ({
+        ...f,
+        antigravityProxyVideoPlanModel: val,
+        antigravityVideoPlanModel: val
+      }));
+      this.saveMessage.set('');
+    }
   }
 
   updateQcModel(val: string): void {
     const p = this.form().activeProvider;
-    if (p === 'openrouter') this.updateField('openRouterQcModel', val);
-    else if (p === 'groq') this.updateField('groqQcModel', val);
-    else this.updateField('antigravityQcModel', val);
+    if (p === 'openrouter') {
+      this.updateField('openRouterQcModel', val);
+    } else if (p === 'groq') {
+      this.updateField('groqQcModel', val);
+    } else {
+      this.form.update(f => ({
+        ...f,
+        antigravityProxyQcModel: val,
+        antigravityQcModel: val
+      }));
+      this.saveMessage.set('');
+    }
   }
 
   applyPreset(preset: 'hybrid' | 'argon' | 'flash'): void {
@@ -709,6 +772,9 @@ export class SettingsModalComponent {
       this.updateField('openRouterSummaryModel', 'google/gemini-3.8-flash');
       this.updateField('openRouterVideoPlanModel', 'anthropic/claude-3.7-sonnet');
       this.updateField('openRouterQcModel', 'google/gemini-3.8-flash');
+      this.updateField('antigravityProxySummaryModel', 'gemini-3.8-flash-tiered');
+      this.updateField('antigravityProxyVideoPlanModel', 'claude-3-7-sonnet-tiered');
+      this.updateField('antigravityProxyQcModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravitySummaryModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravityVideoPlanModel', 'claude-3-7-sonnet-tiered');
       this.updateField('antigravityQcModel', 'gemini-3.8-flash-tiered');
@@ -716,6 +782,9 @@ export class SettingsModalComponent {
       this.updateField('openRouterSummaryModel', 'google/gemini-3.8-flash');
       this.updateField('openRouterVideoPlanModel', 'argon');
       this.updateField('openRouterQcModel', 'google/gemini-3.8-flash');
+      this.updateField('antigravityProxySummaryModel', 'gemini-3.8-flash-tiered');
+      this.updateField('antigravityProxyVideoPlanModel', 'argon');
+      this.updateField('antigravityProxyQcModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravitySummaryModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravityVideoPlanModel', 'argon');
       this.updateField('antigravityQcModel', 'gemini-3.8-flash-tiered');
@@ -723,6 +792,9 @@ export class SettingsModalComponent {
       this.updateField('openRouterSummaryModel', 'google/gemini-3.8-flash');
       this.updateField('openRouterVideoPlanModel', 'google/gemini-3.8-flash');
       this.updateField('openRouterQcModel', 'google/gemini-3.8-flash');
+      this.updateField('antigravityProxySummaryModel', 'gemini-3.8-flash-tiered');
+      this.updateField('antigravityProxyVideoPlanModel', 'gemini-3.8-flash-tiered');
+      this.updateField('antigravityProxyQcModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravitySummaryModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravityVideoPlanModel', 'gemini-3.8-flash-tiered');
       this.updateField('antigravityQcModel', 'gemini-3.8-flash-tiered');

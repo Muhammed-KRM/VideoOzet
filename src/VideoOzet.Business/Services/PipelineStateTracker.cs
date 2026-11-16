@@ -211,7 +211,10 @@ public class PipelineStateTracker : IPipelineStateTracker
 
         if (isActiveProcessingState)
         {
-            if (idleSeconds > 90 && (!rabbitAvailable || relevantQueueMessages == 0 || idleSeconds > 180))
+            // Kuyrukta hâlâ mesaj bekliyorsa (ör. toplu yeniden indekslemede sıra bekleyen dosyalar)
+            // kısa süreli sessizlikleri yanlışlıkla "Takılı Kaldı" olarak işaretleme.
+            bool isLikelyQueued = rabbitAvailable && relevantQueueMessages > 0;
+            if ((!isLikelyQueued && idleSeconds > 90) || (isLikelyQueued && idleSeconds > 1800))
             {
                 health.TakiliMi = true;
                 health.TakilmaNedeni = "Arka plan işçisi (Worker) yanıt vermiyor ve bu aşama yarıda kalmış görünüyor (zaman aşımı veya bağlantı kopması).";

@@ -1,16 +1,19 @@
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using VideoOzet.Business.DTOs;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Interfaces;
+using VideoOzet.Business.Services;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
 using VideoOzet.Data.Enums;
-using Microsoft.Extensions.Logging;
-using VideoOzet.Business.Services;
 using VideoOzet.Worker.Services;
 
 namespace VideoOzet.Worker.Consumers;
@@ -65,8 +68,11 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 EgitimId = msg.EgitimId,
                 Asama = "Video revize ediliyor...",
                 Durum = "İşleniyor",
-                Mesaj = "Mevcut video içeriği güncelleniyor."
+                Mesaj = $"Bölüm {bolum.BolumNo} için kaynaklar taranıyor ve içerik güncelleniyor."
             });
+
+            var seriPlani = bolum.SeriPlani;
+            var request = seriPlani?.ContentRequest;
 
             // Son revizyonu al
             var sonRevizyon = bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
@@ -74,76 +80,146 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             string currentOzet = sonRevizyon?.ArastirmaOzeti ?? "";
             string currentPlan = sonRevizyon?.VideoPlani ?? "";
 
-            // Kaynak bağlamını yükle
-            List<Guid> previousChunkIds = new();
-            if (!string.IsNullOrWhiteSpace(sonRevizyon?.KullanilanKaynaklar))
+            // Önceki revizyonda kullanılan chunk ID'lerini ve bölüme atanan kaynak ID'lerini ayrıştır
+            List<Guid> previousChunkIds = ParseGuidList(sonRevizyon?.KullanilanKaynaklar);
+            List<Guid> assignedIds = ParseGuidList(bolum.AtananKaynaklarJson);
+
+            // Bölüm konularını ve sahne iskeleti başlıklarını çıkar
+            var topicsList = ParseTopicsAndSceneHints(bolum.KonularJson, bolum.SahneIskeletiJson);
+            if (!topicsList.Any() && !string.IsNullOrWhiteSpace(bolum.CalismaBasligi))
             {
-                try
-                {
-                    previousChunkIds = JsonSerializer.Deserialize<List<Guid>>(sonRevizyon.KullanilanKaynaklar) ?? new();
-                }
-                catch { }
+                topicsList.Add(bolum.CalismaBasligi);
             }
+
+            var searchQueries = new List<string>
+            {
+                msg.Talimat ?? "",
+                bolum.CalismaBasligi ?? "",
+                bolum.AnaFikir ?? "",
+                bolum.Kanca ?? ""
+            };
+            searchQueries.AddRange(topicsList);
+            searchQueries = searchQueries
+                .Where(q => !string.IsNullOrWhiteSpace(q))
+                .Select(q => q.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             string contextData = "";
-            if (_sourceContextBuilder != null && previousChunkIds.Any())
-            {
-                var sourceContext = await _sourceContextBuilder.BuildFromChunkIdsAsync(msg.EgitimId, previousChunkIds, context.CancellationToken);
-                contextData = sourceContext.ContextText;
-            }
+            List<Guid> mergedChunkIds = new(previousChunkIds);
 
-            // Eğer önceki chunk ID'leri boşsa veya bağlam metni boş geldiyse, dinamik olarak konu ve başlıklardan kaynak bağlamı üret
-            if (string.IsNullOrWhiteSpace(contextData) && _sourceContextBuilder != null)
+            // Eski 24 chunk'a hapsolmak yerine HER ZAMAN revizyon talimatı + bölüm başlığı + ana fikir + konular ile dinamik arama yap
+            // ve önceki kullanılan chunk'larla birleştir!
+            if (_sourceContextBuilder != null)
             {
-                var topicsList = new List<string>();
-                if (!string.IsNullOrWhiteSpace(bolum.KonularJson))
+                SourceContextResult? dynamicContext = null;
+                try
+                {
+                    dynamicContext = await _sourceContextBuilder.BuildContextAsync(
+                        msg.EgitimId,
+                        searchQueries,
+                        maxChars: 130000,
+                        preferredSourceIds: assignedIds.Count > 0 ? assignedIds : null,
+                        targetChunksOverride: null,
+                        ct: context.CancellationToken);
+                }
+                catch (Exception ctxEx)
+                {
+                    _logger.LogWarning(ctxEx, "Dinamik kaynak bağlamı oluşturulurken uyarı oluştu, önceki chunk'lara düşülüyor.");
+                }
+
+                SourceContextResult? prevContext = null;
+                if (previousChunkIds.Any())
                 {
                     try
                     {
-                        using var doc = JsonDocument.Parse(bolum.KonularJson);
-                        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                        prevContext = await _sourceContextBuilder.BuildFromChunkIdsAsync(
+                            msg.EgitimId,
+                            previousChunkIds,
+                            context.CancellationToken);
+                    }
+                    catch { }
+                }
+
+                var dynamicIds = dynamicContext?.UsedChunkIds ?? new List<Guid>();
+                mergedChunkIds = dynamicIds
+                    .Concat(previousChunkIds)
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+
+                if (mergedChunkIds.Count > dynamicIds.Count && dynamicIds.Count > 0)
+                {
+                    try
+                    {
+                        var unifiedContext = await _sourceContextBuilder.BuildFromChunkIdsAsync(
+                            msg.EgitimId,
+                            mergedChunkIds,
+                            context.CancellationToken);
+
+                        if (!string.IsNullOrWhiteSpace(unifiedContext.ContextText) &&
+                            unifiedContext.ContextText.Length >= (dynamicContext?.ContextText?.Length ?? 0))
                         {
-                            foreach (var elem in doc.RootElement.EnumerateArray())
-                            {
-                                if (elem.ValueKind == JsonValueKind.String)
-                                {
-                                    var s = elem.GetString();
-                                    if (!string.IsNullOrWhiteSpace(s)) topicsList.Add(s);
-                                }
-                                else if (elem.ValueKind == JsonValueKind.Object)
-                                {
-                                    var b = elem.TryGetProperty("Baslik", out var bp) ? bp.GetString() : (elem.TryGetProperty("baslik", out bp) ? bp.GetString() : "");
-                                    var a = elem.TryGetProperty("Aciklama", out var ap) ? ap.GetString() : (elem.TryGetProperty("aciklama", out ap) ? ap.GetString() : "");
-                                    var combined = $"{b} {a}".Trim();
-                                    if (!string.IsNullOrWhiteSpace(combined)) topicsList.Add(combined);
-                                }
-                            }
+                            contextData = unifiedContext.ContextText;
+                            if (unifiedContext.UsedChunkIds.Any())
+                                mergedChunkIds = unifiedContext.UsedChunkIds;
                         }
                     }
                     catch { }
                 }
 
-                if (!topicsList.Any() && !string.IsNullOrWhiteSpace(bolum.CalismaBasligi))
+                if (string.IsNullOrWhiteSpace(contextData))
                 {
-                    topicsList.Add(bolum.CalismaBasligi);
-                }
+                    var dynText = dynamicContext?.ContextText ?? "";
+                    var prvText = prevContext?.ContextText ?? "";
 
-                var searchQueries = new List<string> { bolum.CalismaBasligi ?? "", bolum.AnaFikir ?? "" };
-                searchQueries.AddRange(topicsList);
-                searchQueries = searchQueries.Where(q => !string.IsNullOrWhiteSpace(q)).ToList();
-
-                var dynamicContext = await _sourceContextBuilder.BuildContextAsync(
-                    msg.EgitimId,
-                    searchQueries,
-                    maxChars: 80000,
-                    ct: context.CancellationToken);
-
-                contextData = dynamicContext.ContextText;
-                if (dynamicContext.UsedChunkIds.Any())
-                {
-                    previousChunkIds = dynamicContext.UsedChunkIds;
+                    if (!string.IsNullOrWhiteSpace(dynText) && !string.IsNullOrWhiteSpace(prvText) &&
+                        !string.Equals(dynText, prvText, StringComparison.Ordinal))
+                    {
+                        var combined = $"{dynText}\n\n=== ÖNCEKİ ÜRETİMDE KULLANILAN EK KAYNAK KANITLARI ===\n{prvText}";
+                        contextData = combined.Length > 145000 ? combined[..145000] : combined;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(dynText))
+                    {
+                        contextData = dynText;
+                    }
+                    else
+                    {
+                        contextData = prvText;
+                    }
                 }
             }
+
+            // Varsa bir önceki bölümün güncel DevirNotuJson bilgisini oku (bölümler arası süreklilik için)
+            string oncekiBolumDevirNotu = "";
+            if (bolum.BolumNo > 1)
+            {
+                var oncekiBolum = await _dbContext.SeriBolumler
+                    .AsNoTracking()
+                    .Include(b => b.Revizyonlar)
+                    .FirstOrDefaultAsync(
+                        b => b.SeriPlaniId == bolum.SeriPlaniId && b.BolumNo == bolum.BolumNo - 1,
+                        context.CancellationToken);
+
+                var oncekiAktifRev = oncekiBolum?.Revizyonlar
+                    .OrderByDescending(r => r.Id == oncekiBolum.AktifRevizyonId)
+                    .ThenByDescending(r => r.RevizyonNo)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(oncekiAktifRev?.DevirNotuJson))
+                {
+                    oncekiBolumDevirNotu = oncekiAktifRev.DevirNotuJson;
+                }
+            }
+
+            var yazarTeziText = $"[YAZAR-TEZİ]: {request?.Konu} {request?.EkTonTalimati} {seriPlani?.OnayTalimati}".Trim();
+            var enrichedTopic = $"{bolum.CalismaBasligi} (Hedef Süre: ~{(bolum.HedefSureDk > 0 ? bolum.HedefSureDk : 15)} dk | Bölüm Ana Fikri: {bolum.AnaFikir}) — {yazarTeziText}";
+            if (!string.IsNullOrWhiteSpace(oncekiBolumDevirNotu))
+            {
+                enrichedTopic += $" | [ÖNCEKİ BÖLÜM DEVİR DEFTERİ]: {oncekiBolumDevirNotu}";
+            }
+
+            var enrichedInstruction = $"{msg.Talimat}\n\n{yazarTeziText}".Trim();
 
             // Revizyon işlemini AI ile gerçekleştir
             string yeniOzet = currentOzet;
@@ -151,9 +227,9 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             {
                 yeniOzet = await _synthesisProvider.ReviseContentAsync(
                     currentOzet,
-                    msg.Talimat,
+                    enrichedInstruction,
                     "Araştırma Özeti",
-                    bolum.CalismaBasligi,
+                    enrichedTopic,
                     contextData,
                     context.CancellationToken);
             }
@@ -163,24 +239,31 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             {
                 yeniPlan = await _synthesisProvider.ReviseContentAsync(
                     currentPlan,
-                    msg.Talimat,
+                    enrichedInstruction,
                     "Video Planı",
-                    bolum.CalismaBasligi,
+                    enrichedTopic,
                     contextData,
                     context.CancellationToken);
             }
+
+            var guncelDevirNotuJson = BuildUpdatedContinuityLedgerJson(
+                bolum,
+                yeniOzet,
+                yeniPlan,
+                sonRevizyon?.DevirNotuJson,
+                msg.Talimat);
 
             var yeniRevizyon = new BolumRevizyonu
             {
                 SeriBolumId = bolum.Id,
                 RevizyonNo = yeniRevizyonNo,
                 Talimat = msg.Talimat,
-                HedefAlan = msg.HedefAlan,
+                HedefAlan = string.IsNullOrWhiteSpace(msg.HedefAlan) ? "Hepsi" : msg.HedefAlan,
                 ArastirmaOzeti = yeniOzet,
                 VideoPlani = yeniPlan,
-                DevirNotuJson = sonRevizyon?.DevirNotuJson ?? "",
-                KullanilanKaynaklar = previousChunkIds.Any()
-                    ? JsonSerializer.Serialize(previousChunkIds)
+                DevirNotuJson = guncelDevirNotuJson,
+                KullanilanKaynaklar = mergedChunkIds.Any()
+                    ? JsonSerializer.Serialize(mergedChunkIds)
                     : (sonRevizyon?.KullanilanKaynaklar ?? "[]"),
                 LlmModel = string.IsNullOrWhiteSpace(_synthesisProvider.ActiveModelName) ? "bilinmiyor" : _synthesisProvider.ActiveModelName,
                 Tip = RevizyonTipi.KullaniciRevizyonu,
@@ -195,11 +278,15 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                     ? null
                     : sonRevizyon.DetayliRapor;
 
+                var authorThesisForQc = $"{yazarTeziText} | Bölüm Ana Fikri: {bolum.AnaFikir} | Revizyon Talimatı: {msg.Talimat}".Trim();
+
                 var qcResult = await _qcService.EvaluateAsync(
-                    yeniOzet,
-                    contextData,
+                    summaryText: yeniOzet,
+                    sourceContext: contextData,
+                    authorThesisContext: authorThesisForQc,
                     claimCount: 8,
                     previousReportJson: prevReport,
+                    videoPlanText: yeniPlan,
                     ct: context.CancellationToken);
 
                 yeniRevizyon.GuvenSkorYuzde = qcResult.GuvenSkorYuzde;
@@ -212,28 +299,53 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             }
             catch (Exception qcEx)
             {
-                _logger.LogWarning(qcEx, "Bölüm {BolumNo} revizyon QC değerlendirmesinde hata oluştu, güvenli varsayılan rapor atanıyor.", bolum.BolumNo);
-                yeniRevizyon.GuvenSkorYuzde = 100;
+                _logger.LogWarning(qcEx, "Bölüm {BolumNo} revizyon QC değerlendirmesinde hata oluştu.", bolum.BolumNo);
+                yeniRevizyon.GuvenSkorYuzde = 0m;
                 yeniRevizyon.ToplamIddiaSayisi = 1;
-                yeniRevizyon.DesteklenenSayisi = 1;
-                yeniRevizyon.BelirsizSayisi = 0;
+                yeniRevizyon.DesteklenenSayisi = 0;
+                yeniRevizyon.BelirsizSayisi = 1;
                 yeniRevizyon.DesteklenmeyenSayisi = 0;
-                yeniRevizyon.QcDurumu = BolumDurumu.Tamamlandi;
+                yeniRevizyon.QcDurumu = BolumDurumu.Hata;
                 yeniRevizyon.DetayliRapor = JsonSerializer.Serialize(new[]
                 {
                     new
                     {
-                        iddia = "İçerik revizyonu ve yapısal kalite doğrulaması",
-                        durum = "desteklendi",
-                        aciklama = "Revize edilen içerik başarıyla oluşturuldu ve doğrulandı."
+                        iddia = "Kalite kontrol doğrulaması tamamlanamadı.",
+                        durum = "belirsiz",
+                        kanitKodu = "-",
+                        kaynakAlani = "ArastirmaOzeti",
+                        aciklama = $"Kalite kontrol sırasında hata oluştu: {qcEx.Message}"
                     }
                 });
             }
 
             _dbContext.BolumRevizyonlari.Add(yeniRevizyon);
-            
+
             bolum.AktifRevizyonId = yeniRevizyon.Id;
             bolum.Durum = BolumDurumu.Tamamlandi;
+            bolum.BaglamEskidi = false;
+            bolum.BaglamSorunlariJson = "[]";
+
+            // Aynı plandaki b.BolumNo > bolum.BolumNo olan tamamlanmış bölümlerde BaglamEskidi = true ve BaglamSorunlariJson uyarısını kaydet
+            var sonrakiTamamlanmisBolumler = await _dbContext.SeriBolumler
+                .Where(b => b.SeriPlaniId == bolum.SeriPlaniId && b.BolumNo > bolum.BolumNo && b.Durum == BolumDurumu.Tamamlandi)
+                .OrderBy(b => b.BolumNo)
+                .ToListAsync(context.CancellationToken);
+
+            if (sonrakiTamamlanmisBolumler.Count > 0)
+            {
+                var kisaTalimat = (msg.Talimat ?? "").Trim();
+                if (kisaTalimat.Length > 120)
+                    kisaTalimat = kisaTalimat[..120] + "...";
+
+                var uyariMesaji = $"Bölüm {bolum.BolumNo} ({bolum.CalismaBasligi}) Revizyon #{yeniRevizyonNo} ile güncellendi (Talimat: \"{kisaTalimat}\"). Önceki bölümün devir bağlamı değiştiği için bu bölümü yeni bağlama göre güncelleyebilirsiniz.";
+
+                foreach (var sonraki in sonrakiTamamlanmisBolumler)
+                {
+                    sonraki.BaglamEskidi = true;
+                    sonraki.BaglamSorunlariJson = AppendBaglamSorunu(sonraki.BaglamSorunlariJson, uyariMesaji);
+                }
+            }
 
             await _dbContext.SaveChangesAsync(context.CancellationToken);
 
@@ -270,5 +382,261 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                     Mesaj = $"Revizyon hatası: {ex.Message}"
                 }));
         }
+    }
+
+    private static string BuildUpdatedContinuityLedgerJson(
+        SeriBolum bolum,
+        string yeniOzet,
+        string yeniPlan,
+        string? oncekiDevirNotuJson,
+        string? revizyonTalimati)
+    {
+        EpisodeContinuityLedgerDto? existingLedger = null;
+        if (!string.IsNullOrWhiteSpace(oncekiDevirNotuJson) && oncekiDevirNotuJson.TrimStart().StartsWith("{"))
+        {
+            try
+            {
+                existingLedger = JsonSerializer.Deserialize<EpisodeContinuityLedgerDto>(oncekiDevirNotuJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch { }
+        }
+
+        var kavramlar = new List<string>();
+        kavramlar.AddRange(ParseTopicsAndSceneHints(bolum.KonularJson, null));
+
+        // Yeni özet ve plandaki Markdown başlıklarından işlenen kavramları/düşünürleri çıkar
+        foreach (var text in new[] { yeniOzet, yeniPlan })
+        {
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            foreach (Match m in Regex.Matches(text, @"^#{2,4}\s+(.+)$", RegexOptions.Multiline))
+            {
+                var heading = m.Groups[1].Value.Trim().Trim('*').Trim();
+                if (!string.IsNullOrWhiteSpace(heading) &&
+                    !heading.StartsWith("Sahne", StringComparison.OrdinalIgnoreCase) &&
+                    !heading.Contains("Prompter", StringComparison.OrdinalIgnoreCase) &&
+                    !heading.Contains("Görsel", StringComparison.OrdinalIgnoreCase) &&
+                    heading.Length <= 110)
+                {
+                    kavramlar.Add(heading);
+                }
+            }
+        }
+
+        if (existingLedger?.IslenenDusunurlerVeKavramlar != null)
+        {
+            kavramlar.AddRange(existingLedger.IslenenDusunurlerVeKavramlar);
+        }
+
+        var ornekler = new List<string>();
+        if (existingLedger?.VerilenSomutOrnekler != null)
+        {
+            ornekler.AddRange(existingLedger.VerilenSomutOrnekler);
+        }
+        if (!string.IsNullOrWhiteSpace(revizyonTalimati))
+        {
+            var trimmedRev = revizyonTalimati.Trim();
+            ornekler.Add($"Revizyon vurgusu: {(trimmedRev.Length > 140 ? trimmedRev[..140] + "..." : trimmedRev)}");
+        }
+
+        var sorular = new List<string>();
+        if (!string.IsNullOrWhiteSpace(yeniPlan))
+        {
+            var questionMatches = Regex.Matches(yeniPlan, @"([^.!?\r\n]{15,180}\?)");
+            foreach (Match qm in questionMatches.TakeLast(3))
+            {
+                var q = qm.Groups[1].Value.Trim().TrimStart('>', '-', '*', ' ');
+                if (!string.IsNullOrWhiteSpace(q))
+                    sorular.Add(q);
+            }
+        }
+        if (!sorular.Any() && existingLedger?.AcikBirakilanSorular != null)
+        {
+            sorular.AddRange(existingLedger.AcikBirakilanSorular);
+        }
+
+        string sonCumle = existingLedger?.SonCumleGecisNotu ?? "";
+        var sourceForEnding = !string.IsNullOrWhiteSpace(yeniPlan) ? yeniPlan : yeniOzet;
+        if (!string.IsNullOrWhiteSpace(sourceForEnding))
+        {
+            var lastLines = sourceForEnding
+                .Replace("\r\n", "\n")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim().TrimStart('>', '*', '-', ' '))
+                .Where(l => l.Length > 25 &&
+                            !l.StartsWith("#") &&
+                            !l.StartsWith("[") &&
+                            !l.StartsWith("Kamera:", StringComparison.OrdinalIgnoreCase) &&
+                            !l.StartsWith("B-Roll:", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (lastLines.Count > 0)
+            {
+                var candidate = lastLines[^1];
+                sonCumle = candidate.Length > 240 ? candidate[..240] + "..." : candidate;
+            }
+        }
+
+        var updatedLedger = new EpisodeContinuityLedgerDto
+        {
+            BolumNo = bolum.BolumNo,
+            CalismaBasligi = bolum.CalismaBasligi,
+            IslenenDusunurlerVeKavramlar = kavramlar
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .ToList(),
+            VerilenSomutOrnekler = ornekler
+                .Where(o => !string.IsNullOrWhiteSpace(o))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(6)
+                .ToList(),
+            AcikBirakilanSorular = sorular
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(4)
+                .ToList(),
+            SonCumleGecisNotu = sonCumle
+        };
+
+        return JsonSerializer.Serialize(updatedLedger);
+    }
+
+    private static string AppendBaglamSorunu(string? existingJson, string newWarning)
+    {
+        var warnings = new List<string>();
+        if (!string.IsNullOrWhiteSpace(existingJson))
+        {
+            try
+            {
+                if (existingJson.TrimStart().StartsWith("["))
+                {
+                    var parsed = JsonSerializer.Deserialize<List<string>>(existingJson);
+                    if (parsed != null)
+                        warnings.AddRange(parsed.Where(s => !string.IsNullOrWhiteSpace(s)));
+                }
+                else
+                {
+                    warnings.Add(existingJson.Trim());
+                }
+            }
+            catch
+            {
+                warnings.Add(existingJson.Trim());
+            }
+        }
+
+        if (!warnings.Contains(newWarning, StringComparer.OrdinalIgnoreCase))
+        {
+            warnings.Add(newWarning);
+        }
+
+        return JsonSerializer.Serialize(warnings.TakeLast(5).ToList());
+    }
+
+    private static List<Guid> ParseGuidList(string? raw)
+    {
+        var list = new List<Guid>();
+        if (string.IsNullOrWhiteSpace(raw))
+            return list;
+
+        var trimmed = raw.Trim();
+        try
+        {
+            if (trimmed.StartsWith("["))
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        if (elem.ValueKind == JsonValueKind.String && Guid.TryParse(elem.GetString(), out var g) && g != Guid.Empty)
+                        {
+                            list.Add(g);
+                        }
+                        else if (elem.ValueKind == JsonValueKind.Object)
+                        {
+                            var idStr = elem.TryGetProperty("kaynakId", out var p) ? p.GetString()
+                                : (elem.TryGetProperty("KaynakId", out p) ? p.GetString()
+                                : (elem.TryGetProperty("id", out p) ? p.GetString()
+                                : (elem.TryGetProperty("Id", out p) ? p.GetString() : null)));
+                            if (Guid.TryParse(idStr, out var objGuid) && objGuid != Guid.Empty)
+                                list.Add(objGuid);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                foreach (var part in trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (Guid.TryParse(part.Trim(), out var g) && g != Guid.Empty)
+                        list.Add(g);
+                }
+            }
+        }
+        catch { }
+
+        return list.Distinct().ToList();
+    }
+
+    private static List<string> ParseTopicsAndSceneHints(string? konularJson, string? sahneIskeletiJson)
+    {
+        var topicsList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(konularJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(konularJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        if (elem.ValueKind == JsonValueKind.String)
+                        {
+                            var s = elem.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) topicsList.Add(s.Trim());
+                        }
+                        else if (elem.ValueKind == JsonValueKind.Object)
+                        {
+                            var b = elem.TryGetProperty("Baslik", out var bp) ? bp.GetString() : (elem.TryGetProperty("baslik", out bp) ? bp.GetString() : "");
+                            var a = elem.TryGetProperty("Aciklama", out var ap) ? ap.GetString() : (elem.TryGetProperty("aciklama", out ap) ? ap.GetString() : "");
+                            var combined = $"{b} {a}".Trim();
+                            if (!string.IsNullOrWhiteSpace(combined)) topicsList.Add(combined);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if (!string.IsNullOrWhiteSpace(sahneIskeletiJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(sahneIskeletiJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        if (elem.ValueKind == JsonValueKind.Object)
+                        {
+                            var baslik = elem.TryGetProperty("Baslik", out var bp) ? bp.GetString()
+                                : (elem.TryGetProperty("baslik", out bp) ? bp.GetString() : "");
+                            var aciklama = elem.TryGetProperty("AciklamaVeArgumanlar", out var ap) ? ap.GetString()
+                                : (elem.TryGetProperty("aciklamaVeArgumanlar", out ap) ? ap.GetString() : "");
+                            var combined = $"{baslik} {aciklama}".Trim();
+                            if (!string.IsNullOrWhiteSpace(combined))
+                                topicsList.Add(combined);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return topicsList;
     }
 }

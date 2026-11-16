@@ -88,7 +88,8 @@ public class VideoManager : IVideoService
             Baslik = dto.FileName,
             DosyaYolu = uploadedFilePath,
             IslemDurumu = VideoIslemDurumu.Bekliyor,
-            KullanimTuru = dto.KullanimTuru
+            KullanimTuru = dto.KullanimTuru,
+            IndekslemeTuru = dto.IndekslemeTuru
         };
 
         await _videoRepository.AddAsync(video);
@@ -168,7 +169,25 @@ public class VideoManager : IVideoService
         if (video == null)
             throw new NotFoundException("Video", id);
 
-        await _fileStorageService.DeleteFileAsync(video.DosyaYolu);
+        bool isVideoFileShared = false;
+        if (_dbContext != null && _dbContext.Videolar != null && !string.IsNullOrWhiteSpace(video.DosyaYolu))
+        {
+            isVideoFileShared = await _dbContext.Videolar.AnyAsync(v => v.Id != id && v.DosyaYolu == video.DosyaYolu);
+        }
+
+        if (!isVideoFileShared && !string.IsNullOrWhiteSpace(video.DosyaYolu))
+        {
+            await _fileStorageService.DeleteFileAsync(video.DosyaYolu);
+        }
+
+        if (_dbContext != null && _dbContext.Videolar != null && !string.IsNullOrWhiteSpace(video.SesYolu))
+        {
+            var isAudioShared = await _dbContext.Videolar.AnyAsync(v => v.Id != id && v.SesYolu == video.SesYolu);
+            if (!isAudioShared)
+            {
+                try { await _fileStorageService.DeleteFileAsync(video.SesYolu); } catch { }
+            }
+        }
 
         var egitim = await _egitimRepository.GetByIdAsync(video.EgitimId);
         if (egitim != null && egitim.ToplamVideoSayisi > 0)
@@ -305,6 +324,90 @@ public class VideoManager : IVideoService
         }
     }
 
+    public async Task<int> ReindexAllByEgitimIdAsync(Guid egitimId)
+    {
+        if (_dbContext == null)
+        {
+            var videos = (await _videoRepository.FindAsync(v => v.EgitimId == egitimId)).ToList();
+            int fallbackCount = 0;
+            foreach (var v in videos)
+            {
+                var tr = (await _transcriptRepository.FindAsync(t => t.VideoId == v.Id)).FirstOrDefault();
+                if (tr != null && !string.IsNullOrWhiteSpace(tr.HamMetin))
+                {
+                    await RetryVideoAsync(v.Id);
+                    fallbackCount++;
+                }
+            }
+            return fallbackCount;
+        }
+
+        var list = await _dbContext.Videolar
+            .Include(v => v.Transcript)
+            .Include(v => v.Summary)
+            .Where(v => v.EgitimId == egitimId)
+            .ToListAsync();
+
+        int queuedCount = 0;
+        var summaryEvents = new List<SummaryReadyEvent>();
+        var transcriptEvents = new List<TranscriptReadyEvent>();
+
+        foreach (var video in list)
+        {
+            if (video.Transcript == null || string.IsNullOrWhiteSpace(video.Transcript.HamMetin))
+                continue;
+
+            if (video.Summary != null)
+            {
+                video.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
+                summaryEvents.Add(new SummaryReadyEvent
+                {
+                    VideoId = video.Id,
+                    EgitimId = egitimId,
+                    SummaryId = video.Summary.Id
+                });
+                queuedCount++;
+            }
+            else
+            {
+                video.IslemDurumu = VideoIslemDurumu.OzetlemeBasladi;
+                transcriptEvents.Add(new TranscriptReadyEvent
+                {
+                    VideoId = video.Id,
+                    EgitimId = egitimId,
+                    TranscriptId = video.Transcript.Id
+                });
+                queuedCount++;
+            }
+        }
+
+        if (queuedCount == 0)
+            return 0;
+
+        await _dbContext.SaveChangesAsync();
+
+        foreach (var evt in summaryEvents)
+        {
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(evt.VideoId, egitimId, "Indeksleme", "Transkript zaman damgalarıyla yeniden indekslenmek üzere sıraya alındı...");
+            }
+            await _publishEndpoint.Publish(evt);
+        }
+
+        foreach (var evt in transcriptEvents)
+        {
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(evt.VideoId, egitimId, "Ozetleme", "Özet ve yeniden indeksleme için sıraya alındı...");
+            }
+            await _publishEndpoint.Publish(evt);
+        }
+
+        _logger.LogInformation("Eğitim {EgitimId} için {Count} video yeniden indekslenmek üzere sıraya alındı.", egitimId, queuedCount);
+        return queuedCount;
+    }
+
     public async Task UpdateKullanimTuruAsync(Guid id, KaynakKullanimTuru kullanimTuru)
     {
         var video = await _videoRepository.GetByIdAsync(id);
@@ -313,8 +416,34 @@ public class VideoManager : IVideoService
 
         video.KullanimTuru = kullanimTuru;
         _videoRepository.Update(video);
+
+        if (_dbContext != null && _dbContext.VideoChunkDocuments != null)
+        {
+            var chunks = await _dbContext.VideoChunkDocuments
+                .Where(c => c.VideoId == id)
+                .ToListAsync();
+
+            foreach (var chunk in chunks)
+            {
+                chunk.KullanimTuru = kullanimTuru;
+                if (!string.IsNullOrEmpty(chunk.Text) && chunk.Text.Contains("| Mod:", StringComparison.OrdinalIgnoreCase))
+                {
+                    chunk.Text = System.Text.RegularExpressions.Regex.Replace(
+                        chunk.Text,
+                        @"\s*\|\s*Mod:\s*[^\]\r\n]+(?=\])",
+                        string.Empty,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                }
+            }
+
+            if (chunks.Count > 0)
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+        }
+
         await _videoRepository.SaveChangesAsync();
-        _logger.LogInformation("Video {VideoId} kullanım türü güncellendi: {KullanimTuru}", id, kullanimTuru);
+        _logger.LogInformation("Video {VideoId} kullanım türü ve ilişkili chunk kayıtları güncellendi: {KullanimTuru}", id, kullanimTuru);
     }
 
     public async Task<KaynakIcerikDetayDto?> GetVideoIcerikDetayAsync(Guid id)

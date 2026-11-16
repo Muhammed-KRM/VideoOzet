@@ -226,7 +226,9 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 else if (l.Length >= 2) detectedLang = l.Substring(0, 2);
             }
 
-            var usedModel = (_sttProvider as CompositeSttProvider)?.LastUsedModel ?? "faster-whisper-large-v3-turbo";
+            var compositeStt = _sttProvider as CompositeSttProvider;
+            var usedModel = compositeStt?.LastUsedModel ?? "faster-whisper-large-v3-turbo";
+            var segmentsJson = compositeStt?.LastSegmentsJson;
 
             var existingTranscript = await _dbContext.VideoTranscripts
                 .FirstOrDefaultAsync(t => t.VideoId == message.VideoId, context.CancellationToken);
@@ -235,6 +237,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
             if (existingTranscript != null)
             {
                 existingTranscript.HamMetin = transcriptText;
+                existingTranscript.ZamanDamgalari = segmentsJson;
                 existingTranscript.KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
                 existingTranscript.Dil = detectedLang;
                 existingTranscript.SttModel = usedModel;
@@ -248,6 +251,7 @@ public class ExtractTranscriptConsumer : IConsumer<VideoUploadedEvent>
                 {
                     VideoId = message.VideoId,
                     HamMetin = transcriptText,
+                    ZamanDamgalari = segmentsJson,
                     KelimeSayisi = transcriptText.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length,
                     Dil = detectedLang,
                     SttModel = usedModel,

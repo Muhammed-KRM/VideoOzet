@@ -14,6 +14,7 @@ public class SeriPlani
     public string SeriHaritasiJson { get; set; } = string.Empty;
     public string DisaridaBirakilanlarJson { get; set; } = string.Empty;
     public string KullaniciKisitlariJson { get; set; } = string.Empty;
+    public string OnayTalimati { get; set; } = string.Empty;
     public bool OneridenFarkli { get; set; }
     public bool Onaylandi { get; set; }
     public SeriPlanDurumu Durum { get; set; }

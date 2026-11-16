@@ -32,6 +32,28 @@
   </p>
 </div>
 
+<!-- İşleme & İndeksleme Derinliği (Ham Kaynak vs Özet Kaynak) -->
+<div class="mb-4 bg-slate-900/70 p-1.5 rounded-xl border border-slate-700/70 flex flex-col sm:flex-row gap-1.5">
+  <button
+    type="button"
+    (click)="selectedIndekslemeTuru = 0"
+    [class]="selectedIndekslemeTuru === 0 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="flex-1 py-2 px-3 rounded-lg text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+  >
+    <span>📄 Ham Kaynak</span>
+    <span class="text-[11px] opacity-80 font-normal">(Tam Metin — Yüksek Doğruluk)</span>
+  </button>
+  <button
+    type="button"
+    (click)="selectedIndekslemeTuru = 1"
+    [class]="selectedIndekslemeTuru === 1 ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="flex-1 py-2 px-3 rounded-lg text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+  >
+    <span>⚡ Özet Kaynak</span>
+    <span class="text-[11px] opacity-80 font-normal">(Hızlı Özet İndeksleme)</span>
+  </button>
+</div>
+
 <!-- Sürükle Bırak Yükleme Alanı -->
 <div 
   class="relative border-2 border-dashed rounded-xl p-8 text-center transition-all"
@@ -68,7 +90,7 @@
       [class]="selectedKullanimTuru === 0 ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20' : 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/20'"
       class="px-5 py-2.5 text-white rounded-lg text-sm font-medium transition-colors shadow-lg"
     >
-      Toplu Dosya Seç ({{ selectedKullanimTuru === 0 ? 'Doğrudan Kaynak' : 'Dış Kaynak' }})
+      Toplu Dosya Seç ({{ selectedKullanimTuru === 0 ? 'Doğrudan' : 'Dış' }} · {{ selectedIndekslemeTuru === 0 ? 'Ham Kaynak' : 'Özet Kaynak' }})
     </button>
   </div>
 

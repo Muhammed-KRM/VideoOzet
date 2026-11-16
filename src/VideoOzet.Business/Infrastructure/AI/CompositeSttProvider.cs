@@ -20,6 +20,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
     public Action<int, int>? OnProgress { get; set; }
     public string? LastDetectedLanguage { get; private set; }
     public string? LastUsedModel { get; private set; }
+    public string? LastSegmentsJson { get; private set; }
 
     public CompositeSttProvider(
         GroqWhisperSttProvider groqProvider,
@@ -44,6 +45,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
 
     public async Task<string> TranscribeAsync(Stream audioStream, string fileName, Action<int, int>? onProgress, CancellationToken cancellationToken = default)
     {
+        LastSegmentsJson = null;
         var progressCallback = onProgress ?? OnProgress;
         // Read into memory stream so that multiple providers can read it if fallback is needed
         MemoryStream memoryStream;
@@ -88,6 +90,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                 {
                     LastDetectedLanguage = _groqProvider.LastDetectedLanguage;
                     LastUsedModel = "groq-whisper-large-v3-turbo";
+                    LastSegmentsJson = _groqProvider.LastSegmentsJson;
                     _logger.LogInformation("Transcription succeeded via Groq Whisper API ({Length} chars, Lang: {Lang}).", result.Length, LastDetectedLanguage ?? "auto");
                     progressCallback?.Invoke(2, 2);
                     return result;
@@ -110,6 +113,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                     {
                         LastDetectedLanguage = _localWhisperProvider.LastDetectedLanguage;
                         LastUsedModel = "faster-whisper-large-v3-turbo";
+                        LastSegmentsJson = _localWhisperProvider.LastSegmentsJson;
                         _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars, Lang: {Lang}).", localRes.Length, LastDetectedLanguage ?? "auto");
                         return localRes;
                     }
@@ -139,6 +143,7 @@ public class CompositeSttProvider : ISttProvider, ISupportsProgress
                     {
                         LastDetectedLanguage = _localWhisperProvider.LastDetectedLanguage;
                         LastUsedModel = "faster-whisper-large-v3-turbo";
+                        LastSegmentsJson = _localWhisperProvider.LastSegmentsJson;
                         _logger.LogInformation("Transcription succeeded via Local Faster-Whisper ({Length} chars, Lang: {Lang}).", result.Length, LastDetectedLanguage ?? "auto");
                         return result;
                     }

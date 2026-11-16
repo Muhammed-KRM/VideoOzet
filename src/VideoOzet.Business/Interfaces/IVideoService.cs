@@ -14,6 +14,7 @@ public interface IVideoService
     Task DeleteVideoAsync(Guid id);
     Task RetryVideoAsync(Guid id);
     Task ResetQueueForEgitimAsync(Guid egitimId);
+    Task<int> ReindexAllByEgitimIdAsync(Guid egitimId);
     Task UpdateKullanimTuruAsync(Guid id, KaynakKullanimTuru kullanimTuru);
     Task<KaynakIcerikDetayDto?> GetVideoIcerikDetayAsync(Guid id);
 }

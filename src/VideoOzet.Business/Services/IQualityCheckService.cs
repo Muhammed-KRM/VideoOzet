@@ -1,4 +1,3 @@
-using System;
 using System.Threading;
 using System.Threading.Tasks;
 using VideoOzet.Data.Enums;
@@ -19,9 +18,20 @@ public class QcEvaluationResult
 public interface IQualityCheckService
 {
     Task<QcEvaluationResult> EvaluateAsync(
-        string contentText,
-        string contextData,
+        string summaryText,
+        string sourceContext,
         int claimCount = 8,
         string? previousReportJson = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? videoPlanText = null);
+
+    Task<QcEvaluationResult> EvaluateAsync(
+        string summaryText,
+        string sourceContext,
+        string? authorThesisContext,
+        int claimCount = 8,
+        string? previousReportJson = null,
+        string? videoPlanText = null,
+        CancellationToken ct = default)
+        => EvaluateAsync(summaryText, sourceContext, claimCount, previousReportJson, ct, videoPlanText);
 }

@@ -203,9 +203,9 @@ public class QualityCheckConsumerTests
         // Assert
         request.Durum.Should().Be(ContentRequestDurumu.Tamamlandi);
         savedQcResults.Should().HaveCount(1);
-        savedQcResults[0].BelirsizSayisi.Should().Be(0);
-        savedQcResults[0].DesteklenenSayisi.Should().Be(1);
-        savedQcResults[0].GuvenSkorYuzde.Should().Be(100m);
+        savedQcResults[0].BelirsizSayisi.Should().Be(1);
+        savedQcResults[0].DesteklenenSayisi.Should().Be(0);
+        savedQcResults[0].GuvenSkorYuzde.Should().Be(0m);
     }
 
     [Fact]

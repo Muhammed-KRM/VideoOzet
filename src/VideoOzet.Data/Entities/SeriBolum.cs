@@ -10,9 +10,12 @@ public class SeriBolum
     public Guid SeriPlaniId { get; set; }
     public int BolumNo { get; set; }
     public string CalismaBasligi { get; set; } = string.Empty;
+    public string Kanca { get; set; } = string.Empty;
     public string AnaFikir { get; set; } = string.Empty;
     public int HedefSureDk { get; set; }
     public string KonularJson { get; set; } = string.Empty;
+    public string SahneIskeletiJson { get; set; } = "[]";
+    public string AtananKaynaklarJson { get; set; } = "[]";
     public Guid? AktifRevizyonId { get; set; }
     public bool BaglamEskidi { get; set; }
     public string BaglamSorunlariJson { get; set; } = string.Empty;

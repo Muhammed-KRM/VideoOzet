@@ -34,12 +34,44 @@
           %{{ revision?.guvenSkorYuzde || 0 }}
         </span>
       </button>
+      <button 
+        class="py-4 px-5 text-sm font-medium border-b-2 border-transparent hover:text-slate-200 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
+        [class.border-blue-500]="activeTab === 'kanitlar'"
+        [class.text-blue-400]="activeTab === 'kanitlar'"
+        [class.text-slate-400]="activeTab !== 'kanitlar'"
+        (click)="activeTab = 'kanitlar'">
+        <span>Kanıtlar ([K#])</span>
+        <span class="px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 text-xs font-bold">
+          {{ sourceEvidences.length }}
+        </span>
+      </button>
+      <button
+        *ngIf="contentRequestId"
+        class="py-4 px-5 text-sm font-semibold border-b-2 border-transparent hover:text-indigo-200 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+        [class.border-indigo-500]="activeTab === 'soru'"
+        [class.text-indigo-300]="activeTab === 'soru'"
+        [class.text-slate-400]="activeTab !== 'soru'"
+        (click)="activeTab = 'soru'">
+        <span>💬 Soru Sor</span>
+      </button>
     </div>
 
-    <!-- Aksiyon Butonları (Prompter & İndir) -->
+    <!-- Aksiyon Butonları (Manuel Düzenle, Prompter & İndir) -->
     <div class="flex items-center gap-2 py-2.5 sm:py-0 self-end sm:self-center">
+
+      <!-- ✏️ MANUEL DÜZENLE BUTONU -->
+      <button
+        *ngIf="canManualEdit && !isEditing"
+        type="button"
+        (click)="startManualEdit()"
+        class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap"
+        title="Aktif sekmedeki metni doğrudan elle düzenle"
+      >
+        <span>✏️</span>
+        <span>Manuel Düzenle</span>
+      </button>
       
-      <!-- 🎙️ SADECE PROMPTER METNİ BUTONU (YENİ) -->
+      <!-- 🎙️ SADECE PROMPTER METNİ BUTONU -->
       <div class="relative" *ngIf="hasVideoPlan">
         <button
           id="episode-prompter-btn"
@@ -169,55 +201,217 @@
   <div class="p-8 text-slate-300 leading-relaxed">
     
     <!-- ÖZET TAB -->
-    <div *ngIf="activeTab === 'ozet'" class="prose max-w-none" [innerHTML]="formattedOzet"></div>
+    <div *ngIf="activeTab === 'ozet'">
+      <div *ngIf="!isEditing" class="prose max-w-none" [innerHTML]="formattedOzet"></div>
+      <div *ngIf="isEditing" class="space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-semibold text-amber-300">✏️ Araştırma Özeti (Markdown) — Manuel Düzenleme</span>
+          <div class="flex items-center gap-2">
+            <button type="button" (click)="cancelManualEdit()" [disabled]="isSavingEdit" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg cursor-pointer">İptal</button>
+            <button type="button" (click)="saveManualEdit()" [disabled]="isSavingEdit" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg cursor-pointer">
+              {{ isSavingEdit ? 'Kaydediliyor...' : '💾 Kaydet' }}
+            </button>
+          </div>
+        </div>
+        <div *ngIf="editError" class="p-2.5 bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg text-xs">{{ editError }}</div>
+        <textarea [(ngModel)]="editOzetText" rows="24" class="w-full p-4 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 font-mono text-sm leading-relaxed focus:border-indigo-500 focus:outline-none"></textarea>
+      </div>
+    </div>
 
     <!-- PLAN TAB -->
-    <div *ngIf="activeTab === 'plan'" class="prose max-w-none" [innerHTML]="formattedPlan"></div>
+    <div *ngIf="activeTab === 'plan'">
+      <div *ngIf="!isEditing" class="prose max-w-none" [innerHTML]="formattedPlan"></div>
+      <div *ngIf="isEditing" class="space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-semibold text-amber-300">✏️ Video Planı & Prompter Metni (Markdown) — Manuel Düzenleme</span>
+          <div class="flex items-center gap-2">
+            <button type="button" (click)="cancelManualEdit()" [disabled]="isSavingEdit" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-lg cursor-pointer">İptal</button>
+            <button type="button" (click)="saveManualEdit()" [disabled]="isSavingEdit" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg cursor-pointer">
+              {{ isSavingEdit ? 'Kaydediliyor...' : '💾 Kaydet' }}
+            </button>
+          </div>
+        </div>
+        <div *ngIf="editError" class="p-2.5 bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg text-xs">{{ editError }}</div>
+        <textarea [(ngModel)]="editPlanText" rows="26" class="w-full p-4 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 font-mono text-sm leading-relaxed focus:border-indigo-500 focus:outline-none"></textarea>
+      </div>
+    </div>
 
     <!-- QC TAB -->
     <div *ngIf="activeTab === 'qc'" class="space-y-6">
-      <div class="flex justify-between items-center p-4 rounded-lg bg-slate-800 border border-slate-700">
-        <div>
-          <p class="text-sm text-slate-400">Doğruluk Skoru</p>
-          <div class="text-3xl font-bold" 
-               [ngClass]="{'text-emerald-400': revision.guvenSkorYuzde >= 80, 'text-amber-400': revision.guvenSkorYuzde >= 50 && revision.guvenSkorYuzde < 80, 'text-rose-400': revision.guvenSkorYuzde < 50}">
-            %{{ revision.guvenSkorYuzde }}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-700">
+        <div class="flex items-center gap-6 flex-wrap">
+          <div>
+            <p class="text-xs text-slate-400 uppercase tracking-wider">Doğruluk Skoru</p>
+            <div class="text-3xl font-bold" 
+                 [ngClass]="{'text-emerald-400': revision.guvenSkorYuzde >= 80, 'text-amber-400': revision.guvenSkorYuzde >= 50 && revision.guvenSkorYuzde < 80, 'text-rose-400': revision.guvenSkorYuzde < 50}">
+              %{{ revision.guvenSkorYuzde ?? 0 }}
+            </div>
+          </div>
+          <div class="flex gap-5 text-center border-l border-slate-700 pl-6">
+            <div>
+              <div class="text-xl font-semibold text-emerald-400">{{ revision.desteklenenSayisi ?? 0 }}</div>
+              <div class="text-xs text-slate-500 uppercase">Desteklenen</div>
+            </div>
+            <div>
+              <div class="text-xl font-semibold text-amber-400">{{ revision.belirsizSayisi ?? 0 }}</div>
+              <div class="text-xs text-slate-500 uppercase">Belirsiz</div>
+            </div>
+            <div>
+              <div class="text-xl font-semibold text-rose-400">{{ revision.desteklenmeyenSayisi ?? 0 }}</div>
+              <div class="text-xs text-slate-500 uppercase">Desteklenmeyen</div>
+            </div>
           </div>
         </div>
-        <div class="flex gap-4 text-center">
-          <div>
-            <div class="text-xl font-semibold text-emerald-400">{{ revision.desteklenenSayisi }}</div>
-            <div class="text-xs text-slate-500 uppercase">Desteklenen</div>
+
+        <!-- Kalite Kontrolü Yeniden Çalıştır Butonu -->
+        <button
+          *ngIf="contentRequestId"
+          type="button"
+          (click)="reRunEpisodeQc()"
+          [disabled]="isReQcRunning"
+          class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-semibold rounded-lg shadow-md hover:shadow-emerald-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+        >
+          <svg *ngIf="!isReQcRunning" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span *ngIf="isReQcRunning" class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+          <span>{{ isReQcRunning ? 'Denetleniyor...' : 'Kalite Kontrolü Yeniden Çalıştır' }}</span>
+        </button>
+      </div>
+
+      <!-- Hata Bildirimi -->
+      <div *ngIf="reQcError" class="p-3.5 bg-rose-950/50 border border-rose-800 text-rose-200 rounded-xl text-xs flex items-start gap-2">
+        <span class="text-base">⚠️</span>
+        <div class="flex-1">{{ reQcError }}</div>
+      </div>
+
+      <!-- Yükleniyor Göstergesi -->
+      <div *ngIf="isReQcRunning" class="p-4 bg-emerald-950/40 border border-emerald-800/40 rounded-xl flex items-center gap-3">
+        <div class="animate-spin rounded-full h-6 w-6 border-2 border-emerald-400 border-t-transparent"></div>
+        <div>
+          <div class="text-xs font-semibold text-emerald-200">
+            Revizyon {{ revision?.revizyonNo || 1 }} için Kalite Kontrolü Yeniden Çalıştırılıyor...
           </div>
-          <div>
-            <div class="text-xl font-semibold text-amber-400">{{ revision.belirsizSayisi }}</div>
-            <div class="text-xs text-slate-500 uppercase">Belirsiz</div>
-          </div>
-          <div>
-            <div class="text-xl font-semibold text-rose-400">{{ revision.desteklenmeyenSayisi }}</div>
-            <div class="text-xs text-slate-500 uppercase">Desteklenmeyen</div>
+          <div class="text-[11px] text-emerald-300/80">
+            Araştırma özeti ve video planındaki iddialar eğitim kaynaklarıyla ([K#]) ve yazar teziyle karşılaştırılıyor.
           </div>
         </div>
       </div>
 
       <div class="space-y-3">
-        <div *ngFor="let item of qcRaporList" class="p-4 rounded-lg border bg-slate-800"
+        <div *ngFor="let item of qcRaporList" class="p-4 rounded-lg border bg-slate-900/70"
              [ngClass]="{'border-emerald-500/30': item.durum === 'desteklendi', 'border-amber-500/30': item.durum === 'belirsiz', 'border-rose-500/30': item.durum === 'desteklenmedi'}">
           <div class="flex items-start justify-between gap-4">
-            <h4 class="font-medium text-white flex-1">{{ item.iddia }}</h4>
-            <span class="px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider shrink-0"
-                  [ngClass]="{'bg-emerald-500/20 text-emerald-400': item.durum === 'desteklendi', 'bg-amber-500/20 text-amber-400': item.durum === 'belirsiz', 'bg-rose-500/20 text-rose-400': item.durum === 'desteklenmedi'}">
-              {{ item.durum }}
-            </span>
+            <h4 class="font-medium text-white flex-1 text-sm">{{ item.iddia }}</h4>
+            <div class="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+              <span *ngIf="item.kanitKodu" class="px-2 py-0.5 rounded bg-indigo-950/70 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-bold">
+                {{ item.kanitKodu }}
+              </span>
+              <span *ngIf="item.kaynakAlani" class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[10px]">
+                {{ item.kaynakAlani }}
+              </span>
+              <span *ngIf="item.iddiaTuru" class="px-2 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-500/30 text-[10px]">
+                {{ item.iddiaTuru }}
+              </span>
+              <span class="px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider"
+                    [ngClass]="{'bg-emerald-500/20 text-emerald-400': item.durum === 'desteklendi', 'bg-amber-500/20 text-amber-400': item.durum === 'belirsiz', 'bg-rose-500/20 text-rose-400': item.durum === 'desteklenmedi'}">
+                {{ item.durum }}
+              </span>
+            </div>
           </div>
-          <p class="text-sm text-slate-400 mt-2">{{ item.aciklama }}</p>
+          <p class="text-xs text-slate-400 mt-2 leading-relaxed">{{ item.aciklama }}</p>
         </div>
         
-        <div *ngIf="qcRaporList.length === 0" class="text-center py-8 text-slate-500">
+        <div *ngIf="qcRaporList.length === 0 && !isReQcRunning" class="text-center py-8 text-slate-500">
           Detaylı QC raporu bulunamadı.
         </div>
       </div>
     </div>
+
+    <!-- KANITLAR ([K#]) TAB -->
+    <div *ngIf="activeTab === 'kanitlar'" class="space-y-4">
+      <div class="flex items-center justify-between flex-wrap gap-2 bg-slate-900/70 border border-slate-700/80 rounded-xl p-4">
+        <div>
+          <h3 class="text-sm font-semibold text-white">Bölüm Üretiminde Kullanılan Kaynak Kanıtları ([K#])</h3>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Araştırma özeti, video planı ve QC raporundaki <code class="text-indigo-300">[K#]</code> referanslarının karşılık geldiği kaynak parçaları.
+          </p>
+        </div>
+        <span class="text-xs font-semibold px-3 py-1 rounded-full bg-indigo-950/70 text-indigo-300 border border-indigo-500/30">
+          Toplam {{ sourceEvidences.length }} Kanıt Parçası
+        </span>
+      </div>
+
+      <div *ngIf="sourceEvidences.length === 0" class="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-700/70 text-sm text-slate-400">
+        Bu bölüm revizyonu için ayrıntılı kaynak kanıt tablosu bulunamadı.
+      </div>
+
+      <div *ngIf="sourceEvidences.length > 0" class="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-slate-700/80 bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px]">
+              <th class="py-3 px-4 font-semibold">Kanıt Kodu</th>
+              <th class="py-3 px-4 font-semibold">Kaynak Başlığı</th>
+              <th class="py-3 px-4 font-semibold">Tür</th>
+              <th class="py-3 px-4 font-semibold">Konum / Zaman Aralığı</th>
+              <th class="py-3 px-4 font-semibold">Dil</th>
+              <th class="py-3 px-4 font-semibold">Kullanım Modu</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800">
+            <tr *ngFor="let ev of sourceEvidences" class="hover:bg-slate-800/60 transition-colors">
+              <td class="py-3 px-4 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 font-mono font-bold">
+                  [{{ ev.kanitKodu || 'K?' }}]
+                </span>
+              </td>
+              <td class="py-3 px-4 font-medium text-white">
+                <div>{{ ev.kaynakBaslik || ev.baslik || 'Bilinmeyen Kaynak' }}</div>
+                <div *ngIf="ev.onizleme" class="mt-1 text-[11px] text-slate-400 font-normal line-clamp-2">
+                  {{ ev.onizleme }}
+                </div>
+              </td>
+              <td class="py-3 px-4 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px]">
+                  {{ ev.kaynakTipi || ev.kaynakTuru || 'Kaynak' }}
+                </span>
+              </td>
+              <td class="py-3 px-4 text-slate-300 font-mono text-[11px]">
+                {{ formatEvidenceLocation(ev) }}
+              </td>
+              <td class="py-3 px-4 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700 uppercase font-mono text-[10px]">
+                  {{ ev.kaynakDil || ev.dil || 'TR' }}
+                </span>
+              </td>
+              <td class="py-3 px-4 whitespace-nowrap">
+                <span class="px-2.5 py-0.5 rounded text-[11px] font-medium border"
+                  [ngClass]="isDirectReference(ev)
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                    : 'bg-amber-950/60 text-amber-300 border-amber-500/30'">
+                  {{ isDirectReference(ev) ? '📌 Doğrudan Referans' : '🛡️ Dış Kaynak (Sadece Argüman)' }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SORU-CEVAP (ÇAPRAZ BÖLÜM & KAYNAK ASİSTANI) TAB -->
+    <div *ngIf="activeTab === 'soru'">
+      <app-studio-qa-panel
+        kapsam="Bolum"
+        [contentRequestId]="contentRequestId"
+        [bolumNo]="bolumNo"
+        [baslik]="'Bölüm ' + (bolumNo || 1) + ' & Seri Asistanı'"
+        altAciklama="Bu bölümün yanı sıra serideki diğer tüm bölümleri, seri haritasını ve kaynak kanıtlarını ([K#]) birlikte inceleyerek yanıt verir."
+        placeholder="Bu bölüm veya diğer bölümlerle ilişkisi hakkında soru sorun (örn: Son kısımda sonraki videoda X dendi ama 2. bölümde var mı?)..."
+        [ornekSorular]="episodeOrnekSorular"
+        (suggestionApplied)="reQcCompleted.emit()"
+      ></app-studio-qa-panel>
+    </div>
+
   </div>
 
 </div>

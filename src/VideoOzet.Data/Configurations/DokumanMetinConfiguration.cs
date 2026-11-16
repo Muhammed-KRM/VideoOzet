@@ -11,12 +11,13 @@ public class DokumanMetinConfiguration : IEntityTypeConfiguration<DokumanMetin>
         builder.ToTable("dokuman_metinleri");
         builder.HasKey(d => d.Id);
         
-        builder.Property(d => d.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
+        builder.Property(d => d.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()").ValueGeneratedNever();
         builder.Property(d => d.DokumanId).HasColumnName("dokuman_id").IsRequired();
         builder.Property(d => d.HamMetin).HasColumnName("ham_metin").IsRequired();
         builder.Property(d => d.DamitilmisOzetMetni).HasColumnName("damitilmis_ozet_metni").HasColumnType("text");
         builder.Property(d => d.CevrilmisOzetMetni).HasColumnName("cevrilmis_ozet_metni").HasColumnType("text");
         builder.Property(d => d.OrijinalDil).HasColumnName("orijinal_dil").HasMaxLength(10).HasDefaultValue("tr").IsRequired();
+        builder.Property(d => d.LlmModel).HasColumnName("llm_model").HasMaxLength(150);
         builder.Property(d => d.KelimeSayisi).HasColumnName("kelime_sayisi").HasDefaultValue(0).IsRequired();
         builder.Property(d => d.OlusturmaTarihi).HasColumnName("olusturma_tarihi").HasDefaultValueSql("now()").HasColumnType("timestamptz").IsRequired();
 

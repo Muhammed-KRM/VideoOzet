@@ -24,7 +24,7 @@ export class ContentResultComponent implements OnChanges {
 
   private apiService = inject(ApiService);
 
-  activeTab = 'ozet'; // 'ozet', 'plan', 'qc'
+  activeTab: 'ozet' | 'plan' | 'qc' | 'kanitlar' = 'ozet';
   
   parsedOzet = '';
   parsedPlan = '';
@@ -67,6 +67,26 @@ export class ContentResultComponent implements OnChanges {
   get hasVideoPlan(): boolean {
     const plan = this.currentVideoPlan;
     return !!(plan && plan.trim());
+  }
+
+  get sourceEvidences(): any[] {
+    return this.result?.generatedContent?.kullanilanKaynakDetaylari || [];
+  }
+
+  formatEvidenceLocation(item: any): string {
+    if (!item) return '-';
+    if (item.zamanAraligi) return item.zamanAraligi;
+    if (item.startTimeMs != null && item.endTimeMs != null && item.endTimeMs > 0) {
+      return `${this.formatMs(item.startTimeMs)} - ${this.formatMs(item.endTimeMs)}`;
+    }
+    return item.bolumBasligi || '-';
+  }
+
+  private formatMs(ms: number): string {
+    const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   }
 
   togglePrompterMenu() {

@@ -6,6 +6,7 @@ import { ApiService } from '../../core/services/api.service';
 import { SignalRService } from '../../core/services/signalr.service';
 import { VideoUploadComponent } from '../video-upload/video-upload.component';
 import { ContentResultComponent } from '../content-result/content-result.component';
+import { StudioQaPanelComponent } from '../../shared/components/studio-qa-panel/studio-qa-panel.component';
 import { FormsModule } from '@angular/forms';
 import { marked } from 'marked';
 import { markdownToDocxBlob, DocxSection } from '../../core/utils/markdown-docx';
@@ -13,7 +14,7 @@ import { markdownToDocxBlob, DocxSection } from '../../core/utils/markdown-docx'
 @Component({
   selector: 'app-course-detail',
   standalone: true,
-  imports: [CommonModule, VideoUploadComponent, ContentResultComponent, FormsModule],
+  imports: [CommonModule, VideoUploadComponent, ContentResultComponent, StudioQaPanelComponent, FormsModule],
   templateUrl: './course-detail.component.html'
 })
 export class CourseDetailComponent implements OnInit, OnDestroy {
@@ -33,6 +34,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   contentProgress: number = 0;
   contentError: string = '';
   private contentTimeoutId: any;
+  private contentPollIntervalId: any;
 
   // 2. Akıllı Planlayıcı Modu (Çoklu Video Serisi)
   seriesOdak: string = '';
@@ -51,7 +53,12 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   isKaynakModalOpen: boolean = false;
   isLoadingKaynakDetay: boolean = false;
   kaynakDetay: any = null;
-  kaynakActiveTab: 'ozet' | 'cevirisi' | 'ham' = 'ozet';
+  kaynakActiveTab: 'ozet' | 'cevirisi' | 'ham' | 'soru' = 'ozet';
+  selectedKaynakId = '';
+  kaynakOrnekSorular = [
+    'Bu kaynaktaki temel tez ve öne çıkan argümanlar nelerdir?',
+    'Bu dokümandaki görüşler eğitimdeki diğer kaynaklarla veya seri planındaki bölümlerle nasıl örtüşüyor?'
+  ];
   isDownloadMenuOpen: boolean = false;
   isGeneratingDocx: boolean = false;
   copiedToClipboard: boolean = false;
@@ -65,6 +72,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
 
   private pollIntervalId: any;
   isRecovering: boolean = false;
+  isReindexing: boolean = false;
   recoveryFeedback: string = '';
   videoProgressMap: { [videoId: string]: { yuzde?: number, mevcutAdim?: number, toplamAdim?: number, mesaj?: string, sonAsama?: string, durum?: string } } = {};
 
@@ -134,6 +142,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
               this.isRequestingContent = false;
               this.contentResult = result;
               this.selectedRequestId = data.contentRequestId;
+              this.stopContentPolling();
               this.loadPastRequests(false);
               if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
             });
@@ -156,6 +165,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
           if (data && data.egitimId === this.egitimId && this.isRequestingContent) {
             this.contentError = 'İçerik üretilirken hata oluştu: ' + data.hataMesaji;
             this.isRequestingContent = false;
+            this.stopContentPolling();
             if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
           }
         })
@@ -174,13 +184,55 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       if (this.isRequestingContent) {
         this.contentError = 'İçerik üretim işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.';
         this.isRequestingContent = false;
+        this.stopContentPolling();
       }
-    }, 180000);
+    }, 8 * 60 * 1000);
+  }
+
+  private stopContentPolling() {
+    if (this.contentPollIntervalId) {
+      clearInterval(this.contentPollIntervalId);
+      this.contentPollIntervalId = null;
+    }
+  }
+
+  private startContentPolling(requestId: string) {
+    this.stopContentPolling();
+    this.contentPollIntervalId = setInterval(() => {
+      if (!this.isRequestingContent) {
+        this.stopContentPolling();
+        return;
+      }
+      this.apiService.getContentRequest(requestId).subscribe({
+        next: (result: any) => {
+          if (!result || !this.isRequestingContent) return;
+          if (result.durum === 'Tamamlandi' || result.durum === 3) {
+            this.contentProgress = 100;
+            this.contentStatus = 'Tamamlandı! Sonuçlar yükleniyor...';
+            this.isRequestingContent = false;
+            this.contentResult = result;
+            this.selectedRequestId = requestId;
+            this.stopContentPolling();
+            if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+            this.loadPastRequests(false);
+          } else if (result.durum === 'Hata' || result.durum === 4) {
+            this.isRequestingContent = false;
+            this.contentError = result.hataMesaji || 'İçerik üretilirken hata oluştu.';
+            this.stopContentPolling();
+            if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+          }
+        },
+        error: () => {
+          // Geçici HTTP hatasında polling devam eder
+        }
+      });
+    }, 3000);
   }
 
   ngOnDestroy() {
     if (this.pollIntervalId) clearInterval(this.pollIntervalId);
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+    this.stopContentPolling();
     this.subs.forEach(s => s?.unsubscribe?.());
   }
 
@@ -413,6 +465,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   // 1. Klasik Tekil İçerik Üretimi (2fc9178)
   requestContent() {
     if (!this.contentTopic) return;
+    this.signalRService.ensureConnected();
     this.isRequestingContent = true;
     this.contentResult = null;
     this.contentStatus = 'Sıraya Alındı, Bekleniyor...';
@@ -420,13 +473,15 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.contentError = '';
     
     if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
+    this.stopContentPolling();
 
     this.contentTimeoutId = setTimeout(() => {
       if (this.isRequestingContent) {
         this.contentError = 'İşlem beklediğimizden çok uzun sürdü. Arka plan servislerinde bir sorun olabilir.';
         this.isRequestingContent = false;
+        this.stopContentPolling();
       }
-    }, 5 * 60 * 1000);
+    }, 8 * 60 * 1000);
     
     const payload = {
       konu: this.contentTopic,
@@ -435,12 +490,16 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     };
     
     this.apiService.createContentRequest(this.egitimId, payload).subscribe({
-      next: () => {
-        // Backend Accepted döner, sonuç SignalR'dan gelecek.
+      next: (res: any) => {
+        const reqId = res?.contentRequestId || res?.id;
+        if (reqId) {
+          this.startContentPolling(reqId);
+        }
       },
       error: () => {
         this.isRequestingContent = false;
         this.contentError = 'İstek gönderilemedi. Sunucu bağlantısında sorun var.';
+        this.stopContentPolling();
         if (this.contentTimeoutId) clearTimeout(this.contentTimeoutId);
       }
     });
@@ -450,10 +509,12 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
   planSeries() {
     this.planError = '';
     
-    if (this.egitim.islenmiVideoSayisi === 0) {
-      this.planError = 'İçerik planlayabilmek için en az 1 videonun işlemi tamamlanmış olmalıdır.';
+    if (this.completedVideosCount === 0) {
+      this.planError = 'İçerik planlayabilmek için en az 1 kaynak dosyanın (video veya doküman) işlemi tamamlanmış olmalıdır.';
       return;
     }
+
+    this.signalRService.ensureConnected();
 
     this.isPlanningSeries = true;
     this.planStatus = 'Analiz isteği gönderiliyor...';
@@ -568,6 +629,33 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.recoverProblematicItems();
   }
 
+  reindexAllFiles() {
+    if (this.isReindexing) return;
+    if (!confirm('Bu eğitimdeki tüm tamamlanmış doküman ve videolar ham metin + bağlamsal parçalama (contextual chunking) ile yeniden indekslenecek. Devam etmek istiyor musunuz?')) {
+      return;
+    }
+
+    this.isReindexing = true;
+    this.recoveryFeedback = '';
+
+    this.apiService.reindexEgitimFiles(this.egitimId).subscribe({
+      next: (res) => {
+        this.isReindexing = false;
+        this.videoProgressMap = {};
+        this.recoveryFeedback = res?.mesaj || res?.message || 'Tüm dosyalar ham metinle yeniden indeksleme kuyruğuna alındı.';
+        this.loadEgitim(true);
+        setTimeout(() => {
+          this.recoveryFeedback = '';
+        }, 8000);
+      },
+      error: (err) => {
+        this.isReindexing = false;
+        console.error('Yeniden indeksleme hatası:', err);
+        alert('Yeniden indeksleme başlatılırken bir hata oluştu.');
+      }
+    });
+  }
+
   resetQueue() {
     if (!confirm('RabbitMQ kuyruğu boşaltılacak ve eğitimdeki (Tamamlanmamış) tüm video ve dokümanlar yeniden sıraya eklenecektir. Bu işlem eski tıkanıklıkları çözer. Onaylıyor musunuz?')) return;
     
@@ -611,10 +699,11 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     return item?.kullanimTuru === 1 || item?.kullanimTuru === 'SadeceArgumanVeMantik';
   }
 
-  openKaynakDetayModal(item: any) {
+  openKaynakDetayModal(item: any, initialTab?: 'ozet' | 'cevirisi' | 'ham' | 'soru') {
     this.isKaynakModalOpen = true;
     this.isLoadingKaynakDetay = true;
     this.kaynakDetay = null;
+    this.selectedKaynakId = item?.id || '';
     this.isDownloadMenuOpen = false;
     this.copiedToClipboard = false;
 
@@ -626,7 +715,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.kaynakDetay = res;
         this.isLoadingKaynakDetay = false;
-        if (res.orijinalDil && res.orijinalDil.toLowerCase() !== 'tr' && res.cevrilmisOzetMetni) {
+        if (initialTab) {
+          this.kaynakActiveTab = initialTab;
+        } else if (res.orijinalDil && res.orijinalDil.toLowerCase() !== 'tr' && res.cevrilmisOzetMetni) {
           this.kaynakActiveTab = 'cevirisi';
         } else if (res.damitilmisOzetMetni) {
           this.kaynakActiveTab = 'ozet';
@@ -649,7 +740,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     this.isDownloadMenuOpen = false;
   }
 
-  setKaynakTab(tab: 'ozet' | 'cevirisi' | 'ham') {
+  setKaynakTab(tab: 'ozet' | 'cevirisi' | 'ham' | 'soru') {
     this.kaynakActiveTab = tab;
   }
 

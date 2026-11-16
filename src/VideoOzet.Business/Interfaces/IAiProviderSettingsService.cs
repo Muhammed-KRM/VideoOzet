@@ -43,22 +43,94 @@ public record AiProviderSettingsDto
     public string? GroqQcModel { get; set; }
 
     /// <summary>Antigravity / Yerel Proxy URL</summary>
-    public string AntigravityProxyUrl { get; init; } = "http://localhost:8045/v1";
+    public string AntigravityProxyUrl { get; set; } = "http://localhost:8045/v1";
 
     /// <summary>Antigravity / Yerel Proxy Key (Kullanıcı tarafından arayüzden girilir)</summary>
     public string AntigravityProxyKey { get; set; } = "";
 
     /// <summary>Antigravity / Yerel Proxy Model</summary>
-    public string AntigravityProxyModel { get; init; } = "gemini-3.8-flash-tiered";
+    public string AntigravityProxyModel { get; set; } = "gemini-3.8-flash-tiered";
+
+    private string? _antigravityProxySummaryModel;
+    private string? _antigravitySummaryModel;
+    private string? _antigravityProxyVideoPlanModel;
+    private string? _antigravityVideoPlanModel;
+    private string? _antigravityProxyQcModel;
+    private string? _antigravityQcModel;
 
     /// <summary>Antigravity Proxy Özetleme Modeli</summary>
-    public string? AntigravityProxySummaryModel { get; set; }
+    public string? AntigravityProxySummaryModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravityProxySummaryModel) ? _antigravityProxySummaryModel : _antigravitySummaryModel;
+        set => _antigravityProxySummaryModel = value;
+    }
+
+    /// <summary>Frontend / Eski Ad Uyumluluğu: Antigravity Özetleme Modeli</summary>
+    public string? AntigravitySummaryModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravitySummaryModel) ? _antigravitySummaryModel : _antigravityProxySummaryModel;
+        set => _antigravitySummaryModel = value;
+    }
 
     /// <summary>Antigravity Proxy Video Planı Modeli</summary>
-    public string? AntigravityProxyVideoPlanModel { get; set; }
+    public string? AntigravityProxyVideoPlanModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravityProxyVideoPlanModel) ? _antigravityProxyVideoPlanModel : _antigravityVideoPlanModel;
+        set => _antigravityProxyVideoPlanModel = value;
+    }
+
+    /// <summary>Frontend / Eski Ad Uyumluluğu: Antigravity Video Planı Modeli</summary>
+    public string? AntigravityVideoPlanModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravityVideoPlanModel) ? _antigravityVideoPlanModel : _antigravityProxyVideoPlanModel;
+        set => _antigravityVideoPlanModel = value;
+    }
 
     /// <summary>Antigravity Proxy QC Modeli</summary>
-    public string? AntigravityProxyQcModel { get; set; }
+    public string? AntigravityProxyQcModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravityProxyQcModel) ? _antigravityProxyQcModel : _antigravityQcModel;
+        set => _antigravityProxyQcModel = value;
+    }
+
+    /// <summary>Frontend / Eski Ad Uyumluluğu: Antigravity QC Modeli</summary>
+    public string? AntigravityQcModel
+    {
+        get => !string.IsNullOrWhiteSpace(_antigravityQcModel) ? _antigravityQcModel : _antigravityProxyQcModel;
+        set => _antigravityQcModel = value;
+    }
+
+    /// <summary>Ana model hata verirse yedek sağlayıcıya (örn. Groq) düşülmesine izin ver</summary>
+    public bool AllowFallbackToSecondaryProvider { get; set; } = false;
+
+    public string? GetRawAntigravityProxySummaryModel() => _antigravityProxySummaryModel;
+    public string? GetRawAntigravitySummaryModel() => _antigravitySummaryModel;
+    public string? GetRawAntigravityProxyVideoPlanModel() => _antigravityProxyVideoPlanModel;
+    public string? GetRawAntigravityVideoPlanModel() => _antigravityVideoPlanModel;
+    public string? GetRawAntigravityProxyQcModel() => _antigravityProxyQcModel;
+    public string? GetRawAntigravityQcModel() => _antigravityQcModel;
+
+    public void SyncAntigravityModelAliases(string? fallbackProxyModel = null)
+    {
+        var baseModel = !string.IsNullOrWhiteSpace(fallbackProxyModel)
+            ? fallbackProxyModel.Trim()
+            : (!string.IsNullOrWhiteSpace(AntigravityProxyModel) ? AntigravityProxyModel.Trim() : "gemini-3.8-flash-tiered");
+
+        var summary = (!string.IsNullOrWhiteSpace(_antigravityProxySummaryModel) ? _antigravityProxySummaryModel : _antigravitySummaryModel)?.Trim();
+        if (string.IsNullOrWhiteSpace(summary)) summary = baseModel;
+        _antigravityProxySummaryModel = summary;
+        _antigravitySummaryModel = summary;
+
+        var plan = (!string.IsNullOrWhiteSpace(_antigravityProxyVideoPlanModel) ? _antigravityProxyVideoPlanModel : _antigravityVideoPlanModel)?.Trim();
+        if (string.IsNullOrWhiteSpace(plan)) plan = baseModel;
+        _antigravityProxyVideoPlanModel = plan;
+        _antigravityVideoPlanModel = plan;
+
+        var qc = (!string.IsNullOrWhiteSpace(_antigravityProxyQcModel) ? _antigravityProxyQcModel : _antigravityQcModel)?.Trim();
+        if (string.IsNullOrWhiteSpace(qc)) qc = plan;
+        _antigravityProxyQcModel = qc;
+        _antigravityQcModel = qc;
+    }
 
     public string GetEffectiveSummaryModel()
     {

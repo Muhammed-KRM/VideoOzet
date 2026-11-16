@@ -101,8 +101,10 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 contextData = contextBuilder.ToString();
             }
 
-            // 2. Toplu Kalite Kontrol (QC)
-            _logger.LogInformation("ContentRequest {RequestId} için Toplu Kalite Kontrol (QC) başlatılıyor...", request.Id);
+            // 2. VeriScore İki Katmanlı Toplu Kalite Kontrol (QC)
+            _logger.LogInformation("ContentRequest {RequestId} için VeriScore Kalite Kontrol (QC) başlatılıyor...", request.Id);
+
+            var authorThesisContext = BuildAuthorThesisContext(request.Konu, request.EkTonTalimati);
 
             QcResult qcResult;
             if (_qcService != null)
@@ -110,9 +112,132 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                 var qcEval = await _qcService.EvaluateAsync(
                     request.GeneratedContent.ArastirmaOzeti,
                     contextData,
-                    claimCount: 8,
+                    authorThesisContext,
+                    claimCount: 12,
                     previousReportJson: null,
+                    videoPlanText: request.GeneratedContent.VideoPlani,
                     ct: context.CancellationToken);
+
+                if (qcEval == null)
+                {
+                    qcEval = await _qcService.EvaluateAsync(
+                        request.GeneratedContent.ArastirmaOzeti,
+                        contextData,
+                        claimCount: 12,
+                        previousReportJson: null,
+                        ct: context.CancellationToken,
+                        videoPlanText: request.GeneratedContent.VideoPlani);
+                }
+
+                // 1-Turlu Tez-Korumalı Otomatik Öz-Düzeltme (Auto-Refine): Yalnızca olgusal kaynak dışı uydurmaları temizle!
+                var unsupportedFactualList = ExtractUnsupportedFactualDescriptions(qcEval.DetayliRaporJson);
+                if (qcEval.DesteklenmeyenSayisi > 0 && !string.IsNullOrWhiteSpace(contextData) && !string.IsNullOrWhiteSpace(unsupportedFactualList))
+                {
+                    _logger.LogInformation(
+                        "ContentRequest {RequestId} için {Unsupported} desteklenmeyen olgusal iddia tespit edildi; Tez-Korumalı Auto-Refine başlatılıyor...",
+                        request.Id, qcEval.DesteklenmeyenSayisi);
+
+                    var llmModelName = string.IsNullOrWhiteSpace(request.GeneratedContent.LlmModel)
+                        ? _synthesisProvider.ActiveModelName
+                        : request.GeneratedContent.LlmModel;
+
+                    if (_dbContext.ContentVersions != null)
+                    {
+                        _dbContext.ContentVersions.Add(new ContentVersion
+                        {
+                            ContentRequestId = request.Id,
+                            VersiyonNo = 1,
+                            ArastirmaOzeti = request.GeneratedContent.ArastirmaOzeti,
+                            VideoPlani = request.GeneratedContent.VideoPlani,
+                            RevizeTalimati = "İlk Üretim (Tez-Korumalı Öz-Düzeltme Öncesi)",
+                            LlmModel = llmModelName,
+                            ToplamIddiaSayisi = qcEval.ToplamIddiaSayisi,
+                            DesteklenenSayisi = qcEval.DesteklenenSayisi,
+                            BelirsizSayisi = qcEval.BelirsizSayisi,
+                            DesteklenmeyenSayisi = qcEval.DesteklenmeyenSayisi,
+                            DetayliRapor = qcEval.DetayliRaporJson,
+                            GuvenSkorYuzde = qcEval.GuvenSkorYuzde,
+                            QcTarihi = DateTime.UtcNow
+                        });
+                    }
+
+                    var refineInstruction =
+                        "VERİSCORE TEZ-KORUMALI ÖZ-DÜZELTME TALİMATI:\n" +
+                        "1. Kullanıcının [YAZAR-TEZİ] kapsamındaki kavramsal çerçevesini, felsefi/analitik yorumlarını ve pedagojik sentezlerini KESİNLİKLE SİLME veya KISALTMA!\n" +
+                        "2. Yalnızca aşağıda listelenen, verilen [K#] kaynaklarında doğrulanamayan uydurma sayısal oranları (%), hayali deney/anketleri veya yanlış düşünür atıflarını metinden çıkar ya da [K#] kaynaklarındaki gerçek verilerle düzelt:\n" +
+                        unsupportedFactualList;
+
+                    var topicWithThesis = $"{request.Konu}\n[YAZAR-TEZİ]: {authorThesisContext}";
+
+                    try
+                    {
+                        var revisedSummary = await _synthesisProvider.ReviseContentAsync(
+                            request.GeneratedContent.ArastirmaOzeti,
+                            refineInstruction,
+                            "Araştırma Özeti",
+                            topicWithThesis,
+                            contextData,
+                            context.CancellationToken);
+
+                        if (!string.IsNullOrWhiteSpace(revisedSummary))
+                        {
+                            request.GeneratedContent.ArastirmaOzeti = revisedSummary;
+                        }
+
+                        var revisedPlan = await _synthesisProvider.ReviseContentAsync(
+                            request.GeneratedContent.VideoPlani,
+                            refineInstruction,
+                            "Video Planı",
+                            topicWithThesis,
+                            contextData,
+                            context.CancellationToken);
+
+                        if (!string.IsNullOrWhiteSpace(revisedPlan))
+                        {
+                            request.GeneratedContent.VideoPlani = revisedPlan;
+                        }
+
+                        qcEval = await _qcService.EvaluateAsync(
+                            request.GeneratedContent.ArastirmaOzeti,
+                            contextData,
+                            authorThesisContext,
+                            claimCount: 12,
+                            previousReportJson: qcEval.DetayliRaporJson,
+                            videoPlanText: request.GeneratedContent.VideoPlani,
+                            ct: context.CancellationToken)
+                            ?? await _qcService.EvaluateAsync(
+                                request.GeneratedContent.ArastirmaOzeti,
+                                contextData,
+                                claimCount: 12,
+                                previousReportJson: qcEval.DetayliRaporJson,
+                                ct: context.CancellationToken,
+                                videoPlanText: request.GeneratedContent.VideoPlani);
+
+                        if (_dbContext.ContentVersions != null)
+                        {
+                            _dbContext.ContentVersions.Add(new ContentVersion
+                            {
+                                ContentRequestId = request.Id,
+                                VersiyonNo = 2,
+                                ArastirmaOzeti = request.GeneratedContent.ArastirmaOzeti,
+                                VideoPlani = request.GeneratedContent.VideoPlani,
+                                RevizeTalimati = "Otomatik Kanıt Öz-Düzeltmesi (Tez-Korumalı Auto-Refine)",
+                                LlmModel = llmModelName,
+                                ToplamIddiaSayisi = qcEval.ToplamIddiaSayisi,
+                                DesteklenenSayisi = qcEval.DesteklenenSayisi,
+                                BelirsizSayisi = qcEval.BelirsizSayisi,
+                                DesteklenmeyenSayisi = qcEval.DesteklenmeyenSayisi,
+                                DetayliRapor = qcEval.DetayliRaporJson,
+                                GuvenSkorYuzde = qcEval.GuvenSkorYuzde,
+                                QcTarihi = DateTime.UtcNow
+                            });
+                        }
+                    }
+                    catch (Exception refineEx)
+                    {
+                        _logger.LogWarning(refineEx, "Auto-Refine sırasında hata oluştu, ilk QC sonucu korunuyor.");
+                    }
+                }
 
                 qcResult = new QcResult
                 {
@@ -128,8 +253,12 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             }
             else
             {
+                var summaryWithThesis = string.IsNullOrWhiteSpace(authorThesisContext)
+                    ? request.GeneratedContent.ArastirmaOzeti
+                    : $"[YAZAR-TEZİ]: {authorThesisContext}\n\n{request.GeneratedContent.ArastirmaOzeti}";
+
                 var batchQcResponse = await _synthesisProvider.BatchQualityCheckAsync(
-                    request.GeneratedContent.ArastirmaOzeti,
+                    summaryWithThesis,
                     contextData,
                     claimCount: 8,
                     context.CancellationToken);
@@ -162,8 +291,14 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                         foreach (var element in doc.RootElement.EnumerateArray())
                         {
                             var iddia = element.TryGetProperty("iddia", out var iddiaProp) ? iddiaProp.GetString() : "Bilinmeyen İddia";
+                            var iddiaTuru = element.TryGetProperty("iddiaTuru", out var itProp) ? (itProp.GetString()?.ToLowerInvariant() ?? "olgusal_kaynak_iddiasi") : "olgusal_kaynak_iddiasi";
                             var durum = element.TryGetProperty("durum", out var durumProp) ? durumProp.GetString()?.ToLowerInvariant() ?? "belirsiz" : "belirsiz";
                             var aciklama = element.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
+
+                            if (iddiaTuru == "yazar_tezi_yorumu" && durum == "desteklenmedi")
+                            {
+                                durum = "desteklendi";
+                            }
 
                             if (durum == "desteklendi") desteklenen++;
                             else if (durum == "desteklenmedi") desteklenmeyen++;
@@ -172,6 +307,7 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
                             raporList.Add(new
                             {
                                 iddia = iddia ?? "",
+                                iddiaTuru = iddiaTuru,
                                 durum = durum,
                                 aciklama = aciklama ?? ""
                             });
@@ -189,17 +325,20 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
 
                 if (!raporList.Any())
                 {
-                    desteklenen = 1;
+                    belirsiz = 1;
                     raporList.Add(new
                     {
-                        iddia = "İçerik araştırması video ve döküman kaynakları doğrultusunda analiz edildi.",
-                        durum = "desteklendi",
-                        aciklama = "Genel kalite kontrol analizi başarıyla tamamlandı."
+                        iddia = "Kalite kontrol JSON yanıtı çözümlenemedi.",
+                        iddiaTuru = "olgusal_kaynak_iddiasi",
+                        durum = "belirsiz",
+                        kanitKodu = "-",
+                        kaynakAlani = "ArastirmaOzeti",
+                        aciklama = "Model geçerli bir kalite kontrol raporu döndüremediği için doğrulama tamamlanamadı."
                     });
                 }
 
                 var toplamIddia = raporList.Count;
-                decimal guvenYuzde = toplamIddia == 0 ? 100 : Math.Round((decimal)desteklenen / toplamIddia * 100, 2);
+                decimal guvenYuzde = toplamIddia == 0 ? 0m : Math.Round((decimal)desteklenen / toplamIddia * 100m, 2);
 
                 qcResult = new QcResult
                 {
@@ -281,6 +420,49 @@ public class QualityCheckConsumer : IConsumer<ContentGeneratedEvent>
             {
                 _logger.LogError(pubEx, "ContentErrorEvent publish hatası: {Message}", pubEx.Message);
             }
+        }
+    }
+
+    private static string BuildAuthorThesisContext(string? konu, string? ekTonTalimati)
+    {
+        if (string.IsNullOrWhiteSpace(konu) && string.IsNullOrWhiteSpace(ekTonTalimati))
+            return string.Empty;
+
+        return string.IsNullOrWhiteSpace(ekTonTalimati)
+            ? (konu ?? string.Empty).Trim()
+            : $"{(konu ?? string.Empty).Trim()}\nEk Ton ve Perspektif Direktifi: {ekTonTalimati.Trim()}";
+    }
+
+    private static string ExtractUnsupportedFactualDescriptions(string? reportJson)
+    {
+        if (string.IsNullOrWhiteSpace(reportJson))
+            return string.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(reportJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                var durum = el.TryGetProperty("durum", out var d) ? d.GetString() : null;
+                var iddiaTuru = el.TryGetProperty("iddiaTuru", out var it) ? it.GetString() : "olgusal_kaynak_iddiasi";
+
+                if (string.Equals(durum, "desteklenmedi", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(iddiaTuru, "yazar_tezi_yorumu", StringComparison.OrdinalIgnoreCase))
+                {
+                    var iddia = el.TryGetProperty("iddia", out var i) ? i.GetString() : "";
+                    var aciklama = el.TryGetProperty("aciklama", out var a) ? a.GetString() : "";
+                    sb.AppendLine($"- {iddia} ({aciklama})");
+                }
+            }
+            return sb.ToString().Trim();
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 }

@@ -17,6 +17,8 @@ export class VideoUploadComponent {
   
   // 0: DogrudanReferans (Kendi notlarım/dersim), 1: SadeceArgumanVeMantik (Dış kanal/telif korumalı)
   selectedKullanimTuru: number = 0;
+  // 0: HamKaynak (Tam Metin İndeksleme - Yüksek Doğruluk), 1: OzetKaynak (Hızlı Özet İndeksleme)
+  selectedIndekslemeTuru: number = 0;
 
   currentFileIndex = 0;
   totalFiles = 0;
@@ -87,6 +89,7 @@ export class VideoUploadComponent {
       formData.append('file', file);
       formData.append('baslik', file.name);
       formData.append('kullanimTuru', this.selectedKullanimTuru.toString());
+      formData.append('indekslemeTuru', this.selectedIndekslemeTuru.toString());
 
       try {
         await firstValueFrom(this.apiService.uploadFile(this.egitimId, formData));

@@ -1,5 +1,7 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
+using VideoOzet.Business.DTOs;
 
 namespace VideoOzet.Business.Interfaces;
 
@@ -19,6 +21,12 @@ public interface ISynthesisProvider
     /// RAG sonuçlarını kullanarak video planı üretir.
     /// </summary>
     Task<string> GenerateVideoPlanAsync(string topic, string targetLength, string contextData, CancellationToken ct = default);
+
+    /// <summary>
+    /// Doğrulanmış araştırma özetine sıkı bağlı stüdyo video çekim ve prompter planı üretir.
+    /// </summary>
+    Task<string> GenerateGroundedVideoPlanAsync(string topic, string targetLength, string contextData, string researchSummary, CancellationToken ct = default)
+        => GenerateVideoPlanAsync(topic, targetLength, contextData, ct);
 
     /// <summary>
     /// Çıkarılan bir iddianın kaynaklar tarafından desteklenip desteklenmediğini kontrol eder (QC).
@@ -58,14 +66,43 @@ public interface ISynthesisProvider
     Task<string> GenerateSeriesPlanAsync(string topic, string targetAudience, string konuAnaliziJson, string allSourcesData, string userConstraintsJson = "", CancellationToken ct = default);
 
     /// <summary>
+    /// Fark-bazlı (Diff-Aware), yazar tezi, ton ve yapılandırılmış kaynak kartları ile zengin çoklu video serisi planı oluşturur.
+    /// </summary>
+    Task<string> GenerateSeriesPlanAsync(
+        string topicAndThesis,
+        string targetAudience,
+        string toneInstruction,
+        string konuAnaliziJson,
+        string structuredSourceCardsJson,
+        string formattedConstraintsText,
+        string previousPlanJson = "",
+        CancellationToken ct = default)
+        => GenerateSeriesPlanAsync(topicAndThesis, targetAudience, konuAnaliziJson, structuredSourceCardsJson, formattedConstraintsText, ct);
+
+    /// <summary>
     /// Çoklu video serisindeki belirli bir bölümün içeriğini ve sonraki videoya devir notunu üretir.
     /// JSON formatında döner.
     /// </summary>
     Task<string> GenerateSeriesVideoContentAsync(string bolumBasligi, string bolumKonulariJson, string oncekiVideoDevirNotuJson, string targetAudience, string contextData, string userInstructions = "", CancellationToken ct = default);
 
     /// <summary>
+    /// Sahne-sahne (Iterative Scene-by-Scene) derin bölüm araştırması, çekim/prompter planı ve devir defteri üretir.
+    /// </summary>
+    Task<(string ArastirmaOzeti, string VideoPlani, string DevirDefteriJson)> GenerateSeriesEpisodeAsync(
+        SeriesEpisodeGenerationRequest request,
+        Func<string, int, Task>? onProgress = null,
+        CancellationToken ct = default)
+        => Task.FromResult((string.Empty, string.Empty, "{}"));
+
+    /// <summary>
     /// Kaynak metninden (video veya doküman) anlatılan temel konuları ve tahmini süreleri çıkarır (Map adımı).
     /// JSON formatında döner.
     /// </summary>
     Task<string> ExtractSourceTopicsAsync(string kaynakAdi, string metin, int parcaNo, int parcaSayisi, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stüdyo Soru-Cevap (Q&A) sistemi için yapılandırılmış bağlamla soruyu yanıtlar.
+    /// </summary>
+    Task<string> AskStudioQuestionAsync(string prompt, CancellationToken ct = default)
+        => Task.FromResult("{}");
 }

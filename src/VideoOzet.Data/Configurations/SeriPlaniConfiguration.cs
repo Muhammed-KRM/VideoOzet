@@ -11,6 +11,11 @@ public class SeriPlaniConfiguration : IEntityTypeConfiguration<SeriPlani>
         builder.ToTable("SeriPlanlari");
 
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+
+        builder.Property(x => x.OnayTalimati)
+            .HasDefaultValue(string.Empty)
+            .IsRequired();
 
         builder.HasIndex(x => new { x.ContentRequestId, x.PlanNo }).IsUnique();
 

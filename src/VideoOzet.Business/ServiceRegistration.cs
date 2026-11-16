@@ -43,6 +43,9 @@ public static class ServiceRegistration
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
         services.AddScoped<IGeminiProvider, VideoOzet.Business.Infrastructure.AI.GeminiSummarizer>();
         services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
+        services.AddScoped<IContextualTextChunker, VideoOzet.Business.Infrastructure.AI.ContextualTextChunker>();
+        services.AddScoped<IQueryDecomposer, QueryDecomposer>();
+        services.AddScoped<IDeterministicClaimScanner, DeterministicClaimScanner>();
         services.AddHttpClient<VideoOzet.Business.Infrastructure.AI.GroqWhisperSttProvider>(client =>
         {
             client.Timeout = TimeSpan.FromMinutes(5);
@@ -78,6 +81,7 @@ public static class ServiceRegistration
         services.AddScoped<ISourceTopicMapper, SourceTopicMapper>();
         services.AddScoped<ISourceContextBuilder, SourceContextBuilder>();
         services.AddScoped<IQualityCheckService, QualityCheckService>();
+        services.AddScoped<IStudioQaService, StudioQaService>();
         services.AddScoped<ILogService, LogManager>();
         services.AddHttpClient();
         services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();

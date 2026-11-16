@@ -11,4 +11,5 @@ public class VideoUploadDto
     public string ContentType { get; set; } = string.Empty;
     public Stream FileStream { get; set; } = Stream.Null;
     public KaynakKullanimTuru KullanimTuru { get; set; } = KaynakKullanimTuru.DogrudanReferans;
+    public IndekslemeTuru IndekslemeTuru { get; set; } = IndekslemeTuru.HamKaynak;
 }

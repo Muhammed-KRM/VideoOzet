@@ -21,17 +21,20 @@ public class EgitimManager : IEgitimService
     private readonly IRepository<Egitim> _egitimRepository;
     private readonly IMapper _mapper;
     private readonly ILogger<EgitimManager> _logger;
+    private readonly IFileStorageService? _fileStorageService;
 
     public EgitimManager(
         IRepository<Egitim> egitimRepository, 
         IMapper mapper, 
         ILogger<EgitimManager> logger,
-        AppDbContext? context = null)
+        AppDbContext? context = null,
+        IFileStorageService? fileStorageService = null)
     {
         _context = context;
         _egitimRepository = egitimRepository;
         _mapper = mapper;
         _logger = logger;
+        _fileStorageService = fileStorageService;
     }
 
     public async Task<IEnumerable<EgitimListDto>> GetAllAsync()
@@ -168,6 +171,7 @@ public class EgitimManager : IEgitimService
             Id = newEgitimId,
             Ad = egitim.Ad + " (Kopya)",
             Aciklama = egitim.Aciklama,
+            Durum = egitim.Durum,
             ToplamVideoSayisi = egitim.ToplamVideoSayisi,
             IslenmiVideoSayisi = egitim.IslenmiVideoSayisi,
             OlusturmaTarihi = DateTime.UtcNow,
@@ -195,6 +199,8 @@ public class EgitimManager : IEgitimService
                 Sira = v.Sira,
                 DosyaBoyutu = v.DosyaBoyutu,
                 IslemDurumu = v.IslemDurumu,
+                KullanimTuru = v.KullanimTuru,
+                IndekslemeTuru = v.IndekslemeTuru,
                 OlusturmaTarihi = DateTime.UtcNow,
                 IslemTamamlanmaTarihi = v.IslemTamamlanmaTarihi
             };
@@ -224,6 +230,8 @@ public class EgitimManager : IEgitimService
                     Id = Guid.NewGuid(),
                     VideoId = newVideoId,
                     OzetMetni = v.Summary.OzetMetni,
+                    CevrilmisOzetMetni = v.Summary.CevrilmisOzetMetni,
+                    OrijinalDil = v.Summary.OrijinalDil,
                     KonuBasliklari = v.Summary.KonuBasliklari,
                     KonuEtiketleri = v.Summary.KonuEtiketleri,
                     LlmModel = v.Summary.LlmModel,
@@ -249,6 +257,8 @@ public class EgitimManager : IEgitimService
                 Uzanti = d.Uzanti,
                 DosyaBoyutu = d.DosyaBoyutu,
                 IslemDurumu = d.IslemDurumu,
+                KullanimTuru = d.KullanimTuru,
+                IndekslemeTuru = d.IndekslemeTuru,
                 OlusturmaTarihi = DateTime.UtcNow,
                 IslemTamamlanmaTarihi = d.IslemTamamlanmaTarihi
             };
@@ -261,6 +271,10 @@ public class EgitimManager : IEgitimService
                     Id = Guid.NewGuid(),
                     DokumanId = newDokumanId,
                     HamMetin = d.DokumanMetin.HamMetin,
+                    DamitilmisOzetMetni = d.DokumanMetin.DamitilmisOzetMetni,
+                    CevrilmisOzetMetni = d.DokumanMetin.CevrilmisOzetMetni,
+                    OrijinalDil = d.DokumanMetin.OrijinalDil,
+                    LlmModel = d.DokumanMetin.LlmModel,
                     KelimeSayisi = d.DokumanMetin.KelimeSayisi,
                     OlusturmaTarihi = DateTime.UtcNow
                 };
@@ -269,7 +283,6 @@ public class EgitimManager : IEgitimService
         }
 
         // Vektör/Chunk verilerini kopyala (RAG için)
-        // Çok veri olabileceği için parça parça alıyoruz
         var chunks = await _context.VideoChunkDocuments
             .Where(c => c.EgitimId == id)
             .AsNoTracking()
@@ -285,11 +298,49 @@ public class EgitimManager : IEgitimService
                 DokumanId = c.DokumanId.HasValue && dokumanIdMap.ContainsKey(c.DokumanId.Value) ? dokumanIdMap[c.DokumanId.Value] : null,
                 StartTimeMs = c.StartTimeMs,
                 EndTimeMs = c.EndTimeMs,
+                ChunkIndex = c.ChunkIndex,
+                ChunkTipi = c.ChunkTipi,
+                KaynakBaslik = c.KaynakBaslik,
+                BolumBasligi = c.BolumBasligi,
+                KaynakDil = c.KaynakDil,
+                KullanimTuru = c.KullanimTuru,
                 Text = c.Text,
                 Embedding = c.Embedding,
                 CreatedAt = DateTime.UtcNow
             };
             _context.VideoChunkDocuments.Add(cloneChunk);
+        }
+
+        // Kaynak konu çıkarımı önbelleğini kopyala
+        var allOldSourceIds = videoIdMap.Keys.Concat(dokumanIdMap.Keys).ToList();
+        if (allOldSourceIds.Count > 0)
+        {
+            var topicExtractions = await _context.KaynakKonuCikarimlari
+                .Where(k => allOldSourceIds.Contains(k.KaynakId))
+                .AsNoTracking()
+                .ToListAsync();
+
+            foreach (var k in topicExtractions)
+            {
+                Guid? newKaynakId = null;
+                if (videoIdMap.TryGetValue(k.KaynakId, out var mappedVideoId))
+                    newKaynakId = mappedVideoId;
+                else if (dokumanIdMap.TryGetValue(k.KaynakId, out var mappedDocId))
+                    newKaynakId = mappedDocId;
+
+                if (newKaynakId.HasValue)
+                {
+                    _context.KaynakKonuCikarimlari.Add(new KaynakKonuCikarimi
+                    {
+                        Id = Guid.NewGuid(),
+                        KaynakId = newKaynakId.Value,
+                        KaynakTuru = k.KaynakTuru,
+                        KonularJson = k.KonularJson,
+                        PromptVersiyonu = k.PromptVersiyonu,
+                        IcerikHash = k.IcerikHash
+                    });
+                }
+            }
         }
 
         await _context.SaveChangesAsync();
@@ -303,6 +354,99 @@ public class EgitimManager : IEgitimService
         var egitim = await _egitimRepository.GetByIdAsync(id);
         if (egitim == null)
             throw new NotFoundException("Egitim", id);
+
+        if (_context != null)
+        {
+            var videos = await _context.Videolar
+                .AsNoTracking()
+                .Where(v => v.EgitimId == id)
+                .ToListAsync();
+
+            var dokumanlar = await _context.Dokumanlar
+                .AsNoTracking()
+                .Where(d => d.EgitimId == id)
+                .ToListAsync();
+
+            if (_fileStorageService != null)
+            {
+                foreach (var video in videos)
+                {
+                    if (!string.IsNullOrWhiteSpace(video.DosyaYolu))
+                    {
+                        var sharedByOtherVideo = await _context.Videolar
+                            .AnyAsync(v => v.EgitimId != id && v.DosyaYolu == video.DosyaYolu);
+                        if (!sharedByOtherVideo)
+                        {
+                            try
+                            {
+                                await _fileStorageService.DeleteFileAsync(video.DosyaYolu);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "MinIO video dosyası silinemedi: {DosyaYolu}", video.DosyaYolu);
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(video.SesYolu))
+                    {
+                        var sharedByOtherAudio = await _context.Videolar
+                            .AnyAsync(v => v.EgitimId != id && v.SesYolu == video.SesYolu);
+                        if (!sharedByOtherAudio)
+                        {
+                            try
+                            {
+                                await _fileStorageService.DeleteFileAsync(video.SesYolu);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "MinIO ses dosyası silinemedi: {SesYolu}", video.SesYolu);
+                            }
+                        }
+                    }
+                }
+
+                foreach (var dokuman in dokumanlar)
+                {
+                    if (!string.IsNullOrWhiteSpace(dokuman.DosyaYolu))
+                    {
+                        var sharedByOtherDoc = await _context.Dokumanlar
+                            .AnyAsync(d => d.EgitimId != id && d.DosyaYolu == dokuman.DosyaYolu);
+                        if (!sharedByOtherDoc)
+                        {
+                            try
+                            {
+                                await _fileStorageService.DeleteFileAsync(dokuman.DosyaYolu);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "MinIO doküman dosyası silinemedi: {DosyaYolu}", dokuman.DosyaYolu);
+                            }
+                        }
+                    }
+                }
+            }
+
+            var sourceIds = videos.Select(v => v.Id).Concat(dokumanlar.Select(d => d.Id)).ToList();
+            if (sourceIds.Count > 0)
+            {
+                var orphanTopics = await _context.KaynakKonuCikarimlari
+                    .Where(k => sourceIds.Contains(k.KaynakId))
+                    .ToListAsync();
+                if (orphanTopics.Count > 0)
+                {
+                    _context.KaynakKonuCikarimlari.RemoveRange(orphanTopics);
+                }
+            }
+
+            var orphanChunks = await _context.VideoChunkDocuments
+                .Where(c => c.EgitimId == id)
+                .ToListAsync();
+            if (orphanChunks.Count > 0)
+            {
+                _context.VideoChunkDocuments.RemoveRange(orphanChunks);
+            }
+        }
 
         _egitimRepository.Delete(egitim);
         await _egitimRepository.SaveChangesAsync();

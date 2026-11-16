@@ -1,90 +1,444 @@
-<div class="h-full w-full bg-slate-900 rounded-lg p-6 overflow-x-auto overflow-y-hidden custom-scrollbar flex gap-6">
+<div class="h-full w-full bg-slate-900 rounded-lg flex flex-col overflow-hidden">
 
-  <div *ngIf="bolumler.length === 0" class="w-full h-full flex items-center justify-center">
-    <p class="text-slate-400">Bu planda henüz bölüm bulunmuyor.</p>
+  <!-- Üst Bilgi & Düzenleme Araç Çubuğu (!readonly iken) -->
+  <div *ngIf="!readonly" class="px-5 py-3 bg-slate-950/70 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+    <div class="flex items-center gap-2 text-xs text-slate-300">
+      <span class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+        ✏️ Düzenlenebilir Harita
+      </span>
+      <span class="text-slate-400">
+        Onaylamadan önce bölümlerin başlık, kanca, süre, sahne kırılımı ve kaynaklarını düzenleyebilir veya yeni bölüm ekleyebilirsiniz.
+      </span>
+    </div>
+    <button
+      type="button"
+      (click)="openAddEpisodeModal($event)"
+      [disabled]="isSaving"
+      class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow transition flex items-center gap-1.5 cursor-pointer"
+    >
+      <span>+ Yeni Bölüm Ekle</span>
+    </button>
   </div>
 
-  <div *ngFor="let b of bolumler; trackBy: trackByBolum"
-       class="flex-shrink-0 w-80 flex flex-col h-full bg-slate-800 rounded-xl border-2 transition-all group relative"
-       [ngClass]="{
-         'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]': plan.onaylandi && b.durum === 'Isleniyor',
-         'border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]': plan.onaylandi && b.durum === 'Tamamlandi',
-         'border-rose-500/50': plan.onaylandi && b.durum === 'Hata',
-         'border-slate-700/50 hover:border-slate-600': !plan.onaylandi || b.durum === 'Bekliyor',
-         'cursor-pointer hover:translate-y-[-2px]': plan.onaylandi
-       }"
-       (click)="goToEpisode(b.bolumNo)">
+  <!-- Yatay Bölüm Kartları Alanı -->
+  <div class="flex-1 p-5 overflow-x-auto overflow-y-hidden custom-scrollbar flex gap-5">
 
-    <!-- Bölüm Başlığı -->
-    <div class="p-4 border-b border-slate-700/50 bg-slate-800/80 rounded-t-xl relative overflow-hidden">
-      <div class="absolute top-0 left-0 w-full h-1"
-           [ngClass]="{
-             'bg-indigo-500': plan.onaylandi && b.durum === 'Isleniyor',
-             'bg-emerald-500': plan.onaylandi && b.durum === 'Tamamlandi',
-             'bg-rose-500': plan.onaylandi && b.durum === 'Hata',
-             'bg-slate-600': !plan.onaylandi || b.durum === 'Bekliyor'
-           }">
-      </div>
-
-      <div class="flex justify-between items-start mb-2">
-        <span class="px-2 py-1 bg-slate-700 text-xs font-bold text-white rounded-md">Bölüm {{ b.bolumNo }}</span>
-        <span class="text-xs font-medium text-slate-400 bg-slate-900 px-2 py-1 rounded-full border border-slate-700">~{{ b.hedefSureDk }} dk</span>
-      </div>
-      <h4 class="text-base font-bold text-white leading-tight mb-1">{{ b.calismaBasligi }}</h4>
+    <div *ngIf="bolumler.length === 0" class="w-full h-full flex items-center justify-center">
+      <p class="text-slate-400">Bu planda henüz bölüm bulunmuyor.</p>
     </div>
 
-    <!-- Bölüm İçeriği -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-      <div>
-        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Ana Fikir</h5>
-        <p class="text-sm text-slate-300">{{ b.anaFikir }}</p>
+    <div *ngFor="let b of bolumler; let i = index; trackBy: trackByBolum"
+         class="flex-shrink-0 w-96 flex flex-col h-full bg-slate-800 rounded-xl border-2 transition-all group relative"
+         [ngClass]="{
+           'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]': plan.onaylandi && b.durum === 'Isleniyor',
+           'border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]': plan.onaylandi && b.durum === 'Tamamlandi' && !b.baglamEskidi,
+           'border-amber-500/70 shadow-[0_0_15px_rgba(245,158,11,0.2)]': plan.onaylandi && b.baglamEskidi,
+           'border-rose-500/50': plan.onaylandi && b.durum === 'Hata',
+           'border-slate-700/60 hover:border-slate-500': !plan.onaylandi || b.durum === 'Bekliyor',
+           'cursor-pointer hover:translate-y-[-2px]': plan.onaylandi
+         }"
+         (click)="goToEpisode(b.bolumNo)">
+
+      <!-- Bölüm Başlığı & Kontroller -->
+      <div class="p-4 border-b border-slate-700/50 bg-slate-800/90 rounded-t-xl relative overflow-hidden shrink-0">
+        <div class="absolute top-0 left-0 w-full h-1"
+             [ngClass]="{
+               'bg-indigo-500': plan.onaylandi && b.durum === 'Isleniyor',
+               'bg-emerald-500': plan.onaylandi && b.durum === 'Tamamlandi' && !b.baglamEskidi,
+               'bg-amber-500': plan.onaylandi && b.baglamEskidi,
+               'bg-rose-500': plan.onaylandi && b.durum === 'Hata',
+               'bg-slate-600': !plan.onaylandi || b.durum === 'Bekliyor'
+             }">
+        </div>
+
+        <div class="flex justify-between items-center mb-2 gap-2">
+          <div class="flex items-center gap-1.5">
+            <span class="px-2 py-0.5 bg-slate-700 text-xs font-bold text-white rounded-md">Bölüm {{ b.bolumNo }}</span>
+            <span class="text-xs font-semibold text-indigo-300 bg-slate-900 px-2.5 py-0.5 rounded-full border border-indigo-500/30">
+              ~{{ b.hedefSureDk }} dk
+            </span>
+          </div>
+
+          <!-- Onay Öncesi Sıra Taşıma, Düzenle ve Sil Butonları -->
+          <div *ngIf="!readonly" class="flex items-center gap-1" (click)="$event.stopPropagation()">
+            <button
+              type="button"
+              (click)="moveEpisode($event, i, -1)"
+              [disabled]="i === 0 || isSaving"
+              title="Önceki sıraya taşı"
+              class="p-1 rounded bg-slate-900 hover:bg-slate-700 text-slate-300 disabled:opacity-30 text-xs border border-slate-700 cursor-pointer"
+            >
+              ◀
+            </button>
+            <button
+              type="button"
+              (click)="moveEpisode($event, i, 1)"
+              [disabled]="i === bolumler.length - 1 || isSaving"
+              title="Sonraki sıraya taşı"
+              class="p-1 rounded bg-slate-900 hover:bg-slate-700 text-slate-300 disabled:opacity-30 text-xs border border-slate-700 cursor-pointer"
+            >
+              ▶
+            </button>
+            <button
+              type="button"
+              (click)="openEditModal($event, i)"
+              [disabled]="isSaving"
+              title="Bölümü Düzenle"
+              class="px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/40 text-[11px] font-semibold cursor-pointer"
+            >
+              ✏️ Düzenle
+            </button>
+            <button
+              type="button"
+              (click)="deleteEpisode($event, i)"
+              [disabled]="bolumler.length <= 1 || isSaving"
+              title="Bölümü Sil"
+              class="p-1 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 disabled:opacity-30 text-xs cursor-pointer"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+
+        <h4 class="text-base font-bold text-white leading-snug">{{ b.calismaBasligi }}</h4>
       </div>
 
-      <div *ngIf="getKonular(b).length">
-        <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Kapsanan Konular</h5>
-        <ul class="space-y-2">
-          <li *ngFor="let k of getKonular(b)" class="flex items-start gap-2">
-            <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"></span>
-            <span class="text-xs text-slate-300 leading-snug">{{ k }}</span>
-          </li>
+      <!-- Bağlam Eskidi Uyarısı (Onaylı Planda) -->
+      <div *ngIf="plan.onaylandi && b.baglamEskidi"
+           class="mx-4 mt-3 p-3 rounded-lg bg-amber-950/60 border border-amber-500/50 space-y-1.5 shrink-0"
+           (click)="$event.stopPropagation()">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+            <span>⚠️</span> Önceki Bölüm Değişti (Bağlam Eskidi)
+          </span>
+          <button
+            type="button"
+            (click)="retryBolum($event, b.bolumNo)"
+            class="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold transition cursor-pointer"
+          >
+            🔄 Yenile
+          </button>
+        </div>
+        <ul *ngIf="getBaglamSorunlari(b).length > 0" class="text-[11px] text-amber-200/80 list-disc list-inside space-y-0.5">
+          <li *ngFor="let s of getBaglamSorunlari(b)">{{ s }}</li>
         </ul>
       </div>
-    </div>
 
-    <!-- Durum -->
-    <div *ngIf="plan.onaylandi" class="p-3 border-t border-slate-700/50 bg-slate-800/80 rounded-b-xl flex justify-between items-center">
-      <div class="flex items-center gap-2">
-        <span class="flex h-2 w-2 relative">
-          <span *ngIf="b.durum === 'Isleniyor'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2 w-2"
+      <!-- Bölüm İçeriği -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+
+        <!-- Açılış Kancası (Hook) -->
+        <div *ngIf="b.kanca" class="p-3 rounded-lg bg-amber-950/25 border border-amber-500/30">
+          <h5 class="text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+            <span>🎯</span> Açılış Kancası (Hook)
+          </h5>
+          <p class="text-xs text-amber-100/90 italic leading-relaxed">"{{ b.kanca }}"</p>
+        </div>
+
+        <!-- Ana Fikir -->
+        <div>
+          <h5 class="text-xs font-bold text-slate-400 uppercase mb-1.5">Ana Fikir & Bölüm Tezi</h5>
+          <p class="text-xs text-slate-200 leading-relaxed whitespace-pre-line">{{ b.anaFikir }}</p>
+        </div>
+
+        <!-- Sahne Kırılımı (sahneIskeletiJson) -->
+        <div *ngIf="getSahneIskeleti(b).length > 0">
+          <h5 class="text-xs font-bold text-indigo-300 uppercase mb-2 flex items-center justify-between">
+            <span>🎬 Sahne Kırılımı</span>
+            <span class="text-[10px] text-slate-400 font-normal">{{ getSahneIskeleti(b).length }} sahne</span>
+          </h5>
+          <div class="space-y-2">
+            <div *ngFor="let s of getSahneIskeleti(b)" class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-700/70 space-y-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-white">
+                  {{ s.sahneNo }}. {{ s.baslik }}
+                </span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 border border-slate-700 shrink-0">
+                  ~{{ s.tahminiSureDk }} dk
+                </span>
+              </div>
+              <p *ngIf="s.aciklamaVeArgumanlar" class="text-[11px] text-slate-300 leading-snug">
+                {{ s.aciklamaVeArgumanlar }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Kapsanan Konular -->
+        <div *ngIf="getKonular(b).length">
+          <h5 class="text-xs font-bold text-slate-400 uppercase mb-2">Kapsanan Konular</h5>
+          <ul class="space-y-1.5">
+            <li *ngFor="let k of getKonular(b)" class="flex items-start gap-2">
+              <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"></span>
+              <span class="text-xs text-slate-300 leading-snug">{{ k }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Atanan Kaynaklar -->
+        <div class="pt-2 border-t border-slate-700/50">
+          <div class="flex items-center justify-between mb-2">
+            <h5 class="text-xs font-bold text-emerald-300 uppercase flex items-center gap-1">
+              <span>📚</span> Atanan Kaynaklar
+            </h5>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+              {{ getAtananKaynakDetaylari(b).length }} kaynak
+            </span>
+          </div>
+
+          <div *ngIf="getAtananKaynakDetaylari(b).length === 0" class="text-[11px] text-slate-500 italic">
+            Özel kaynak ataması yok (genel havuzdan aranır).
+          </div>
+
+          <div *ngIf="getAtananKaynakDetaylari(b).length > 0" class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+            <span *ngFor="let src of getAtananKaynakDetaylari(b)"
+                  class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] text-slate-300 truncate max-w-full"
+                  [title]="src.baslik">
+              <strong class="text-indigo-300">{{ src.kaynakTuru === 'Video' ? '🎬' : '📄' }}</strong>
+              {{ src.baslik }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alt Durum Çubuğu (Onaylı Planda) -->
+      <div *ngIf="plan.onaylandi" class="p-3 border-t border-slate-700/50 bg-slate-800/80 rounded-b-xl flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="flex h-2 w-2 relative">
+            <span *ngIf="b.durum === 'Isleniyor'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2"
+                  [ngClass]="{
+                    'bg-slate-500': b.durum === 'Bekliyor',
+                    'bg-indigo-500': b.durum === 'Isleniyor',
+                    'bg-emerald-500': b.durum === 'Tamamlandi',
+                    'bg-rose-500': b.durum === 'Hata'
+                  }"></span>
+          </span>
+          <span class="text-xs font-medium"
                 [ngClass]="{
-                  'bg-slate-500': b.durum === 'Bekliyor',
-                  'bg-indigo-500': b.durum === 'Isleniyor',
-                  'bg-emerald-500': b.durum === 'Tamamlandi',
-                  'bg-rose-500': b.durum === 'Hata'
-                }"></span>
-        </span>
-        <span class="text-xs font-medium"
-              [ngClass]="{
-                'text-slate-400': b.durum === 'Bekliyor',
-                'text-indigo-400': b.durum === 'Isleniyor',
-                'text-emerald-400': b.durum === 'Tamamlandi',
-                'text-rose-400': b.durum === 'Hata'
-              }">
-          {{ durumEtiketi(b.durum) }}
-        </span>
-      </div>
-      <div class="flex items-center gap-1.5">
-        <button *ngIf="b.durum === 'Hata'" (click)="retryBolum($event, b.bolumNo)" class="text-xs text-white bg-rose-600 hover:bg-rose-500 px-2.5 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1 shadow-sm">
-          <span>🔄</span> Yeniden Dene
-        </button>
-        <button *ngIf="b.durum === 'Tamamlandi'" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors">
-          Görüntüle
-        </button>
+                  'text-slate-400': b.durum === 'Bekliyor',
+                  'text-indigo-400': b.durum === 'Isleniyor',
+                  'text-emerald-400': b.durum === 'Tamamlandi',
+                  'text-rose-400': b.durum === 'Hata'
+                }">
+            {{ durumEtiketi(b.durum) }}
+          </span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button *ngIf="b.durum === 'Hata'" (click)="retryBolum($event, b.bolumNo)" class="text-xs text-white bg-rose-600 hover:bg-rose-500 px-2.5 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1 shadow-sm cursor-pointer">
+            <span>🔄</span> Yeniden Dene
+          </button>
+          <button *ngIf="b.durum === 'Tamamlandi'" class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer">
+            Görüntüle
+          </button>
+        </div>
       </div>
     </div>
-  </div>
 
+    <!-- Sonda Hızlı "+ Yeni Bölüm Ekle" Kartı (!readonly) -->
+    <div *ngIf="!readonly"
+         (click)="openAddEpisodeModal($event)"
+         class="flex-shrink-0 w-64 h-full rounded-xl border-2 border-dashed border-slate-700 hover:border-indigo-500/60 bg-slate-800/30 hover:bg-slate-800/60 flex flex-col items-center justify-center p-6 text-center cursor-pointer transition-all group">
+      <div class="w-12 h-12 rounded-full bg-indigo-500/15 group-hover:bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-2xl font-bold mb-3 transition">
+        +
+      </div>
+      <p class="text-sm font-semibold text-slate-200 group-hover:text-white">Yeni Bölüm Ekle</p>
+      <p class="text-xs text-slate-400 mt-1">Seriye yeni bir video bölümü ekleyin</p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ==================== BÖLÜM DÜZENLEME / EKLEME MODALI ==================== -->
+<div *ngIf="isEditModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" (click)="closeEditModal()">
+  <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden text-slate-100" (click)="$event.stopPropagation()">
+
+    <!-- Modal Üst Başlık -->
+    <div class="px-6 py-4 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
+      <div>
+        <h3 class="text-base font-bold text-white">
+          {{ isNewEpisode ? '➕ Yeni Bölüm Ekle' : '✏️ Bölüm ' + editForm.bolumNo + ' Detaylarını Düzenle' }}
+        </h3>
+        <p class="text-xs text-slate-400 mt-0.5">
+          Değişiklikleriniz doğrudan veritabanındaki bölüm planına kaydedilir ve senaryo üretiminde esas alınır.
+        </p>
+      </div>
+      <button type="button" (click)="closeEditModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+        ✕
+      </button>
+    </div>
+
+    <!-- Modal İçerik -->
+    <div class="p-6 overflow-y-auto space-y-5 flex-1 custom-scrollbar">
+
+      <div *ngIf="saveError" class="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200">
+        ⚠️ {{ saveError }}
+      </div>
+
+      <!-- Başlık ve Süre -->
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div class="sm:col-span-3">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Çalışma Başlığı *</label>
+          <input
+            type="text"
+            [(ngModel)]="editForm.calismaBasligi"
+            placeholder="Örn: Dijital Gözetim Çağında Özgür İrade Yanılsaması"
+            class="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Hedef Süre (Dk)</label>
+          <input
+            type="number"
+            min="2"
+            max="120"
+            [(ngModel)]="editForm.hedefSureDk"
+            class="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      <!-- Açılış Kancası -->
+      <div>
+        <label class="block text-xs font-semibold text-amber-300 mb-1">🎯 Açılış Kancası (Hook)</label>
+        <input
+          type="text"
+          [(ngModel)]="editForm.kanca"
+          placeholder="İzleyiciyi ilk 15 saniyede yakalayacak çarpıcı soru veya tez..."
+          class="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-amber-400 focus:outline-none"
+        />
+      </div>
+
+      <!-- Ana Fikir -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 mb-1">Ana Fikir & Bölüm Tezi</label>
+        <textarea
+          [(ngModel)]="editForm.anaFikir"
+          rows="3"
+          placeholder="Bu bölümün temel argümanı ve anlatım omurgası..."
+          class="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-indigo-500 focus:outline-none"
+        ></textarea>
+      </div>
+
+      <!-- Kapsanan Konular -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 mb-1">
+          Kapsanan Konular <span class="text-slate-500 font-normal">(Her satıra bir konu/argüman yazın)</span>
+        </label>
+        <textarea
+          [(ngModel)]="editForm.konularText"
+          rows="4"
+          placeholder="Konu 1&#10;Konu 2&#10;Konu 3"
+          class="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-indigo-500 focus:outline-none"
+        ></textarea>
+      </div>
+
+      <!-- Sahne Kırılımı Editörü -->
+      <div class="space-y-2.5">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-semibold text-indigo-300">🎬 Sahne İskeleti ({{ editForm.sahneIskeleti.length }} Sahne)</label>
+          <button
+            type="button"
+            (click)="addSceneToEditForm()"
+            class="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 text-xs font-semibold cursor-pointer"
+          >
+            + Sahne Ekle
+          </button>
+        </div>
+
+        <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          <div *ngFor="let s of editForm.sahneIskeleti; let sIdx = index" class="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-slate-400 w-16 shrink-0">Sahne {{ sIdx + 1 }}</span>
+              <input
+                type="text"
+                [(ngModel)]="s.baslik"
+                placeholder="Sahne başlığı"
+                class="flex-1 px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-xs text-white"
+              />
+              <div class="flex items-center gap-1 shrink-0">
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  [(ngModel)]="s.tahminiSureDk"
+                  class="w-14 px-2 py-1.5 rounded bg-slate-900 border border-slate-700 text-xs text-white text-center"
+                />
+                <span class="text-[11px] text-slate-400">dk</span>
+              </div>
+              <button
+                type="button"
+                (click)="removeSceneFromEditForm(sIdx)"
+                class="p-1 text-rose-400 hover:text-rose-300 text-xs cursor-pointer"
+                title="Sahneyi Kaldır"
+              >
+                ✕
+              </button>
+            </div>
+            <textarea
+              [(ngModel)]="s.aciklamaVeArgumanlar"
+              rows="2"
+              placeholder="Bu sahnede işlenecek düşünürler, kavramlar ve örnekler..."
+              class="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-xs text-slate-200"
+            ></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Atanmış Kaynak Seçimi -->
+      <div class="space-y-2" *ngIf="egitimKaynaklari.length > 0">
+        <div class="flex items-center justify-between gap-2">
+          <label class="text-xs font-semibold text-emerald-300">
+            📚 Bu Bölüme Atanan Kaynaklar ({{ editForm.atananKaynakIdleri.length }} / {{ egitimKaynaklari.length }} seçili)
+          </label>
+          <input
+            type="text"
+            [(ngModel)]="sourceSearchQuery"
+            placeholder="Kaynak ara..."
+            class="px-2.5 py-1 rounded bg-slate-950 border border-slate-700 text-xs text-white w-48"
+          />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto p-2 rounded-lg bg-slate-950 border border-slate-800">
+          <label
+            *ngFor="let src of filteredEgitimKaynaklari"
+            class="flex items-center gap-2 p-2 rounded hover:bg-slate-900 cursor-pointer text-xs border transition"
+            [ngClass]="isSourceSelected(src.kaynakId) ? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-200' : 'border-transparent text-slate-300'"
+          >
+            <input
+              type="checkbox"
+              [checked]="isSourceSelected(src.kaynakId)"
+              (change)="toggleSourceSelection(src.kaynakId)"
+              class="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-0"
+            />
+            <span class="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 shrink-0">{{ src.kaynakTuru }}</span>
+            <span class="truncate" [title]="src.baslik">{{ src.baslik }}</span>
+          </label>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Modal Alt Aksiyonlar -->
+    <div class="px-6 py-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-end gap-3">
+      <button
+        type="button"
+        (click)="closeEditModal()"
+        [disabled]="isSaving"
+        class="px-4 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
+      >
+        İptal
+      </button>
+      <button
+        type="button"
+        (click)="saveEditModal()"
+        [disabled]="isSaving"
+        class="px-5 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white shadow-lg shadow-indigo-500/25 transition cursor-pointer"
+      >
+        {{ isSaving ? 'Kaydediliyor...' : '✓ Değişiklikleri Kaydet' }}
+      </button>
+    </div>
+
+  </div>
 </div>
 
 <style>

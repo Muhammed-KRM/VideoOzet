@@ -10,6 +10,7 @@ public class DokumanMetin
     public string? DamitilmisOzetMetni { get; set; }
     public string? CevrilmisOzetMetni { get; set; }
     public string OrijinalDil { get; set; } = "tr";
+    public string? LlmModel { get; set; }
     public int KelimeSayisi { get; set; }
     public DateTime OlusturmaTarihi { get; set; } = DateTime.UtcNow;
 

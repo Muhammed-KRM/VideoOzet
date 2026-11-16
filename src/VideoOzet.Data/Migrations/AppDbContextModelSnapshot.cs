@@ -21,6 +21,7 @@ namespace VideoOzet.Data.Migrations
                 .HasAnnotation("ProductVersion", "10.0.5")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "pg_trgm");
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
@@ -275,6 +276,9 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("egitim_id");
 
+                    b.Property<int>("IndekslemeTuru")
+                        .HasColumnType("integer");
+
                     b.Property<int>("IslemDurumu")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -343,6 +347,11 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("kelime_sayisi");
+
+                    b.Property<string>("LlmModel")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("llm_model");
 
                     b.Property<DateTime>("OlusturmaTarihi")
                         .ValueGeneratedOnAdd()
@@ -907,6 +916,12 @@ namespace VideoOzet.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("AtananKaynaklarJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
                     b.Property<bool>("BaglamEskidi")
                         .HasColumnType("boolean");
 
@@ -927,9 +942,21 @@ namespace VideoOzet.Data.Migrations
                     b.Property<int>("HedefSureDk")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Kanca")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("");
+
                     b.Property<string>("KonularJson")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("SahneIskeletiJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
 
                     b.Property<Guid>("SeriPlaniId")
                         .HasColumnType("uuid");
@@ -961,6 +988,12 @@ namespace VideoOzet.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("OnayTalimati")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("");
+
                     b.Property<bool>("Onaylandi")
                         .HasColumnType("boolean");
 
@@ -986,6 +1019,72 @@ namespace VideoOzet.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("SeriPlanlari", (string)null);
+                });
+
+            modelBuilder.Entity("VideoOzet.Data.Entities.StudioQaMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("BolumNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("bolum_no");
+
+                    b.Property<Guid?>("ContentRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("content_request_id");
+
+                    b.Property<Guid>("EgitimId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("egitim_id");
+
+                    b.Property<string>("Kapsam")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("kapsam");
+
+                    b.Property<Guid?>("KaynakId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("kaynak_id");
+
+                    b.Property<string>("KullanilanBaglamOzeti")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("kullanilan_baglam_ozeti");
+
+                    b.Property<string>("Mesaj")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("mesaj");
+
+                    b.Property<DateTime>("OlusturmaTarihi")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("olusturma_tarihi");
+
+                    b.Property<string>("OneriJson")
+                        .HasColumnType("text")
+                        .HasColumnName("oneri_json");
+
+                    b.Property<string>("Rol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("rol");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KaynakId", "OlusturmaTarihi")
+                        .HasDatabaseName("idx_studio_qa_kaynak");
+
+                    b.HasIndex("ContentRequestId", "BolumNo", "OlusturmaTarihi")
+                        .HasDatabaseName("idx_studio_qa_request_bolum");
+
+                    b.HasIndex("EgitimId", "Kapsam", "OlusturmaTarihi")
+                        .HasDatabaseName("idx_studio_qa_egitim_kapsam");
+
+                    b.ToTable("studio_qa_messages", (string)null);
                 });
 
             modelBuilder.Entity("VideoOzet.Data.Entities.Video", b =>
@@ -1016,6 +1115,9 @@ namespace VideoOzet.Data.Migrations
                     b.Property<Guid>("EgitimId")
                         .HasColumnType("uuid")
                         .HasColumnName("egitim_id");
+
+                    b.Property<int>("IndekslemeTuru")
+                        .HasColumnType("integer");
 
                     b.Property<int>("IslemDurumu")
                         .ValueGeneratedOnAdd()
@@ -1075,6 +1177,23 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<string>("BolumBasligi")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("bolum_basligi");
+
+                    b.Property<int>("ChunkIndex")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("chunk_index");
+
+                    b.Property<int>("ChunkTipi")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("chunk_tipi");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -1097,6 +1216,28 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("end_time_ms");
 
+                    b.Property<string>("KaynakBaslik")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasDefaultValue("")
+                        .HasColumnName("kaynak_baslik");
+
+                    b.Property<string>("KaynakDil")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("tr")
+                        .HasColumnName("kaynak_dil");
+
+                    b.Property<int>("KullanimTuru")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("kullanim_turu");
+
                     b.Property<int>("StartTimeMs")
                         .HasColumnType("integer")
                         .HasColumnName("start_time_ms");
@@ -1118,6 +1259,8 @@ namespace VideoOzet.Data.Migrations
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });
+
+                    b.HasIndex("EgitimId", "ChunkTipi");
 
                     b.ToTable("video_chunk_documents", (string)null);
                 });

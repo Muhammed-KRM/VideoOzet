@@ -7,8 +7,32 @@
     </button>
     <div>
       <h1 class="text-2xl font-bold text-white tracking-tight">Bölüm {{ bolumNo }}: {{ episode?.calismaBasligi || 'Yükleniyor...' }}</h1>
-      <p class="text-sm text-slate-400 mt-1">Bu bölüm için üretilmiş video planı, metin ve revizyon geçmişi.</p>
+      <p class="text-sm text-slate-400 mt-1">Bu bölüm için üretilmiş video planı, metin, kaynak kanıtları ve revizyon geçmişi.</p>
     </div>
+  </div>
+
+  <!-- Bağlam Eskidi Uyarısı -->
+  <div *ngIf="!isLoading && episode?.baglamEskidi" class="mb-6 bg-amber-950/40 border border-amber-500/50 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
+    <div class="flex items-start gap-3">
+      <span class="text-2xl shrink-0">⚠️</span>
+      <div>
+        <h4 class="text-sm font-bold text-amber-300">Önceki Bölüm Değişti (Bağlam Eskidi)</h4>
+        <p class="text-xs text-amber-200/90 mt-0.5">
+          Bu bölümden önceki bir bölüm revize edildiği için bölümler arası süreklilik defteri değişti. Bu bölümü güncel bağlama göre yeniden üretebilirsiniz.
+        </p>
+        <ul *ngIf="getBaglamSorunlari().length > 0" class="mt-2 space-y-1 text-xs text-amber-200/80 list-disc list-inside">
+          <li *ngFor="let s of getBaglamSorunlari()">{{ s }}</li>
+        </ul>
+      </div>
+    </div>
+    <button
+      type="button"
+      (click)="retryEpisode()"
+      [disabled]="episode.durum === 'Isleniyor' || isRevising"
+      class="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold rounded-lg transition-colors shrink-0 shadow cursor-pointer"
+    >
+      🔄 Yeni Bağlama Göre Güncelle
+    </button>
   </div>
 
   <div *ngIf="isLoading" class="flex justify-center items-center py-20">
@@ -37,6 +61,20 @@
                 {{ episode.durum === 'Bekliyor' ? 'Sırada' : (episode.durum === 'Isleniyor' ? 'Üretiliyor...' : (episode.durum === 'Hata' ? 'Hata' : 'Tamamlandı')) }}
               </span>
             </div>
+            <button
+              *ngIf="episode.durum === 'Isleniyor' || episode.durum === 'Bekliyor' || isRevising"
+              type="button"
+              (click)="cancelProcess()"
+              [disabled]="isCancelling"
+              class="mt-2.5 w-full py-1.5 px-3 bg-rose-600/25 hover:bg-rose-600/40 text-rose-200 border border-rose-500/50 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {{ isCancelling ? 'Durduruluyor...' : '⏹ İşlemi Durdur' }}
+            </button>
+          </div>
+
+          <div *ngIf="episode.kanca">
+            <p class="text-xs font-medium text-amber-400 uppercase tracking-wider mb-1">🎯 Açılış Kancası</p>
+            <p class="text-xs text-amber-200/90 italic bg-amber-950/30 border border-amber-500/20 rounded-lg p-2.5">{{ episode.kanca }}</p>
           </div>
           
           <div>
@@ -47,6 +85,11 @@
           <div>
             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Hedef Süre</p>
             <p class="text-sm text-slate-300">~{{ episode.hedefSureDk }} Dakika</p>
+          </div>
+
+          <div *ngIf="getAktifRevizyon()?.llmModel">
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1">Üreten AI Modeli</p>
+            <p class="text-xs font-mono text-indigo-300">{{ getAktifRevizyon()?.llmModel }}</p>
           </div>
         </div>
       </div>
@@ -65,6 +108,13 @@
             <div class="grid grid-cols-3 gap-1 p-1 bg-slate-900 rounded-lg border border-slate-700 text-xs">
               <button 
                 type="button"
+                (click)="hedefAlan = 'Hepsi'" 
+                [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'Hepsi', 'text-slate-400 hover:text-white': hedefAlan !== 'Hepsi'}"
+                class="py-1.5 px-1 rounded transition-all text-center">
+                İkisi Birden
+              </button>
+              <button 
+                type="button"
                 (click)="hedefAlan = 'VideoPlani'" 
                 [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'VideoPlani', 'text-slate-400 hover:text-white': hedefAlan !== 'VideoPlani'}"
                 class="py-1.5 px-1 rounded transition-all text-center">
@@ -77,18 +127,11 @@
                 class="py-1.5 px-1 rounded transition-all text-center">
                 Araştırma Özeti
               </button>
-              <button 
-                type="button"
-                (click)="hedefAlan = 'Hepsi'" 
-                [ngClass]="{'bg-indigo-600 text-white font-semibold shadow': hedefAlan === 'Hepsi', 'text-slate-400 hover:text-white': hedefAlan !== 'Hepsi'}"
-                class="py-1.5 px-1 rounded transition-all text-center">
-                İkisi Birden
-              </button>
             </div>
             <p class="text-[11px] text-slate-400 mt-1.5 leading-snug">
+              <span *ngIf="hedefAlan === 'Hepsi'" class="text-indigo-300">💡 Hem araştırma özeti hem video planı birbiriyle uyumlu şekilde revize edilir (Önerilen).</span>
               <span *ngIf="hedefAlan === 'VideoPlani'" class="text-indigo-300">💡 Yalnızca kurgu yönergeleri ve prompter metni yenilenir, araştırma özeti aynen korunur.</span>
               <span *ngIf="hedefAlan === 'ArastirmaOzeti'" class="text-indigo-300">💡 Yalnızca akademik araştırma özeti yenilenir, video planı aynen korunur.</span>
-              <span *ngIf="hedefAlan === 'Hepsi'" class="text-indigo-300">💡 Hem araştırma özeti hem video planı baştan revize edilir.</span>
             </p>
           </div>
 
@@ -98,7 +141,7 @@
               [(ngModel)]="revizyonTalimati" 
               name="revizyon" 
               rows="4" 
-              [placeholder]="hedefAlan === 'VideoPlani' ? 'Örn: Prompter metni daha samimi olsun, görsel yönergelerde B-roll ve alt yazı grafiklerini artır...' : (hedefAlan === 'ArastirmaOzeti' ? 'Örn: Kaynaktaki 2. konuyu daha detaylı açıkla, ek kavramsal analiz ekle...' : 'Örn: Giriş çok sıkıcı olmuş, daha heyecanlı bir dille yeniden yaz...')" 
+              [placeholder]="hedefAlan === 'VideoPlani' ? 'Örn: Prompter metni daha samimi olsun, görsel yönergelerde B-roll ve alt yazı grafiklerini artır...' : (hedefAlan === 'ArastirmaOzeti' ? 'Örn: Kaynaktaki 2. konuyu daha detaylı açıkla, ek kavramsal analiz ekle...' : 'Örn: Şu düşünürlerin görüşlerini daha ayrıntılı açıkla ve prompter metnini genişlet...')" 
               class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:border-indigo-500 focus:outline-none placeholder:text-slate-500"
               [disabled]="episode.durum === 'Isleniyor'">
             </textarea>
@@ -168,7 +211,7 @@
           </div>
         </div>
         <h3 class="text-xl font-bold text-white mb-2">AI Videoyu Üretiyor...</h3>
-        <p class="text-slate-400 max-w-md">Senaryo yazılıyor, kalite kontrolleri yapılıyor. Lütfen bekleyin.</p>
+        <p class="text-slate-400 max-w-md">Sahne-sahne senaryo yazılıyor, kalite kontrolleri yapılıyor. Lütfen bekleyin.</p>
       </div>
 
       <div *ngIf="episode.durum === 'Hata'" class="bg-slate-800 rounded-xl p-10 border border-rose-500/30 shadow-xl h-full flex flex-col items-center justify-center text-center">
@@ -202,7 +245,13 @@
         </div>
 
         <!-- Burada plan-viewer componentini kullanıyoruz -->
-        <app-plan-viewer [revision]="getAktifRevizyon()" [title]="episode?.calismaBasligi || ''" [bolumNo]="bolumNo"></app-plan-viewer>
+        <app-plan-viewer
+          [revision]="getAktifRevizyon()"
+          [title]="episode?.calismaBasligi || ''"
+          [bolumNo]="bolumNo"
+          [contentRequestId]="contentRequestId"
+          (reQcCompleted)="onReQcCompleted()">
+        </app-plan-viewer>
       </div>
     </div>
   </div>

@@ -23,6 +23,7 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
     private readonly ITextChunker _textChunker;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IPipelineStateTracker? _stateTracker;
+    private readonly IContextualTextChunker? _contextualChunker;
 
     private const int EmbeddingBatchSize = 4;
 
@@ -31,13 +32,15 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
         AppDbContext context,
         ITextChunker textChunker,
         IEmbeddingProvider embeddingProvider,
-        IPipelineStateTracker? stateTracker = null)
+        IPipelineStateTracker? stateTracker = null,
+        IContextualTextChunker? contextualChunker = null)
     {
         _logger = logger;
         _context = context;
         _textChunker = textChunker;
         _embeddingProvider = embeddingProvider;
         _stateTracker = stateTracker;
+        _contextualChunker = contextualChunker;
     }
 
     public async Task Consume(ConsumeContext<DocumentTextReadyEvent> context)
@@ -87,19 +90,82 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
                 throw new Exception("DokumanMetin bulunamadı.");
             }
 
-            var text = !string.IsNullOrWhiteSpace(dokumanMetin.CevrilmisOzetMetni)
+            var sourceText = !string.IsNullOrWhiteSpace(dokumanMetin.HamMetin)
+                ? dokumanMetin.HamMetin
+                : (!string.IsNullOrWhiteSpace(dokumanMetin.CevrilmisOzetMetni)
+                    ? dokumanMetin.CevrilmisOzetMetni
+                    : dokumanMetin.DamitilmisOzetMetni);
+
+            if (string.IsNullOrWhiteSpace(sourceText))
+            {
+                throw new Exception("Doküman için indekslenecek metin bulunamadı.");
+            }
+
+            var contextualChunks = new List<ContextualChunk>();
+            var rawTitle = string.IsNullOrWhiteSpace(dokuman.DosyaAdi) ? $"Doküman-{dokuman.Id}" : dokuman.DosyaAdi;
+            var safeTitle = rawTitle.Length > 300 ? rawTitle[..300] : rawTitle;
+            var safeLang = string.IsNullOrWhiteSpace(dokumanMetin.OrijinalDil)
+                ? "tr"
+                : (dokumanMetin.OrijinalDil.Length > 16 ? dokumanMetin.OrijinalDil[..16] : dokumanMetin.OrijinalDil);
+
+            var ozetOnlyText = !string.IsNullOrWhiteSpace(dokumanMetin.CevrilmisOzetMetni)
                 ? dokumanMetin.CevrilmisOzetMetni
-                : (!string.IsNullOrWhiteSpace(dokumanMetin.DamitilmisOzetMetni)
-                    ? dokumanMetin.DamitilmisOzetMetni
-                    : dokumanMetin.HamMetin);
+                : dokumanMetin.DamitilmisOzetMetni;
 
-            var wordCount = dokumanMetin.KelimeSayisi > 0
-                ? dokumanMetin.KelimeSayisi
-                : text.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            if (dokuman.IndekslemeTuru == IndekslemeTuru.OzetKaynak && !string.IsNullOrWhiteSpace(ozetOnlyText))
+            {
+                var summarySlices = _textChunker.ChunkText(ozetOnlyText, 500);
+                for (int si = 0; si < summarySlices.Count; si++)
+                {
+                    contextualChunks.Add(new ContextualChunk(
+                        ChunkIndex: si,
+                        ChunkTipi: ChunkTipi.OzetKart,
+                        BolumBasligi: summarySlices.Count > 1 ? $"Özet Bölüm {si + 1}" : "Özet Kaynak",
+                        StartTimeMs: 0,
+                        EndTimeMs: 0,
+                        RawText: summarySlices[si],
+                        ContextualizedText: $"[Kaynak: {safeTitle} | Tür: ÖZET KAYNAK | Dil: {safeLang.ToUpperInvariant()}]\n{summarySlices[si]}"));
+                }
+            }
+            else if (_contextualChunker != null && !string.IsNullOrWhiteSpace(dokumanMetin.HamMetin))
+            {
+                var docOptions = new ContextualChunkOptions(
+                    KaynakBaslik: rawTitle,
+                    KaynakTuru: "DOKÜMAN",
+                    Dil: safeLang,
+                    KullanimTuru: dokuman.KullanimTuru,
+                    TargetWords: 500,
+                    OverlapWords: 75);
 
-            int maxTokensPerChunk = wordCount > 6000 ? 900 : 500;
-            var chunks = _textChunker.ChunkText(text, maxTokensPerChunk);
-            if (chunks.Count == 0)
+                contextualChunks.AddRange(_contextualChunker.ChunkDocument(dokumanMetin.HamMetin, docOptions));
+
+                var ozetText = !string.IsNullOrWhiteSpace(dokumanMetin.CevrilmisOzetMetni)
+                    ? dokumanMetin.CevrilmisOzetMetni
+                    : dokumanMetin.DamitilmisOzetMetni;
+                if (!string.IsNullOrWhiteSpace(ozetText))
+                {
+                    var cardSlice = ozetText.Length > 2000 ? ozetText[..2000] : ozetText;
+                    contextualChunks.Add(new ContextualChunk(
+                        ChunkIndex: contextualChunks.Count,
+                        ChunkTipi: ChunkTipi.OzetKart,
+                        BolumBasligi: "Doküman Kimlik Kartı",
+                        StartTimeMs: 0,
+                        EndTimeMs: 0,
+                        RawText: cardSlice,
+                        ContextualizedText: $"[Kaynak: {safeTitle} | Tür: ÖZET KART | Kimlik Özeti | Dil: {safeLang.ToUpperInvariant()}]\n{cardSlice}"));
+                }
+            }
+            else
+            {
+                var plainChunks = _textChunker.ChunkText(sourceText, 500);
+                for (int ci = 0; ci < plainChunks.Count; ci++)
+                {
+                    contextualChunks.Add(new ContextualChunk(
+                        ci, ChunkTipi.HamMetin, null, 0, 0, plainChunks[ci], plainChunks[ci]));
+                }
+            }
+
+            if (contextualChunks.Count == 0)
             {
                 throw new Exception("Dokümandan indekslenecek metin parçası oluşturulamadı.");
             }
@@ -114,45 +180,53 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
                 await _context.SaveChangesAsync(context.CancellationToken);
             }
 
-            var chunkDocuments = new List<VideoChunkDocument>(chunks.Count);
+            var chunkDocuments = new List<VideoChunkDocument>(contextualChunks.Count);
             int processed = 0;
 
-            for (int offset = 0; offset < chunks.Count; offset += EmbeddingBatchSize)
+            for (int offset = 0; offset < contextualChunks.Count; offset += EmbeddingBatchSize)
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
 
-                var batch = chunks.Skip(offset).Take(EmbeddingBatchSize).ToList();
-                var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(batch);
+                var batch = contextualChunks.Skip(offset).Take(EmbeddingBatchSize).ToList();
+                var batchTexts = batch.Select(c => c.ContextualizedText).ToList();
+                var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(batchTexts);
 
                 for (int i = 0; i < batch.Count; i++)
                 {
                     if (i < embeddings.Count && embeddings[i].Length > 0)
                     {
+                        var chunk = batch[i];
                         chunkDocuments.Add(new VideoChunkDocument
                         {
                             EgitimId = evt.EgitimId,
                             DokumanId = evt.DokumanId,
-                            Text = batch[i],
+                            ChunkIndex = chunk.ChunkIndex,
+                            ChunkTipi = chunk.ChunkTipi,
+                            KaynakBaslik = safeTitle,
+                            BolumBasligi = chunk.BolumBasligi,
+                            KaynakDil = safeLang,
+                            KullanimTuru = dokuman.KullanimTuru,
+                            Text = chunk.ContextualizedText,
                             Embedding = new Vector(embeddings[i]),
-                            StartTimeMs = 0,
-                            EndTimeMs = 0,
+                            StartTimeMs = chunk.StartTimeMs,
+                            EndTimeMs = chunk.EndTimeMs,
                             CreatedAt = DateTime.UtcNow
                         });
                     }
                 }
 
                 processed += batch.Count;
-                int percent = Math.Clamp((int)Math.Round((double)processed / chunks.Count * 100), 1, 99);
+                int percent = Math.Clamp((int)Math.Round((double)processed / contextualChunks.Count * 100), 1, 99);
                 var progEvt = new PipelineProgressEvent
                 {
                     VideoId = evt.DokumanId,
                     EgitimId = evt.EgitimId,
                     Asama = "Doküman İndeksleme",
                     Durum = VideoIslemDurumu.IndekslemeBasladi.ToString(),
-                    Mesaj = $"Vektör indeksleniyor: {processed}/{chunks.Count} parça (%{percent})",
+                    Mesaj = $"Vektör indeksleniyor: {processed}/{contextualChunks.Count} parça (%{percent})",
                     Yuzde = percent,
                     MevcutAdim = processed,
-                    ToplamAdim = chunks.Count
+                    ToplamAdim = contextualChunks.Count
                 };
                 if (_stateTracker != null) await _stateTracker.RecordProgressAsync(progEvt);
                 await context.Publish(progEvt, context.CancellationToken);
@@ -172,8 +246,8 @@ public class IndexDokumanConsumer : IConsumer<DocumentTextReadyEvent>
                 Durum = VideoIslemDurumu.Tamamlandi.ToString(),
                 Mesaj = "Doküman indeksleme tamamlandı. Hazır.",
                 Yuzde = 100,
-                MevcutAdim = chunks.Count,
-                ToplamAdim = chunks.Count
+                MevcutAdim = contextualChunks.Count,
+                ToplamAdim = contextualChunks.Count
             };
             if (_stateTracker != null) await _stateTracker.RecordProgressAsync(doneEvt);
             await context.Publish(doneEvt, context.CancellationToken);

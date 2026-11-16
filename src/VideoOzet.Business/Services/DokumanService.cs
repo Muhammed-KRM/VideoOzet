@@ -39,7 +39,7 @@ public class DokumanService : IDokumanService
         _stateTracker = stateTracker;
     }
 
-    public async Task<Guid> UploadDokumanAsync(Guid egitimId, string fileName, string contentType, Stream fileStream, KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans)
+    public async Task<Guid> UploadDokumanAsync(Guid egitimId, string fileName, string contentType, Stream fileStream, KaynakKullanimTuru kullanimTuru = KaynakKullanimTuru.DogrudanReferans, IndekslemeTuru indekslemeTuru = IndekslemeTuru.HamKaynak)
     {
         var egitimExists = await _context.Egitimler.AnyAsync(e => e.Id == egitimId);
         if (!egitimExists)
@@ -60,7 +60,8 @@ public class DokumanService : IDokumanService
             Uzanti = uzanti,
             DosyaBoyutu = fileStream.Length,
             IslemDurumu = VideoIslemDurumu.Bekliyor,
-            KullanimTuru = kullanimTuru
+            KullanimTuru = kullanimTuru,
+            IndekslemeTuru = indekslemeTuru
         };
 
         _context.Dokumanlar.Add(dokuman);
@@ -105,6 +106,7 @@ public class DokumanService : IDokumanService
                 DosyaBoyutu = d.DosyaBoyutu,
                 IslemDurumu = d.IslemDurumu,
                 KullanimTuru = d.KullanimTuru,
+                IndekslemeTuru = d.IndekslemeTuru,
                 OrijinalDil = d.DokumanMetin != null && !string.IsNullOrWhiteSpace(d.DokumanMetin.OrijinalDil)
                     ? d.DokumanMetin.OrijinalDil
                     : "tr",
@@ -136,13 +138,20 @@ public class DokumanService : IDokumanService
         var dokuman = await _context.Dokumanlar.FindAsync(dokumanId);
         if (dokuman != null)
         {
-            try
+            if (!string.IsNullOrWhiteSpace(dokuman.DosyaYolu))
             {
-                await _fileStorageService.DeleteFileAsync(dokuman.DosyaYolu);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not delete file from storage: {DosyaYolu}", dokuman.DosyaYolu);
+                var isShared = await _context.Dokumanlar.AnyAsync(d => d.Id != dokumanId && d.DosyaYolu == dokuman.DosyaYolu);
+                if (!isShared)
+                {
+                    try
+                    {
+                        await _fileStorageService.DeleteFileAsync(dokuman.DosyaYolu);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Could not delete file from storage: {DosyaYolu}", dokuman.DosyaYolu);
+                    }
+                }
             }
 
             var orphanChunks = await _context.VideoChunkDocuments
@@ -248,6 +257,47 @@ public class DokumanService : IDokumanService
         }
     }
 
+    public async Task<int> ReindexAllByEgitimIdAsync(Guid egitimId)
+    {
+        var dokumanlar = await _context.Dokumanlar
+            .Include(d => d.DokumanMetin)
+            .Where(d => d.EgitimId == egitimId)
+            .ToListAsync();
+
+        var toQueue = new List<(Guid DokumanId, Guid MetinId)>();
+        foreach (var d in dokumanlar)
+        {
+            if (d.DokumanMetin != null && !string.IsNullOrWhiteSpace(d.DokumanMetin.HamMetin))
+            {
+                d.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
+                toQueue.Add((d.Id, d.DokumanMetin.Id));
+            }
+        }
+
+        if (toQueue.Count == 0)
+            return 0;
+
+        await _context.SaveChangesAsync();
+
+        foreach (var item in toQueue)
+        {
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(item.DokumanId, egitimId, "Doküman İndeksleme", "Ham metinle yeniden indekslenmek üzere sıraya alındı...");
+            }
+
+            await _publishEndpoint.Publish(new DocumentTextReadyEvent
+            {
+                DokumanId = item.DokumanId,
+                EgitimId = egitimId,
+                DokumanMetinId = item.MetinId
+            });
+        }
+
+        _logger.LogInformation("Eğitim {EgitimId} için {Count} doküman ham metinle yeniden indekslenmek üzere sıraya alındı.", egitimId, toQueue.Count);
+        return toQueue.Count;
+    }
+
     public async Task UpdateKullanimTuruAsync(Guid dokumanId, KaynakKullanimTuru kullanimTuru)
     {
         var dokuman = await _context.Dokumanlar.FindAsync(dokumanId);
@@ -255,8 +305,29 @@ public class DokumanService : IDokumanService
             throw new NotFoundException("Dokuman", dokumanId);
 
         dokuman.KullanimTuru = kullanimTuru;
+
+        if (_context.VideoChunkDocuments != null)
+        {
+            var chunks = await _context.VideoChunkDocuments
+                .Where(c => c.DokumanId == dokumanId)
+                .ToListAsync();
+
+            foreach (var chunk in chunks)
+            {
+                chunk.KullanimTuru = kullanimTuru;
+                if (!string.IsNullOrEmpty(chunk.Text) && chunk.Text.Contains("| Mod:", StringComparison.OrdinalIgnoreCase))
+                {
+                    chunk.Text = System.Text.RegularExpressions.Regex.Replace(
+                        chunk.Text,
+                        @"\s*\|\s*Mod:\s*[^\]\r\n]+(?=\])",
+                        string.Empty,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                }
+            }
+        }
+
         await _context.SaveChangesAsync();
-        _logger.LogInformation("Doküman {DokumanId} kullanım türü güncellendi: {KullanimTuru}", dokumanId, kullanimTuru);
+        _logger.LogInformation("Doküman {DokumanId} kullanım türü ve ilişkili chunk kayıtları güncellendi: {KullanimTuru}", dokumanId, kullanimTuru);
     }
 
     public async Task<KaynakIcerikDetayDto?> GetDokumanIcerikDetayAsync(Guid dokumanId)
@@ -276,7 +347,7 @@ public class DokumanService : IDokumanService
             OrijinalDil = dokuman.DokumanMetin?.OrijinalDil ?? "tr",
             KelimeSayisi = dokuman.DokumanMetin?.KelimeSayisi ?? 0,
             SttModel = null,
-            LlmModel = "gemini-1.5-flash",
+            LlmModel = dokuman.DokumanMetin?.LlmModel,
             OlusturmaTarihi = dokuman.OlusturmaTarihi,
             HamMetin = dokuman.DokumanMetin?.HamMetin ?? string.Empty,
             DamitilmisOzetMetni = dokuman.DokumanMetin?.DamitilmisOzetMetni,

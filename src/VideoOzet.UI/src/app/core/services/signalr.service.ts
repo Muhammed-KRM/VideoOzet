@@ -19,22 +19,51 @@ export class SignalRService {
   public seriesPlanCompleted$ = new Subject<any>();
 
   public startConnection() {
-    // Aynı anda birden fazla bağlantı olmasını engellemek için
-    if (this.hubConnection && this.hubConnection.state === signalR.HubConnectionState.Connected) {
+    if (this.hubConnection &&
+      (this.hubConnection.state === signalR.HubConnectionState.Connected ||
+       this.hubConnection.state === signalR.HubConnectionState.Connecting ||
+       this.hubConnection.state === signalR.HubConnectionState.Reconnecting)) {
       return;
     }
 
-    this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl(environment.hubUrl)
-      .withAutomaticReconnect()
-      .build();
+    if (!this.hubConnection) {
+      this.hubConnection = new signalR.HubConnectionBuilder()
+        .withUrl(environment.hubUrl)
+        .withAutomaticReconnect([0, 2000, 5000, 10000, 15000, 30000, 30000, 30000, 30000, 30000])
+        .build();
 
-    this.addListeners();
+      this.addListeners();
+      this.hubConnection.onclose(() => {
+        setTimeout(() => this.startConnection(), 5000);
+      });
+    }
 
     this.hubConnection
       .start()
       .then(() => console.log('SignalR connection started'))
-      .catch(err => console.log('Error while starting connection: ' + err));
+      .catch(err => {
+        console.log('Error while starting connection: ' + err);
+        setTimeout(() => this.startConnection(), 5000);
+      });
+  }
+
+  public async ensureConnected(): Promise<boolean> {
+    if (!this.hubConnection) {
+      this.startConnection();
+      return false;
+    }
+    if (this.hubConnection.state === signalR.HubConnectionState.Connected) {
+      return true;
+    }
+    if (this.hubConnection.state === signalR.HubConnectionState.Disconnected) {
+      try {
+        await this.hubConnection.start();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   private addListeners() {

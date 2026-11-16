@@ -100,15 +100,20 @@ public class ContentRequestDetailsController : ControllerBase
     private readonly AppDbContext _dbContext;
     private readonly ISynthesisProvider _synthesisProvider;
     private readonly ISourceContextBuilder? _sourceContextBuilder;
+    private readonly IQualityCheckService _qcService;
 
     public ContentRequestDetailsController(
         AppDbContext dbContext,
         ISynthesisProvider synthesisProvider,
-        ISourceContextBuilder? sourceContextBuilder = null)
+        ISourceContextBuilder? sourceContextBuilder = null,
+        IQualityCheckService? qcService = null)
     {
         _dbContext = dbContext;
         _synthesisProvider = synthesisProvider;
         _sourceContextBuilder = sourceContextBuilder;
+        _qcService = qcService ?? new QualityCheckService(
+            synthesisProvider,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<QualityCheckService>.Instance);
     }
 
     /// <summary>
@@ -146,6 +151,7 @@ public class ContentRequestDetailsController : ControllerBase
                 ArastirmaOzeti = request.GeneratedContent.ArastirmaOzeti,
                 VideoPlani = request.GeneratedContent.VideoPlani,
                 KullanilanKaynaklar = request.GeneratedContent.KullanilanKaynaklar,
+                KullanilanKaynakDetaylari = await LoadUsedSourceChunkDetailsAsync(request.EgitimId, request.GeneratedContent.KullanilanKaynaklar),
                 LlmModel = request.GeneratedContent.LlmModel,
                 TokenKullanimi = request.GeneratedContent.TokenKullanimi,
                 UretimSuresiMs = request.GeneratedContent.UretimSuresiMs,
@@ -274,11 +280,19 @@ public class ContentRequestDetailsController : ControllerBase
         {
             try
             {
-                var sc = await _sourceContextBuilder.BuildContextAsync(request.EgitimId, new[] { request.Konu }, 80000, ct);
+                var sc = await _sourceContextBuilder.BuildContextAsync(
+                    request.EgitimId,
+                    new[] { dto.RevizeTalimati, request.Konu }.Where(q => !string.IsNullOrWhiteSpace(q)),
+                    120000,
+                    ct);
                 revisionContext = sc.ContextText;
             }
             catch { }
         }
+
+        var topicWithThesis = string.IsNullOrWhiteSpace(request.EkTonTalimati)
+            ? $"[YAZAR-TEZİ]: {request.Konu}"
+            : $"[YAZAR-TEZİ]: {request.Konu} | {request.EkTonTalimati}";
 
         if (hedefAlan == "hepsi" || hedefAlan == "ozet")
         {
@@ -286,7 +300,7 @@ public class ContentRequestDetailsController : ControllerBase
                 currentOzet,
                 dto.RevizeTalimati,
                 "Araştırma Özeti",
-                request.Konu,
+                topicWithThesis,
                 revisionContext,
                 ct);
         }
@@ -297,7 +311,7 @@ public class ContentRequestDetailsController : ControllerBase
                 currentPlan,
                 dto.RevizeTalimati,
                 "Video Planı",
-                request.Konu,
+                topicWithThesis,
                 revisionContext,
                 ct);
         }
@@ -317,7 +331,7 @@ public class ContentRequestDetailsController : ControllerBase
         try
         {
             var prevReport = latestVersion?.DetayliRapor ?? request.QcResult?.DetayliRapor ?? "[]";
-            var qc = await ExecuteQualityCheckInternal(request, revisedOzet, prevReport, ct);
+            var qc = await ExecuteQualityCheckInternal(request, revisedOzet, prevReport, ct, revisedPlan);
             newVersion.ToplamIddiaSayisi = qc.toplam;
             newVersion.DesteklenenSayisi = qc.desteklenen;
             newVersion.BelirsizSayisi = qc.belirsiz;
@@ -390,7 +404,7 @@ public class ContentRequestDetailsController : ControllerBase
             .FirstOrDefault();
         var prevReport = prevVersion?.DetayliRapor;
 
-        var qc = await ExecuteQualityCheckInternal(request, targetVersion.ArastirmaOzeti, prevReport, ct);
+        var qc = await ExecuteQualityCheckInternal(request, targetVersion.ArastirmaOzeti, prevReport, ct, targetVersion.VideoPlani);
         targetVersion.ToplamIddiaSayisi = qc.toplam;
         targetVersion.DesteklenenSayisi = qc.desteklenen;
         targetVersion.BelirsizSayisi = qc.belirsiz;
@@ -419,7 +433,8 @@ public class ContentRequestDetailsController : ControllerBase
         ContentRequest request, 
         string contentText, 
         string? previousQcReportJson, 
-        CancellationToken ct)
+        CancellationToken ct,
+        string? videoPlanText = null)
     {
         var contextData = string.Empty;
         var chunkIdsStr = request.GeneratedContent?.KullanilanKaynaklar;
@@ -441,7 +456,7 @@ public class ContentRequestDetailsController : ControllerBase
             catch { }
         }
 
-        if (_sourceContextBuilder != null)
+        if (_sourceContextBuilder != null && chunkIds.Any())
         {
             var sc = await _sourceContextBuilder.BuildFromChunkIdsAsync(request.EgitimId, chunkIds, ct);
             contextData = sc.ContextText;
@@ -483,74 +498,132 @@ public class ContentRequestDetailsController : ControllerBase
             }
         }
 
-        var batchQcResponse = !string.IsNullOrWhiteSpace(previousQcReportJson) && previousQcReportJson != "[]"
-            ? await _synthesisProvider.ReQualityCheckAsync(
-                contentText,
-                previousQcReportJson,
-                contextData,
-                claimCount: 8,
-                ct)
-            : await _synthesisProvider.BatchQualityCheckAsync(
-                contentText,
-                contextData,
-                claimCount: 8,
-                ct);
+        if (string.IsNullOrWhiteSpace(contextData))
+        {
+            contextData = $"[YAZAR-TEZİ VE ODAK BAĞLAMI]: {request.Konu}";
+        }
 
-        var cleanJson = batchQcResponse.Trim();
-        if (cleanJson.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            cleanJson = cleanJson.Substring(7);
-        else if (cleanJson.StartsWith("```"))
-            cleanJson = cleanJson.Substring(3);
-        if (cleanJson.EndsWith("```"))
-            cleanJson = cleanJson.Substring(0, cleanJson.Length - 3);
-        cleanJson = cleanJson.Trim();
+        var effectivePrevReport = string.IsNullOrWhiteSpace(previousQcReportJson) || previousQcReportJson == "[]"
+            ? null
+            : previousQcReportJson;
 
-        var desteklenen = 0;
-        var belirsiz = 0;
-        var desteklenmeyen = 0;
-        var raporList = new List<object>();
+        var authorThesis = string.IsNullOrWhiteSpace(request.EkTonTalimati)
+            ? request.Konu
+            : $"{request.Konu} | {request.EkTonTalimati}";
 
+        var qcResult = await _qcService.EvaluateAsync(
+            summaryText: contentText,
+            sourceContext: contextData,
+            authorThesisContext: authorThesis,
+            claimCount: 8,
+            previousReportJson: effectivePrevReport,
+            videoPlanText: videoPlanText,
+            ct: ct);
+
+        return (
+            qcResult.ToplamIddiaSayisi,
+            qcResult.DesteklenenSayisi,
+            qcResult.BelirsizSayisi,
+            qcResult.DesteklenmeyenSayisi,
+            qcResult.DetayliRaporJson,
+            qcResult.GuvenSkorYuzde);
+    }
+
+    private async Task<List<UsedSourceChunkDto>> LoadUsedSourceChunkDetailsAsync(Guid egitimId, string? kullanilanKaynaklarJson)
+    {
+        var details = new List<UsedSourceChunkDto>();
+        if (string.IsNullOrWhiteSpace(kullanilanKaynaklarJson))
+            return details;
+
+        List<Guid> chunkIds;
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(cleanJson);
-            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-            {
-                foreach (var element in doc.RootElement.EnumerateArray())
-                {
-                    var iddia = element.TryGetProperty("iddia", out var iddiaProp) ? iddiaProp.GetString() : "Bilinmeyen İddia";
-                    var durum = element.TryGetProperty("durum", out var durumProp) ? durumProp.GetString()?.ToLowerInvariant() ?? "belirsiz" : "belirsiz";
-                    var aciklama = element.TryGetProperty("aciklama", out var aciklamaProp) ? aciklamaProp.GetString() : "";
-
-                    if (durum == "desteklendi") desteklenen++;
-                    else if (durum == "desteklenmedi") desteklenmeyen++;
-                    else { durum = "belirsiz"; belirsiz++; }
-
-                    raporList.Add(new
-                    {
-                        iddia = iddia ?? "",
-                        durum = durum,
-                        aciklama = aciklama ?? ""
-                    });
-                }
-            }
+            chunkIds = kullanilanKaynaklarJson.TrimStart().StartsWith("[")
+                ? System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(kullanilanKaynaklarJson) ?? new()
+                : kullanilanKaynaklarJson.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
         }
-        catch { }
-
-        if (!raporList.Any())
+        catch
         {
-            desteklenen = 1;
-            raporList.Add(new
+            return details;
+        }
+
+        var distinctIds = chunkIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinctIds.Count == 0)
+            return details;
+
+        var chunks = await _dbContext.VideoChunkDocuments
+            .AsNoTracking()
+            .Where(c => c.EgitimId == egitimId && distinctIds.Contains(c.Id))
+            .ToListAsync();
+
+        var chunkMap = chunks.ToDictionary(c => c.Id);
+        var videoIds = chunks.Where(c => c.VideoId.HasValue).Select(c => c.VideoId!.Value).Distinct().ToList();
+        var docIds = chunks.Where(c => c.DokumanId.HasValue).Select(c => c.DokumanId!.Value).Distinct().ToList();
+
+        var videoInfos = videoIds.Count > 0
+            ? await _dbContext.Videolar
+                .AsNoTracking()
+                .Where(v => videoIds.Contains(v.Id))
+                .Select(v => new { v.Id, v.Baslik, v.KullanimTuru, OrijinalDil = v.Summary != null ? v.Summary.OrijinalDil : null })
+                .ToDictionaryAsync(v => v.Id, v => (v.Baslik, v.KullanimTuru, v.OrijinalDil))
+            : new Dictionary<Guid, (string Baslik, KaynakKullanimTuru KullanimTuru, string? OrijinalDil)>();
+
+        var docInfos = docIds.Count > 0
+            ? await _dbContext.Dokumanlar
+                .AsNoTracking()
+                .Where(d => docIds.Contains(d.Id))
+                .Select(d => new { d.Id, d.DosyaAdi, d.KullanimTuru, OrijinalDil = d.DokumanMetin != null ? d.DokumanMetin.OrijinalDil : null })
+                .ToDictionaryAsync(d => d.Id, d => (d.DosyaAdi, d.KullanimTuru, d.OrijinalDil))
+            : new Dictionary<Guid, (string DosyaAdi, KaynakKullanimTuru KullanimTuru, string? OrijinalDil)>();
+
+        for (int i = 0; i < distinctIds.Count; i++)
+        {
+            if (!chunkMap.TryGetValue(distinctIds[i], out var c))
+                continue;
+
+            (string Baslik, KaynakKullanimTuru KullanimTuru, string? OrijinalDil) vInfo = default;
+            (string DosyaAdi, KaynakKullanimTuru KullanimTuru, string? OrijinalDil) dInfo = default;
+            var hasVideo = c.VideoId.HasValue && videoInfos.TryGetValue(c.VideoId.Value, out vInfo);
+            var hasDoc = c.DokumanId.HasValue && docInfos.TryGetValue(c.DokumanId.Value, out dInfo);
+
+            string title = hasDoc && !string.IsNullOrWhiteSpace(dInfo.DosyaAdi)
+                ? dInfo.DosyaAdi
+                : (hasVideo && !string.IsNullOrWhiteSpace(vInfo.Baslik)
+                    ? vInfo.Baslik
+                    : (!string.IsNullOrWhiteSpace(c.KaynakBaslik) ? c.KaynakBaslik : "Bilinmeyen Kaynak"));
+
+            // İndekste kalmış eski metin/değer yerine veritabanındaki güncel video/dokuman.KullanimTuru değerini baz al
+            var liveKullanimTuru = hasVideo
+                ? vInfo.KullanimTuru
+                : (hasDoc ? dInfo.KullanimTuru : c.KullanimTuru);
+
+            var liveLang = !string.IsNullOrWhiteSpace(c.KaynakDil)
+                ? c.KaynakDil
+                : (hasVideo && !string.IsNullOrWhiteSpace(vInfo.OrijinalDil)
+                    ? vInfo.OrijinalDil!
+                    : (hasDoc && !string.IsNullOrWhiteSpace(dInfo.OrijinalDil) ? dInfo.OrijinalDil! : "tr"));
+
+            string? timeRange = null;
+            if (c.EndTimeMs > c.StartTimeMs)
             {
-                iddia = "İçerik araştırması video ve döküman kaynakları doğrultusunda analiz edildi.",
-                durum = "desteklendi",
-                aciklama = "Kalite kontrol analizi başarıyla tamamlandı."
+                var tsS = TimeSpan.FromMilliseconds(c.StartTimeMs);
+                var tsE = TimeSpan.FromMilliseconds(c.EndTimeMs);
+                timeRange = $"{(int)tsS.TotalMinutes:D2}:{tsS.Seconds:D2}–{(int)tsE.TotalMinutes:D2}:{tsE.Seconds:D2}";
+            }
+
+            details.Add(new UsedSourceChunkDto
+            {
+                KanitKodu = $"K{details.Count + 1}",
+                ChunkId = c.Id,
+                KaynakTipi = c.VideoId.HasValue ? "Video" : "Dokuman",
+                KaynakBaslik = title,
+                BolumBasligi = c.BolumBasligi,
+                ZamanAraligi = timeRange,
+                KaynakDil = liveLang,
+                KullanimTuru = liveKullanimTuru == KaynakKullanimTuru.SadeceArgumanVeMantik ? "DisKaynak" : "DogrudanReferans"
             });
         }
 
-        var toplam = raporList.Count;
-        var guvenSkor = toplam == 0 ? 100m : Math.Round((decimal)desteklenen / toplam * 100, 2);
-        var finalJson = System.Text.Json.JsonSerializer.Serialize(raporList);
-
-        return (toplam, desteklenen, belirsiz, desteklenmeyen, finalJson, guvenSkor);
+        return details;
     }
 }

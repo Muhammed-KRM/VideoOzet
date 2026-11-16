@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink, NavigationEnd } from '@angular/router';
 import { filter } from 'rxjs/operators';
@@ -41,36 +41,40 @@ import { SettingsModalComponent } from '../settings-modal/settings-modal.compone
 
           <!-- Sağ: Aktif AI Sağlayıcı Durumu & API Ayarları Butonu -->
           <div class="flex items-center gap-3">
-            <!-- Aktif Sağlayıcı Rozeti -->
+            <!-- Aktif Sağlayıcı & Görev Modeli Rozeti -->
             <button
               type="button"
               (click)="settingsService.openModal()"
-              title="Aktif AI Sağlayıcısını Değiştir"
+              [title]="badgeTooltip()"
               class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/80 hover:border-slate-600 text-xs transition"
             >
               <span
-                class="w-2 h-2 rounded-full animate-pulse"
+                class="w-2 h-2 rounded-full animate-pulse shrink-0"
                 [ngClass]="settingsService.settings().activeProvider === 'openrouter'
                   ? 'bg-cyan-400'
                   : settingsService.settings().activeProvider === 'groq'
                     ? 'bg-amber-400'
                     : 'bg-purple-400'"
               ></span>
-              <span class="text-slate-400">AI:</span>
-              <span class="font-semibold text-white">
-                {{ settingsService.settings().activeProvider === 'openrouter'
-                  ? 'OpenRouter'
-                  : settingsService.settings().activeProvider === 'groq'
-                    ? 'Groq Cloud'
-                    : 'Yerel Proxy' }}
+              <span class="font-semibold text-white whitespace-nowrap">
+                {{ providerLabel() }}:
               </span>
-              <span class="text-slate-500 font-mono text-[11px] max-w-[160px] truncate">
-                ({{ settingsService.settings().activeProvider === 'openrouter'
-                  ? settingsService.settings().openRouterModel
-                  : settingsService.settings().activeProvider === 'groq'
-                    ? settingsService.settings().groqModel
-                    : settingsService.settings().antigravityProxyModel }})
+              <span class="px-1.5 py-0.5 rounded bg-purple-500/20 border border-purple-500/30 text-purple-200 font-mono text-[11px] font-semibold max-w-[200px] truncate">
+                Plan: {{ activePlanModel() }}
               </span>
+              @if (activeSummaryModel() !== activePlanModel()) {
+                <span class="hidden lg:inline-block text-slate-400 font-mono text-[10px] max-w-[150px] truncate">
+                  | Özet: {{ activeSummaryModel() }}
+                </span>
+              }
+              @if (activeQcModel() !== activePlanModel() && activeQcModel() !== activeSummaryModel()) {
+                <span class="hidden xl:inline-block text-slate-400 font-mono text-[10px] max-w-[140px] truncate">
+                  | QC: {{ activeQcModel() }}
+                </span>
+              }
+              @if (!settingsService.settings().allowFallbackToSecondaryProvider) {
+                <span class="text-[10px] text-emerald-400" title="Kesin Model Kilidi Aktif (Yedek sağlayıcıya sessiz geçiş kapalı)">🔒</span>
+              }
             </button>
 
             <!-- API Ayarları Butonu -->
@@ -94,6 +98,68 @@ export class NavbarComponent implements OnInit {
   readonly settingsService = inject(SettingsService);
   private readonly router = inject(Router);
   isLoginPage = false;
+
+  readonly providerLabel = computed(() => {
+    const p = this.settingsService.settings().activeProvider;
+    if (p === 'openrouter') return 'OpenRouter';
+    if (p === 'groq') return 'Groq Cloud';
+    return 'Yerel Proxy';
+  });
+
+  readonly activePlanModel = computed(() => {
+    const s = this.settingsService.settings();
+    if (s.activeProvider === 'openrouter') {
+      return s.openRouterVideoPlanModel || s.openRouterModel || 'anthropic/claude-3.7-sonnet';
+    }
+    if (s.activeProvider === 'groq') {
+      return s.groqVideoPlanModel || s.groqModel || 'openai/gpt-oss-120b';
+    }
+    return (
+      s.antigravityProxyVideoPlanModel ||
+      s.antigravityVideoPlanModel ||
+      s.antigravityProxyModel ||
+      'claude-3-7-sonnet-tiered'
+    );
+  });
+
+  readonly activeSummaryModel = computed(() => {
+    const s = this.settingsService.settings();
+    if (s.activeProvider === 'openrouter') {
+      return s.openRouterSummaryModel || s.openRouterModel || 'google/gemini-3.8-flash';
+    }
+    if (s.activeProvider === 'groq') {
+      return s.groqSummaryModel || s.groqModel || 'openai/gpt-oss-120b';
+    }
+    return (
+      s.antigravityProxySummaryModel ||
+      s.antigravitySummaryModel ||
+      s.antigravityProxyModel ||
+      'gemini-3.8-flash-tiered'
+    );
+  });
+
+  readonly activeQcModel = computed(() => {
+    const s = this.settingsService.settings();
+    if (s.activeProvider === 'openrouter') {
+      return s.openRouterQcModel || s.openRouterModel || 'google/gemini-3.8-flash';
+    }
+    if (s.activeProvider === 'groq') {
+      return s.groqQcModel || s.groqModel || 'openai/gpt-oss-120b';
+    }
+    return (
+      s.antigravityProxyQcModel ||
+      s.antigravityQcModel ||
+      s.antigravityProxyModel ||
+      'gemini-3.8-flash-tiered'
+    );
+  });
+
+  readonly badgeTooltip = computed(() => {
+    const lockText = this.settingsService.settings().allowFallbackToSecondaryProvider
+      ? 'Yedek sağlayıcıya geçiş açık'
+      : 'Kesin Model Kilidi Aktif';
+    return `Sağlayıcı: ${this.providerLabel()} | Plan/Senaryo: ${this.activePlanModel()} | Özet: ${this.activeSummaryModel()} | QC: ${this.activeQcModel()} (${lockText})`;
+  });
 
   ngOnInit(): void {
     this.checkUrl(this.router.url);

@@ -1,6 +1,9 @@
-import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { marked } from 'marked';
+import { ApiService } from '../../core/services/api.service';
+import { StudioQaPanelComponent } from '../../shared/components/studio-qa-panel/studio-qa-panel.component';
 import {
   markdownToDocxBlob,
   qcToMarkdown,
@@ -15,15 +18,24 @@ type DownloadScope = 'active' | 'all';
 @Component({
   selector: 'app-plan-viewer',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule, StudioQaPanelComponent],
   templateUrl: './plan-viewer.component.html'
 })
 export class PlanViewerComponent implements OnChanges {
   @Input() revision: any;
   @Input() title = '';
   @Input() bolumNo: number | null = null;
+  @Input() contentRequestId = '';
+  @Output() reQcCompleted = new EventEmitter<void>();
 
-  activeTab: 'ozet' | 'plan' | 'qc' = 'ozet';
+  private apiService = inject(ApiService);
+
+  activeTab: 'ozet' | 'plan' | 'qc' | 'kanitlar' | 'soru' = 'ozet';
+  episodeOrnekSorular = [
+    'Bu bölümün kapanışındaki sonraki video geçişi, bir sonraki bölümün gerçek konusuyla uyumlu mu?',
+    'Bu bölümde hangi kaynaklara doğrudan değinilmiş, hangileri dışarıda kalmış?',
+    'Son kısımdaki geçiş cümlesini bir sonraki bölüme tam uyacak şekilde nasıl değiştirebiliriz?'
+  ];
   qcRaporList: any[] = [];
   formattedOzet: string = '';
   formattedPlan: string = '';
@@ -33,8 +45,102 @@ export class PlanViewerComponent implements OnChanges {
   isPrompterMenuOpen = false;
   copyPrompterSuccess = false;
 
+  isReQcRunning = false;
+  reQcError = '';
+
+  isEditing = false;
+  isSavingEdit = false;
+  editError = '';
+  editOzetText = '';
+  editPlanText = '';
+
+  get canManualEdit(): boolean {
+    return !!(this.contentRequestId && this.bolumNo != null && this.revision && (this.activeTab === 'ozet' || this.activeTab === 'plan'));
+  }
+
+  startManualEdit() {
+    this.editOzetText = this.revision?.arastirmaOzeti || '';
+    this.editPlanText = this.revision?.videoPlani || '';
+    this.editError = '';
+    this.isEditing = true;
+  }
+
+  cancelManualEdit() {
+    this.isEditing = false;
+    this.editError = '';
+  }
+
+  saveManualEdit() {
+    if (!this.contentRequestId || this.bolumNo == null || !this.revision || this.isSavingEdit) return;
+    this.isSavingEdit = true;
+    this.editError = '';
+    const revNo = this.revision.revizyonNo || 1;
+    const payload = this.activeTab === 'ozet'
+      ? { arastirmaOzeti: this.editOzetText }
+      : { videoPlani: this.editPlanText };
+
+    this.apiService.updateEpisodeRevision(this.contentRequestId, this.bolumNo, revNo, payload).subscribe({
+      next: (res) => {
+        this.isSavingEdit = false;
+        this.isEditing = false;
+        if (res?.arastirmaOzeti !== undefined) {
+          this.revision.arastirmaOzeti = res.arastirmaOzeti;
+        }
+        if (res?.videoPlani !== undefined) {
+          this.revision.videoPlani = res.videoPlani;
+        }
+        this.formattedOzet = this.formatMarkdown(this.revision.arastirmaOzeti || '');
+        this.formattedPlan = this.formatMarkdown(this.revision.videoPlani || '');
+        this.reQcCompleted.emit();
+      },
+      error: (err) => {
+        this.isSavingEdit = false;
+        this.editError = err?.error?.mesaj || err?.error?.Mesaj || 'Düzenleme kaydedilirken hata oluştu.';
+      }
+    });
+  }
+
   get hasVideoPlan(): boolean {
     return !!(this.revision?.videoPlani && String(this.revision.videoPlani).trim());
+  }
+
+  get sourceEvidences(): any[] {
+    const raw = this.revision?.kullanilanKaynakDetaylari ?? this.revision?.kullanilanKaynakDetaylariJson;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  formatEvidenceLocation(item: any): string {
+    if (!item) return '-';
+    if (item.zamanAraligi && item.bolumBasligi) {
+      return `${item.bolumBasligi} (${item.zamanAraligi})`;
+    }
+    if (item.zamanAraligi) return item.zamanAraligi;
+    if (item.startTimeMs != null && item.endTimeMs != null && item.endTimeMs > 0) {
+      return `${this.formatMs(item.startTimeMs)} - ${this.formatMs(item.endTimeMs)}`;
+    }
+    return item.bolumBasligi || item.konum || '-';
+  }
+
+  private formatMs(ms: number): string {
+    const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+
+  isDirectReference(ev: any): boolean {
+    const mode = String(ev?.kullanimTuru ?? '').toLowerCase();
+    return mode.includes('dogrudan') || mode === '0' || !mode.includes('dis') && !mode.includes('arguman');
   }
 
   togglePrompterMenu() {
@@ -43,9 +149,12 @@ export class PlanViewerComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['revision'] && this.revision) {
+      this.isEditing = false;
+      this.editError = '';
       this.parseQcReport();
       this.formattedOzet = this.formatMarkdown(this.revision.arastirmaOzeti || '');
       this.formattedPlan = this.formatMarkdown(this.revision.videoPlani || '');
+      this.reQcError = '';
     }
   }
 
@@ -53,12 +162,45 @@ export class PlanViewerComponent implements OnChanges {
     this.qcRaporList = [];
     if (this.revision?.detayliRapor) {
       try {
-        const parsed = JSON.parse(this.revision.detayliRapor);
+        const parsed = typeof this.revision.detayliRapor === 'string'
+          ? JSON.parse(this.revision.detayliRapor)
+          : this.revision.detayliRapor;
         this.qcRaporList = Array.isArray(parsed) ? parsed : [];
       } catch {
         // Hata durumunda liste bos kalir
       }
     }
+  }
+
+  reRunEpisodeQc() {
+    const bNo = this.bolumNo ?? this.revision?.bolumNo;
+    const revNo = this.revision?.revizyonNo ?? 1;
+    if (!this.contentRequestId || !bNo || this.isReQcRunning) return;
+
+    this.isReQcRunning = true;
+    this.reQcError = '';
+
+    this.apiService.reRunEpisodeQc(this.contentRequestId, bNo, revNo).subscribe({
+      next: (res: any) => {
+        this.isReQcRunning = false;
+        if (res && this.revision) {
+          // Eğer API doğrudan güncellenmiş revizyon veya bölüm nesnesini döndürdüyse anında yansıt
+          const updatedRev = Array.isArray(res.revizyonlar)
+            ? res.revizyonlar.find((r: any) => r.revizyonNo === revNo)
+            : (res.detayliRapor !== undefined || res.guvenSkorYuzde !== undefined ? res : null);
+          if (updatedRev) {
+            Object.assign(this.revision, updatedRev);
+            this.parseQcReport();
+          }
+        }
+        this.reQcCompleted.emit();
+      },
+      error: (err: any) => {
+        console.error('Bölüm QC yeniden çalıştırma hatası:', err);
+        this.isReQcRunning = false;
+        this.reQcError = err?.error?.mesaj || err?.error?.message || 'Kalite kontrolü yeniden çalıştırılırken bir hata oluştu.';
+      }
+    });
   }
 
   // ───────────────────────── İndirme ─────────────────────────
@@ -70,6 +212,7 @@ export class PlanViewerComponent implements OnChanges {
   get activeTabLabel(): string {
     if (this.activeTab === 'ozet') return 'Araştırma Özeti';
     if (this.activeTab === 'plan') return 'Video Planı';
+    if (this.activeTab === 'kanitlar') return 'Kaynak Kanıtları';
     return 'Kalite Kontrol';
   }
 
@@ -95,7 +238,11 @@ export class PlanViewerComponent implements OnChanges {
       .slice(0, 40) || 'Bolum';
     const suffix = scope === 'all'
       ? 'Tam_Rapor'
-      : (this.activeTab === 'ozet' ? 'Arastirma_Ozeti' : (this.activeTab === 'plan' ? 'Video_Plani' : 'QC_Raporu'));
+      : (this.activeTab === 'ozet'
+          ? 'Arastirma_Ozeti'
+          : (this.activeTab === 'plan'
+              ? 'Video_Plani'
+              : (this.activeTab === 'kanitlar' ? 'Kaynak_Kanitlari' : 'QC_Raporu')));
     const prefix = bolum ? `Bolum${bolum}_` : '';
     return `${prefix}${base}_${suffix}_V${this.versionNo}.${ext}`;
   }
@@ -381,10 +528,6 @@ export class PlanViewerComponent implements OnChanges {
 
   private formatMarkdown(text: string): string {
     if (!text) return '';
-    // 1) Aynı alıntı kutusu (blockquote) içinde alt alta yazılmış ayrı paragrafların ("..." satırlarının)
-    // birbirine yapışmasını önlemek için aralarına boş '>' satırı ekle:
-    // 2) Alıntı (>) satırından hemen sonra boş satır bırakılmadan normal paragraf yazılmışsa,
-    // marked'ın normal paragrafı gri alıntı kutusunun (blockquote) içine yutmasını önle:
     const normalized = text
       .replace(/^(>\s*\S.*)\r?\n(?=>\s*["“”])/gm, '$1\n>\n')
       .replace(/^(>\s*.*)\r?\n(?!\s*>|\s*$)/gm, '$1\n\n');

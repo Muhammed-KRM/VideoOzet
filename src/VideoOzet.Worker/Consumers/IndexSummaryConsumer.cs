@@ -23,19 +23,22 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
     private readonly ITextChunker _chunker;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IPipelineStateTracker? _stateTracker;
+    private readonly IContextualTextChunker? _contextualChunker;
 
     public IndexSummaryConsumer(
         ILogger<IndexSummaryConsumer> logger,
         AppDbContext context,
         ITextChunker chunker,
         IEmbeddingProvider embeddingProvider,
-        IPipelineStateTracker? stateTracker = null)
+        IPipelineStateTracker? stateTracker = null,
+        IContextualTextChunker? contextualChunker = null)
     {
         _logger = logger;
         _context = context;
         _chunker = chunker;
         _embeddingProvider = embeddingProvider;
         _stateTracker = stateTracker;
+        _contextualChunker = contextualChunker;
     }
 
     public async Task Consume(ConsumeContext<SummaryReadyEvent> context)
@@ -79,30 +82,127 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             var textToIndex = !string.IsNullOrWhiteSpace(summary.CevrilmisOzetMetni)
                 ? summary.CevrilmisOzetMetni
                 : summary.OzetMetni;
-            var chunks = _chunker.ChunkText(textToIndex);
 
-            if (chunks.Count == 0)
+            VideoTranscript? transcript = null;
+            if (_context.VideoTranscripts != null)
             {
-                throw new Exception("Özet metninden indekslenecek parça üretilemedi.");
+                transcript = await _context.VideoTranscripts
+                    .FirstOrDefaultAsync(t => t.VideoId == evt.VideoId, context.CancellationToken);
             }
 
-            var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(chunks);
+            Video? videoEntity = null;
+            if (_context.Videolar != null)
+            {
+                videoEntity = await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken);
+            }
+
+            var videoTitle = !string.IsNullOrWhiteSpace(videoEntity?.Baslik) ? videoEntity!.Baslik : $"Video-{evt.VideoId}";
+            var safeTitle = videoTitle.Length > 300 ? videoTitle[..300] : videoTitle;
+            var videoLang = !string.IsNullOrWhiteSpace(transcript?.Dil) ? transcript!.Dil : "tr";
+            var safeLang = videoLang.Length > 16 ? videoLang[..16] : videoLang;
+            var usageMode = videoEntity?.KullanimTuru ?? KaynakKullanimTuru.SadeceArgumanVeMantik;
+            int? videoDurationSeconds = videoEntity?.Sure != null ? (int?)Math.Round(videoEntity.Sure.Value.TotalSeconds) : null;
 
             var documents = new List<VideoChunkDocument>();
-            for (int i = 0; i < chunks.Count; i++)
+
+            bool useFullTranscript = videoEntity?.IndekslemeTuru != IndekslemeTuru.OzetKaynak;
+            if (useFullTranscript && _contextualChunker != null && transcript != null && !string.IsNullOrWhiteSpace(transcript.HamMetin))
             {
-                if (i < embeddings.Count)
+                var transcriptOptions = new ContextualChunkOptions(
+                    KaynakBaslik: videoTitle,
+                    KaynakTuru: "VİDEO",
+                    Dil: safeLang,
+                    KullanimTuru: usageMode,
+                    TargetWords: 450,
+                    OverlapWords: 70,
+                    VideoDurationSeconds: videoDurationSeconds);
+
+                var contextualChunks = _contextualChunker.ChunkTranscript(
+                    transcript.HamMetin,
+                    transcript.ZamanDamgalari,
+                    transcriptOptions).ToList();
+
+                if (!string.IsNullOrWhiteSpace(textToIndex))
                 {
-                    documents.Add(new VideoChunkDocument
+                    var cardSlice = textToIndex.Length > 2000 ? textToIndex[..2000] : textToIndex;
+                    contextualChunks.Add(new ContextualChunk(
+                        ChunkIndex: contextualChunks.Count,
+                        ChunkTipi: ChunkTipi.OzetKart,
+                        BolumBasligi: "Video Kimlik Kartı",
+                        StartTimeMs: 0,
+                        EndTimeMs: (videoDurationSeconds ?? 0) * 1000,
+                        RawText: cardSlice,
+                        ContextualizedText: $"[Kaynak: {safeTitle} | Tür: ÖZET KART | Kimlik Özeti | Dil: {safeLang.ToUpperInvariant()}]\n{cardSlice}"));
+                }
+
+                if (contextualChunks.Count == 0)
+                {
+                    throw new Exception("Video transkriptinden indekslenecek parça üretilemedi.");
+                }
+
+                const int batchSize = 4;
+                for (int offset = 0; offset < contextualChunks.Count; offset += batchSize)
+                {
+                    context.CancellationToken.ThrowIfCancellationRequested();
+                    var batch = contextualChunks.Skip(offset).Take(batchSize).ToList();
+                    var batchTexts = batch.Select(c => c.ContextualizedText).ToList();
+                    var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(batchTexts);
+                    for (int i = 0; i < batch.Count; i++)
                     {
-                        VideoId = evt.VideoId,
-                        EgitimId = evt.EgitimId,
-                        Text = chunks[i],
-                        Embedding = new Vector(embeddings[i]),
-                        StartTimeMs = 0,
-                        EndTimeMs = 0,
-                        CreatedAt = DateTime.UtcNow
-                    });
+                        if (i < embeddings.Count && embeddings[i].Length > 0)
+                        {
+                            var chunk = batch[i];
+                            documents.Add(new VideoChunkDocument
+                            {
+                                VideoId = evt.VideoId,
+                                EgitimId = evt.EgitimId,
+                                ChunkIndex = chunk.ChunkIndex,
+                                ChunkTipi = chunk.ChunkTipi,
+                                KaynakBaslik = safeTitle,
+                                BolumBasligi = chunk.BolumBasligi,
+                                KaynakDil = safeLang,
+                                KullanimTuru = usageMode,
+                                Text = chunk.ContextualizedText,
+                                Embedding = new Vector(embeddings[i]),
+                                StartTimeMs = chunk.StartTimeMs,
+                                EndTimeMs = chunk.EndTimeMs,
+                                CreatedAt = DateTime.UtcNow
+                            });
+                        }
+                    }
+                }
+            }
+            else
+            {
+                var chunks = _chunker.ChunkText(textToIndex);
+
+                if (chunks.Count == 0)
+                {
+                    throw new Exception("Özet metninden indekslenecek parça üretilemedi.");
+                }
+
+                var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(chunks);
+
+                for (int i = 0; i < chunks.Count; i++)
+                {
+                    if (i < embeddings.Count)
+                    {
+                        documents.Add(new VideoChunkDocument
+                        {
+                            VideoId = evt.VideoId,
+                            EgitimId = evt.EgitimId,
+                            ChunkIndex = i,
+                            ChunkTipi = ChunkTipi.OzetKart,
+                            KaynakBaslik = safeTitle,
+                            KaynakDil = safeLang,
+                            KullanimTuru = usageMode,
+                            Text = chunks[i],
+                            Embedding = new Vector(embeddings[i]),
+                            StartTimeMs = 0,
+                            EndTimeMs = 0,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
                 }
             }
 

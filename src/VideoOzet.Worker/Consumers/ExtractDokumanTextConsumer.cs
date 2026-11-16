@@ -125,43 +125,110 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
 
             string? damitilmisOzet = null;
             string? cevrilmisOzet = null;
-            string orijinalDil = "tr";
+            string orijinalDil = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.DetectLanguageReliably(extractedText, null, "tr");
+            string? usedLlmModel = null;
 
             if (_geminiProvider != null && extractedText.Length > 100)
             {
                 try
                 {
-                    var sumEvt = new PipelineProgressEvent
-                    {
-                        VideoId = evt.DokumanId,
-                        EgitimId = evt.EgitimId,
-                        Asama = "Doküman Çıkarımı",
-                        Durum = VideoIslemDurumu.SttBasladi.ToString(),
-                        Mesaj = "Doküman metni analiz ediliyor ve damıtılmış özet hazırlanıyor...",
-                        Yuzde = 45
-                    };
-                    if (_stateTracker != null) await _stateTracker.RecordProgressAsync(sumEvt);
-                    await _publishEndpoint.Publish(sumEvt, context.CancellationToken);
+                    var sections = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.SplitIntoSemanticSections(extractedText, 20000);
+                    var distilledSections = new System.Collections.Generic.List<string>(sections.Count);
+                    string? detectedFromLlm = null;
 
-                    var sampleText = extractedText.Length > 20000 ? extractedText.Substring(0, 20000) : extractedText;
-                    var summaryJson = await _geminiProvider.SummarizeAsync(sampleText);
-                    var parsed = LlmJson.Deserialize<SummaryDocLlmResponse>(summaryJson);
-                    if (parsed != null)
+                    for (int i = 0; i < sections.Count; i++)
                     {
-                        damitilmisOzet = parsed.OzetMetni;
-                        if (!string.IsNullOrWhiteSpace(parsed.Dil))
+                        int progressPct = sections.Count > 1
+                            ? 30 + (int)Math.Round((i + 1.0) / sections.Count * 20.0)
+                            : 45;
+
+                        var sumEvt = new PipelineProgressEvent
                         {
-                            var l = parsed.Dil.Trim().ToLowerInvariant();
-                            if (l.StartsWith("en") || l == "english") orijinalDil = "en";
-                            else if (l.StartsWith("de") || l == "german") orijinalDil = "de";
-                            else if (l.StartsWith("tr") || l == "turkish") orijinalDil = "tr";
-                            else if (l.Length >= 2) orijinalDil = l.Substring(0, 2);
+                            VideoId = evt.DokumanId,
+                            EgitimId = evt.EgitimId,
+                            Asama = "Doküman Çıkarımı",
+                            Durum = VideoIslemDurumu.SttBasladi.ToString(),
+                            Mesaj = sections.Count > 1
+                                ? $"Doküman metni bölüm bölüm damıtılıyor ({i + 1}/{sections.Count})..."
+                                : "Doküman metni analiz ediliyor ve damıtılmış özet hazırlanıyor...",
+                            Yuzde = progressPct,
+                            MevcutAdim = i + 1,
+                            ToplamAdim = sections.Count
+                        };
+                        if (_stateTracker != null) await _stateTracker.RecordProgressAsync(sumEvt);
+                        await _publishEndpoint.Publish(sumEvt, context.CancellationToken);
+
+                        var summaryJson = await _geminiProvider.SummarizeAsync(sections[i]);
+                        var parsed = LlmJson.Deserialize<SummaryDocLlmResponse>(summaryJson);
+
+                        string? sectionOzet = null;
+                        string? sectionDil = null;
+                        string[]? sectionBasliklar = null;
+
+                        if (parsed != null && !string.IsNullOrWhiteSpace(parsed.OzetMetni))
+                        {
+                            sectionOzet = parsed.OzetMetni.Trim();
+                            sectionDil = parsed.Dil;
+                            sectionBasliklar = parsed.KonuBasliklari;
+                        }
+                        else
+                        {
+                            var recovered = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.TryParseOrRecoverSummary(summaryJson, sections[i]);
+                            sectionOzet = recovered.OzetMetni?.Trim();
+                            sectionDil = recovered.Dil;
+                            sectionBasliklar = recovered.KonuBasliklari;
                         }
 
-                        if (!orijinalDil.Equals("tr", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(damitilmisOzet))
+                        if (string.IsNullOrWhiteSpace(detectedFromLlm) && !string.IsNullOrWhiteSpace(sectionDil))
                         {
-                            cevrilmisOzet = await _geminiProvider.TranslateDistilledSummaryToTurkishAsync(damitilmisOzet, orijinalDil);
+                            detectedFromLlm = sectionDil;
                         }
+
+                        if (!string.IsNullOrWhiteSpace(sectionOzet))
+                        {
+                            if (sections.Count > 1)
+                            {
+                                var headerSuffix = sectionBasliklar != null && sectionBasliklar.Length > 0
+                                    ? $" ({string.Join(", ", System.Linq.Enumerable.Take(sectionBasliklar, 3))})"
+                                    : string.Empty;
+                                distilledSections.Add($"### Bölüm {i + 1}/{sections.Count}{headerSuffix}\n{sectionOzet}");
+                            }
+                            else
+                            {
+                                distilledSections.Add(sectionOzet);
+                            }
+                        }
+                    }
+
+                    usedLlmModel = !string.IsNullOrWhiteSpace(_geminiProvider.ActiveModelName)
+                        ? _geminiProvider.ActiveModelName
+                        : "gemini-3.8-flash-tiered";
+
+                    if (distilledSections.Count > 0)
+                    {
+                        damitilmisOzet = string.Join("\n\n", distilledSections);
+                    }
+
+                    orijinalDil = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.DetectLanguageReliably(
+                        extractedText,
+                        damitilmisOzet,
+                        detectedFromLlm);
+
+                    if (!orijinalDil.Equals("tr", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(damitilmisOzet))
+                    {
+                        var trEvt = new PipelineProgressEvent
+                        {
+                            VideoId = evt.DokumanId,
+                            EgitimId = evt.EgitimId,
+                            Asama = "Doküman Çıkarımı",
+                            Durum = VideoIslemDurumu.SttBasladi.ToString(),
+                            Mesaj = $"Yabancı dil ({orijinalDil.ToUpperInvariant()}) tespit edildi, terim korumalı Türkçe çeviri hazırlanıyor...",
+                            Yuzde = 55
+                        };
+                        if (_stateTracker != null) await _stateTracker.RecordProgressAsync(trEvt);
+                        await _publishEndpoint.Publish(trEvt, context.CancellationToken);
+
+                        cevrilmisOzet = await _geminiProvider.TranslateDistilledSummaryToTurkishAsync(damitilmisOzet, orijinalDil);
                     }
                 }
                 catch (Exception ex)
@@ -180,6 +247,7 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
                 existingMetin.DamitilmisOzetMetni = damitilmisOzet;
                 existingMetin.CevrilmisOzetMetni = cevrilmisOzet;
                 existingMetin.OrijinalDil = orijinalDil;
+                existingMetin.LlmModel = usedLlmModel;
                 existingMetin.KelimeSayisi = kelimeSayisi;
                 existingMetin.OlusturmaTarihi = DateTime.UtcNow;
                 dokumanMetin = existingMetin;
@@ -193,6 +261,7 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
                     DamitilmisOzetMetni = damitilmisOzet,
                     CevrilmisOzetMetni = cevrilmisOzet,
                     OrijinalDil = orijinalDil,
+                    LlmModel = usedLlmModel,
                     KelimeSayisi = kelimeSayisi,
                     OlusturmaTarihi = DateTime.UtcNow
                 };
@@ -345,6 +414,8 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
     {
         public string? Dil { get; set; }
         public string OzetMetni { get; set; } = string.Empty;
+        public string[]? KonuBasliklari { get; set; }
+        public string[]? KonuEtiketleri { get; set; }
     }
 }
 
