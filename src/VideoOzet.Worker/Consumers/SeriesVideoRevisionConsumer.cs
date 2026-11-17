@@ -74,15 +74,36 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
             var seriPlani = bolum.SeriPlani;
             var request = seriPlani?.ContentRequest;
 
-            // Son revizyonu al
-            var sonRevizyon = bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
-            int yeniRevizyonNo = (sonRevizyon?.RevizyonNo ?? 0) + 1;
+            // Kullanıcının ekranda seçtiği sürümü (BazRevizyonNo) veya AktifRevizyonId'yi baz al; eski sürümleri ASLA değiştirme, yeni numara aç!
+            int yeniRevizyonNo = (bolum.Revizyonlar.Any() ? bolum.Revizyonlar.Max(r => r.RevizyonNo) : 0) + 1;
+            BolumRevizyonu? sonRevizyon = null;
+            if (msg.BazRevizyonNo.HasValue && msg.BazRevizyonNo.Value > 0)
+            {
+                sonRevizyon = bolum.Revizyonlar.FirstOrDefault(r => r.RevizyonNo == msg.BazRevizyonNo.Value);
+            }
+            if (sonRevizyon == null && bolum.AktifRevizyonId.HasValue)
+            {
+                sonRevizyon = bolum.Revizyonlar.FirstOrDefault(r => r.Id == bolum.AktifRevizyonId.Value);
+            }
+            sonRevizyon ??= bolum.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
+
             string currentOzet = sonRevizyon?.ArastirmaOzeti ?? "";
             string currentPlan = sonRevizyon?.VideoPlani ?? "";
 
             // Önceki revizyonda kullanılan chunk ID'lerini ve bölüme atanan kaynak ID'lerini ayrıştır
             List<Guid> previousChunkIds = ParseGuidList(sonRevizyon?.KullanilanKaynaklar);
             List<Guid> assignedIds = ParseGuidList(bolum.AtananKaynaklarJson);
+
+            // Kullanıcının revizyon talimatında ismen belirttiği veya plan sonrası yeni eklediği tüm kaynakları tespit et
+            var mentionedSourceIds = await FindMentionedOrLatestSourceIdsAsync(
+                msg.EgitimId,
+                msg.Talimat,
+                request?.OlusturmaTarihi,
+                context.CancellationToken);
+            if (mentionedSourceIds.Count > 0)
+            {
+                assignedIds = mentionedSourceIds.Concat(assignedIds).Distinct().ToList();
+            }
 
             // Bölüm konularını ve sahne iskeleti başlıklarını çıkar
             var topicsList = ParseTopicsAndSceneHints(bolum.KonularJson, bolum.SahneIskeletiJson);
@@ -219,7 +240,12 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 enrichedTopic += $" | [ÖNCEKİ BÖLÜM DEVİR DEFTERİ]: {oncekiBolumDevirNotu}";
             }
 
-            var enrichedInstruction = $"{msg.Talimat}\n\n{yazarTeziText}".Trim();
+            var surgicalPreservationRule =
+                "CERRAHİ DÜZENLEME VE KORUMA KURALI (ÇOK ÖNEMLİ): " +
+                "Kullanıcı yalnızca belirli bir sahnenin/paragrafın/kısmın değiştirilmesini veya eklenmesini istediyse, " +
+                "talimatın dışında kalan TÜM diğer sahneleri, başlıkları, zaman aralıklarını ve prompter cümlelerini KELİMESİ KELİMESİNE AYNEN KORU; " +
+                "değiştirilmesi istenmeyen hiçbir cümleyi silme, kısaltma veya yeniden yazma!";
+            var enrichedInstruction = $"{msg.Talimat}\n\n{surgicalPreservationRule}\n\n{yazarTeziText}".Trim();
 
             // Revizyon işlemini AI ile gerçekleştir
             string yeniOzet = currentOzet;
@@ -638,5 +664,109 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
         }
 
         return topicsList;
+    }
+
+    private async Task<List<Guid>> FindMentionedOrLatestSourceIdsAsync(
+        Guid egitimId,
+        string? talimat,
+        DateTime? planCreatedAtUtc,
+        System.Threading.CancellationToken ct)
+    {
+        var found = new List<Guid>();
+        if (string.IsNullOrWhiteSpace(talimat) || egitimId == Guid.Empty)
+            return found;
+
+        static string Norm(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var lower = s.ToLowerInvariant()
+                .Replace('ı', 'i').Replace('İ', 'i').Replace('ş', 's').Replace('ğ', 'g')
+                .Replace('ü', 'u').Replace('ö', 'o').Replace('ç', 'c').Replace('â', 'a').Replace('î', 'i').Replace('û', 'u');
+            return System.Text.RegularExpressions.Regex.Replace(lower, @"[^a-z0-9]+", " ").Trim();
+        }
+
+        var normQuery = Norm(talimat);
+        bool asksLatest = normQuery.Contains("yeni ekle") || normQuery.Contains("son ekle") ||
+                          normQuery.Contains("yeni yukle") || normQuery.Contains("son yukle") ||
+                          normQuery.Contains("yeni kaynak") || normQuery.Contains("yeni dosya") ||
+                          normQuery.Contains("yeni video") || normQuery.Contains("yeni dokuman") ||
+                          normQuery.Contains("ekledigim kaynak") || normQuery.Contains("atanmayan kaynak");
+
+        var docs = await _dbContext.Dokumanlar.AsNoTracking()
+            .Where(d => d.EgitimId == egitimId)
+            .Select(d => new { d.Id, Title = d.DosyaAdi, d.OlusturmaTarihi })
+            .ToListAsync(ct);
+
+        var vids = await _dbContext.Videolar.AsNoTracking()
+            .Where(v => v.EgitimId == egitimId)
+            .Select(v => new { v.Id, Title = v.Baslik, v.OlusturmaTarihi })
+            .ToListAsync(ct);
+
+        var stopWords = new HashSet<string>
+        {
+            "video", "dokuman", "makale", "bolum", "ders", "kitap", "risalesi", "uzerine",
+            "ozgur", "irade", "free", "will", "and", "the", "for", "from", "with", "prof"
+        };
+
+        var scored = new List<(Guid Id, DateTime Created, int Score)>();
+        foreach (var item in docs.Concat(vids))
+        {
+            var stripped = System.Text.RegularExpressions.Regex.Replace(item.Title ?? "", @"\.(pdf|docx|txt|mp4|mkv|mp3|wav)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var normTitle = Norm(stripped);
+            if (normTitle.Length < 4) continue;
+
+            if (normQuery.Contains(normTitle))
+            {
+                scored.Add((item.Id, item.OlusturmaTarihi, 200));
+                continue;
+            }
+
+            var tokens = normTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t.Length >= 4 && !int.TryParse(t, out _) && !stopWords.Contains(t))
+                .Distinct()
+                .ToList();
+
+            int matched = 0, longest = 0;
+            foreach (var tok in tokens)
+            {
+                if (normQuery.Contains(tok))
+                {
+                    matched++;
+                    if (tok.Length > longest) longest = tok.Length;
+                }
+            }
+
+            if (matched >= 2)
+                scored.Add((item.Id, item.OlusturmaTarihi, matched * 35 + longest));
+            else if (matched == 1 && longest >= 6)
+                scored.Add((item.Id, item.OlusturmaTarihi, 25 + longest));
+        }
+
+        if (asksLatest && planCreatedAtUtc.HasValue)
+        {
+            var addedAfterPlan = docs.Concat(vids)
+                .Where(x => x.OlusturmaTarihi > planCreatedAtUtc.Value)
+                .OrderByDescending(x => x.OlusturmaTarihi)
+                .Take(8)
+                .Select(x => x.Id)
+                .ToList();
+
+            if (addedAfterPlan.Count > 0)
+            {
+                return scored.Select(s => s.Id).Concat(addedAfterPlan).Distinct().Take(8).ToList();
+            }
+        }
+
+        if (scored.Count == 0 && asksLatest)
+        {
+            return docs.Concat(vids).OrderByDescending(x => x.OlusturmaTarihi).Take(5).Select(x => x.Id).ToList();
+        }
+
+        return scored
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.Created)
+            .Take(8)
+            .Select(x => x.Id)
+            .ToList();
     }
 }

@@ -404,6 +404,7 @@
         kapsam="Bolum"
         [contentRequestId]="contentRequestId"
         [bolumNo]="bolumNo"
+        [activeRevizyonNo]="revision?.revizyonNo || 1"
         [baslik]="'Bölüm ' + (bolumNo || 1) + ' & Seri Asistanı'"
         altAciklama="Bu bölümün yanı sıra serideki diğer tüm bölümleri, seri haritasını ve kaynak kanıtlarını ([K#]) birlikte inceleyerek yanıt verir."
         placeholder="Bu bölüm veya diğer bölümlerle ilişkisi hakkında soru sorun (örn: Son kısımda sonraki videoda X dendi ama 2. bölümde var mı?)..."

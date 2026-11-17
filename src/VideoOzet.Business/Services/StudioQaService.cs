@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -22,6 +23,8 @@ public class StudioQaService : IStudioQaService
     private readonly ISourceContextBuilder _sourceContextBuilder;
     private readonly ISourceTopicMapper _sourceTopicMapper;
     private readonly ILogger<StudioQaService> _logger;
+
+    private static readonly ConcurrentDictionary<string, DateTime> ActiveThreads = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -61,6 +64,40 @@ public class StudioQaService : IStudioQaService
             .ToListAsync(ct);
 
         return items.Select(MapToDto).ToList();
+    }
+
+    public bool IsThreadProcessing(
+        Guid? egitimId,
+        Guid? contentRequestId,
+        int? bolumNo,
+        Guid? kaynakId,
+        string kapsam)
+    {
+        var normalizedScope = NormalizeScope(kapsam, bolumNo, kaynakId);
+        var key = BuildThreadKey(egitimId, contentRequestId, bolumNo, kaynakId, normalizedScope);
+        if (ActiveThreads.TryGetValue(key, out var startedUtc))
+        {
+            if (DateTime.UtcNow - startedUtc < TimeSpan.FromMinutes(12))
+                return true;
+            ActiveThreads.TryRemove(key, out _);
+        }
+        return false;
+    }
+
+    private static string BuildThreadKey(
+        Guid? egitimId,
+        Guid? contentRequestId,
+        int? bolumNo,
+        Guid? kaynakId,
+        string scope)
+    {
+        if (scope == "Bolum" && contentRequestId.HasValue)
+            return $"Bolum:{contentRequestId.Value}:{bolumNo ?? 1}";
+        if (scope == "Plan" && contentRequestId.HasValue)
+            return $"Plan:{contentRequestId.Value}";
+        if (scope == "Kaynak" && kaynakId.HasValue)
+            return $"Kaynak:{kaynakId.Value}";
+        return $"{scope}:{egitimId ?? Guid.Empty}";
     }
 
     public async Task ClearHistoryAsync(
@@ -157,39 +194,72 @@ public class StudioQaService : IStudioQaService
         _dbContext.StudioQaMessages.Add(userMsg);
         await _dbContext.SaveChangesAsync(ct);
 
-        // 3 Katmanlı Bağlam Yönlendirici (Context Router)
-        var (contextBlock, contextBadgeSummary) = normalizedScope switch
+        var threadKey = BuildThreadKey(resolvedEgitimId, request.ContentRequestId, request.BolumNo, request.KaynakId, normalizedScope);
+        ActiveThreads[threadKey] = DateTime.UtcNow;
+
+        try
         {
-            "Bolum" => await BuildEpisodeScopeContextAsync(contentRequest, resolvedEgitimId, request.BolumNo ?? 1, soru, recentHistory, ct),
-            "Plan" => await BuildPlanScopeContextAsync(contentRequest, resolvedEgitimId, soru, ct),
-            _ => await BuildSourceScopeContextAsync(resolvedEgitimId, request.KaynakId, soru, ct)
-        };
+            // 3 Katmanlı Bağlam Yönlendirici (Context Router)
+            var (contextBlock, contextBadgeSummary) = normalizedScope switch
+            {
+                "Bolum" => await BuildEpisodeScopeContextAsync(contentRequest, resolvedEgitimId, request.BolumNo ?? 1, soru, recentHistory, ct),
+                "Plan" => await BuildPlanScopeContextAsync(contentRequest, resolvedEgitimId, soru, ct),
+                _ => await BuildSourceScopeContextAsync(resolvedEgitimId, request.KaynakId, soru, ct)
+            };
 
-        var historyBlock = FormatConversationHistory(recentHistory);
-        var prompt = BuildStudioQaPrompt(normalizedScope, request.BolumNo, soru, historyBlock, contextBlock);
+            var historyBlock = FormatConversationHistory(recentHistory);
+            var prompt = BuildStudioQaPrompt(normalizedScope, request.BolumNo, soru, historyBlock, contextBlock);
 
-        var rawLlmResponse = await _synthesisProvider.AskStudioQuestionAsync(prompt, ct);
-        var (answerMarkdown, suggestion) = ParseQaResponse(rawLlmResponse, normalizedScope, request.BolumNo);
+            var rawLlmResponse = await _synthesisProvider.AskStudioQuestionAsync(prompt, ct);
+            var (answerMarkdown, suggestion) = ParseQaResponse(rawLlmResponse, normalizedScope, request.BolumNo);
 
-        var assistantMsg = new StudioQaMessage
+            var assistantMsg = new StudioQaMessage
+            {
+                Id = Guid.NewGuid(),
+                EgitimId = resolvedEgitimId,
+                ContentRequestId = request.ContentRequestId,
+                BolumNo = request.BolumNo,
+                KaynakId = request.KaynakId,
+                Kapsam = normalizedScope,
+                Rol = "assistant",
+                Mesaj = answerMarkdown,
+                OneriJson = suggestion != null ? JsonSerializer.Serialize(suggestion, JsonOpts) : null,
+                KullanilanBaglamOzeti = contextBadgeSummary,
+                OlusturmaTarihi = DateTime.UtcNow
+            };
+
+            _dbContext.StudioQaMessages.Add(assistantMsg);
+            await _dbContext.SaveChangesAsync(ct);
+
+            return MapToDto(assistantMsg);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Id = Guid.NewGuid(),
-            EgitimId = resolvedEgitimId,
-            ContentRequestId = request.ContentRequestId,
-            BolumNo = request.BolumNo,
-            KaynakId = request.KaynakId,
-            Kapsam = normalizedScope,
-            Rol = "assistant",
-            Mesaj = answerMarkdown,
-            OneriJson = suggestion != null ? JsonSerializer.Serialize(suggestion, JsonOpts) : null,
-            KullanilanBaglamOzeti = contextBadgeSummary,
-            OlusturmaTarihi = DateTime.UtcNow
-        };
-
-        _dbContext.StudioQaMessages.Add(assistantMsg);
-        await _dbContext.SaveChangesAsync(ct);
-
-        return MapToDto(assistantMsg);
+            // Kullanıcı sayfadan ayrılmış olsa bile hatayı sohbet geçmişine kaydet ki döndüğünde sessizce kaybolmasın
+            var errMsg = new StudioQaMessage
+            {
+                Id = Guid.NewGuid(),
+                EgitimId = resolvedEgitimId,
+                ContentRequestId = request.ContentRequestId,
+                BolumNo = request.BolumNo,
+                KaynakId = request.KaynakId,
+                Kapsam = normalizedScope,
+                Rol = "assistant",
+                Mesaj = $"⚠️ **Yanıt üretilirken bir hata oluştu:** {ex.Message}",
+                OlusturmaTarihi = DateTime.UtcNow
+            };
+            try
+            {
+                _dbContext.StudioQaMessages.Add(errMsg);
+                await _dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+            catch { }
+            throw;
+        }
+        finally
+        {
+            ActiveThreads.TryRemove(threadKey, out _);
+        }
     }
 
     public async Task<(bool Basarili, string Mesaj, int? HedefBolumNo)> ApplySuggestionAsync(
@@ -371,8 +441,33 @@ public class StudioQaService : IStudioQaService
             }
         }
 
+        // KATMAN 2.5: Kullanıcının Soruda İsmen Belirttiği veya Plan Sonrası Yeni Eklediği TÜM Kaynakları Doğrudan Oku
+        var allPlanAssignedIds = orderedEpisodes
+            .SelectMany(b => ParseGuidArray(b.AtananKaynaklarJson))
+            .ToHashSet();
+
+        var (mentionedIds, mentionedSourceText, mentionedNames) = await LoadExplicitlyMentionedSourcesAsync(
+            egitimId,
+            soru,
+            contentRequest?.OlusturmaTarihi,
+            allPlanAssignedIds,
+            ct);
+
+        if (!string.IsNullOrWhiteSpace(mentionedSourceText))
+        {
+            sb.AppendLine("=== KULLANICININ DOĞRUDAN BELİRTTİĞİ VEYA SONRADAN EKLEDİĞİ YENİ KAYNAKLARIN TAM İÇERİĞİ ===");
+            sb.AppendLine(mentionedSourceText);
+            sb.AppendLine();
+            badgeParts.Add($"Yeni/Özel Kaynak ({mentionedNames.Count}: {string.Join(", ", mentionedNames.Take(4))}{(mentionedNames.Count > 4 ? "…" : "")})");
+        }
+
         // KATMAN 3: Eğitim Kaynaklarından İlgili RAG Kanıtları ([K#])
         var assignedSourceIds = ParseGuidArray(currentEp?.AtananKaynaklarJson);
+        var preferredForQa = mentionedIds
+            .Concat(assignedSourceIds)
+            .Distinct()
+            .ToList();
+
         var ragQueries = new List<string> { soru };
         if (currentEp != null)
             ragQueries.Add(currentEp.CalismaBasligi);
@@ -380,9 +475,9 @@ public class StudioQaService : IStudioQaService
         var ragResult = await _sourceContextBuilder.BuildContextAsync(
             egitimId,
             ragQueries,
-            maxChars: 30000,
-            preferredSourceIds: assignedSourceIds.Count > 0 ? assignedSourceIds : null,
-            targetChunksOverride: 14,
+            maxChars: 32000,
+            preferredSourceIds: preferredForQa.Count > 0 ? preferredForQa : null,
+            targetChunksOverride: Math.Max(18, preferredForQa.Count + 4),
             ct: ct);
 
         if (!string.IsNullOrWhiteSpace(ragResult?.ContextText))
@@ -460,29 +555,56 @@ public class StudioQaService : IStudioQaService
             sb.AppendLine();
         }
 
-        var cards = await _sourceTopicMapper.GetStructuredSourceCardsAsync(egitimId, ct);
-        if (cards.Count > 0)
+        var allVideos = await _dbContext.Videolar.AsNoTracking()
+            .Where(v => v.EgitimId == egitimId)
+            .OrderBy(v => v.OlusturmaTarihi)
+            .Select(v => new { v.Id, Baslik = v.Baslik, Tur = "Video", Mode = v.KullanimTuru.ToString(), v.OlusturmaTarihi })
+            .ToListAsync(ct);
+
+        var allDocs = await _dbContext.Dokumanlar.AsNoTracking()
+            .Where(d => d.EgitimId == egitimId)
+            .OrderBy(d => d.OlusturmaTarihi)
+            .Select(d => new { d.Id, Baslik = d.DosyaAdi, Tur = "Dokuman", Mode = d.KullanimTuru.ToString(), d.OlusturmaTarihi })
+            .ToListAsync(ct);
+
+        var allSources = allVideos.Concat(allDocs).ToList();
+        if (allSources.Count > 0)
         {
-            sb.AppendLine($"=== EĞİTİMDEKİ TÜM KAYNAK KARTLARI ({cards.Count} Kaynak ve Atama Durumu) ===");
-            foreach (var c in cards)
+            var reqCreated = contentRequest?.OlusturmaTarihi;
+            sb.AppendLine($"=== EĞİTİMDEKİ TÜM KAYNAK KARTLARI ({allSources.Count} Kaynak ve Atama Durumu) ===");
+            foreach (var c in allSources)
             {
-                var status = assignedMap.TryGetValue(c.KaynakId, out var eps)
+                bool addedAfterPlan = reqCreated.HasValue && c.OlusturmaTarihi > reqCreated.Value;
+                var status = assignedMap.TryGetValue(c.Id, out var eps)
                     ? $"ATANDI -> Bölüm {string.Join(", ", eps)}"
-                    : "HİÇBİR BÖLÜME ATANMADI";
-                sb.AppendLine($"- [{c.KaynakTuru}] {c.Baslik} (ID: {c.KaynakId} | Mod: {c.KullanimTuru} | {status})");
-                if (c.Konular.Count > 0)
-                    sb.AppendLine($"  Konular: {string.Join("; ", c.Konular.Take(8))}");
+                    : (addedAfterPlan ? "HİÇBİR BÖLÜME ATANMADI — PLAN SONRASI YENİ EKLENDİ!" : "HİÇBİR BÖLÜME ATANMADI");
+                sb.AppendLine($"- [{c.Tur}] {c.Baslik} (ID: {c.Id} | Mod: {c.Mode} | {status})");
             }
             sb.AppendLine();
-            badgeParts.Add($"{cards.Count} Kaynak Kartı");
+            badgeParts.Add($"{allSources.Count} Kaynak Kartı");
+        }
+
+        var (planMentionedIds, planMentionedText, planMentionedNames) = await LoadExplicitlyMentionedSourcesAsync(
+            egitimId,
+            soru,
+            contentRequest?.OlusturmaTarihi,
+            assignedMap.Keys.ToHashSet(),
+            ct);
+
+        if (!string.IsNullOrWhiteSpace(planMentionedText))
+        {
+            sb.AppendLine("=== KULLANICININ BELİRTTİĞİ VEYA PLAN SONRASI YENİ EKLEDİĞİ KAYNAKLARIN İÇERİĞİ ===");
+            sb.AppendLine(planMentionedText);
+            sb.AppendLine();
+            badgeParts.Add($"Yeni/Özel Kaynak ({planMentionedNames.Count})");
         }
 
         var ragResult = await _sourceContextBuilder.BuildContextAsync(
             egitimId,
             new[] { soru },
             maxChars: 30000,
-            preferredSourceIds: null,
-            targetChunksOverride: 14,
+            preferredSourceIds: planMentionedIds.Count > 0 ? planMentionedIds : null,
+            targetChunksOverride: Math.Max(16, planMentionedIds.Count + 6),
             ct: ct);
 
         if (!string.IsNullOrWhiteSpace(ragResult?.ContextText))
@@ -721,10 +843,32 @@ public class StudioQaService : IStudioQaService
         }
         catch
         {
-            // Model düz Markdown döndürdüyse olduğu gibi göster
+            // Model çok uzun Markdown içinde kaçırılmamış tırnak/satır sonu nedeniyle bozuk JSON döndürdüyse sadece cevapMarkdown gövdesini ayıkla
         }
 
-        return (raw.Trim(), null);
+        var unwrapped = UnwrapMalformedJsonEnvelope(raw);
+        return (unwrapped, null);
+    }
+
+    private static string UnwrapMalformedJsonEnvelope(string raw)
+    {
+        var trimmed = raw.Trim();
+        var match = Regex.Match(
+            trimmed,
+            @"^\{\s*""yanitModu""[\s\S]*?""cevapMarkdown""\s*:\s*""([\s\S]*?)""\s*(?:,\s*""oneri""[\s\S]*?)?\}$");
+
+        if (match.Success && match.Groups[1].Value.Length > 0)
+        {
+            return match.Groups[1].Value
+                .Replace("\\r\\n", "\n")
+                .Replace("\\n", "\n")
+                .Replace("\\t", "\t")
+                .Replace("\\\"", "\"")
+                .Replace("\\\\", "\\")
+                .Trim();
+        }
+
+        return trimmed;
     }
 
     private static List<SeriBolum> PrioritizeCrossEpisodes(List<SeriBolum> others, int activeBolumNo, string queryText)
@@ -902,6 +1046,213 @@ public class StudioQaService : IStudioQaService
         }
         catch { }
         return list;
+    }
+
+    private async Task<(List<Guid> Ids, string TextBlock, List<string> Names)> LoadExplicitlyMentionedSourcesAsync(
+        Guid egitimId,
+        string queryText,
+        DateTime? planCreatedAtUtc,
+        HashSet<Guid>? alreadyAssignedIds,
+        CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        var names = new List<string>();
+        if (string.IsNullOrWhiteSpace(queryText) || egitimId == Guid.Empty)
+            return (ids, string.Empty, names);
+
+        var normQuery = NormalizeForMatch(queryText);
+        bool asksNewOrUnassigned =
+            normQuery.Contains("yeni ekle") ||
+            normQuery.Contains("son ekle") ||
+            normQuery.Contains("yeni yukle") ||
+            normQuery.Contains("son yukle") ||
+            normQuery.Contains("yeni kaynak") ||
+            normQuery.Contains("yeni dosya") ||
+            normQuery.Contains("yeni video") ||
+            normQuery.Contains("yeni dokuman") ||
+            normQuery.Contains("ekledigim kaynak") ||
+            normQuery.Contains("ekledigim dosya") ||
+            normQuery.Contains("eklenen kaynak") ||
+            normQuery.Contains("atanmayan kaynak") ||
+            normQuery.Contains("disarida kalan kaynak");
+
+        var docs = await _dbContext.Dokumanlar.AsNoTracking()
+            .Include(d => d.DokumanMetin)
+            .Where(d => d.EgitimId == egitimId)
+            .OrderByDescending(d => d.OlusturmaTarihi)
+            .ToListAsync(ct);
+
+        var vids = await _dbContext.Videolar.AsNoTracking()
+            .Include(v => v.Summary)
+            .Include(v => v.Transcript)
+            .Where(v => v.EgitimId == egitimId)
+            .OrderByDescending(v => v.OlusturmaTarihi)
+            .ToListAsync(ct);
+
+        var candidates = new List<(Guid Id, string Name, string Kind, string Mode, DateTime Created, string Content, int Score)>();
+
+        foreach (var d in docs)
+        {
+            int score = ScoreTitleMention(normQuery, d.DosyaAdi);
+            bool isAddedAfterPlan = planCreatedAtUtc.HasValue && d.OlusturmaTarihi > planCreatedAtUtc.Value;
+            bool isUnassigned = alreadyAssignedIds != null && alreadyAssignedIds.Count > 0 && !alreadyAssignedIds.Contains(d.Id);
+
+            if (score > 0 || (asksNewOrUnassigned && (isAddedAfterPlan || isUnassigned)))
+            {
+                var body = BuildSourceExcerpt(
+                    d.DokumanMetin?.CevrilmisOzetMetni ?? d.DokumanMetin?.DamitilmisOzetMetni,
+                    d.DokumanMetin?.HamMetin,
+                    asksNewOrUnassigned && score == 0 ? 12000 : 24000);
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    int finalScore = score > 0 ? score : (isAddedAfterPlan ? 120 : 70);
+                    var label = isAddedAfterPlan ? "Doküman - Plan Sonrası Yeni Eklendi" : "Doküman";
+                    candidates.Add((d.Id, d.DosyaAdi, label, d.KullanimTuru.ToString(), d.OlusturmaTarihi, body, finalScore));
+                }
+            }
+        }
+
+        foreach (var v in vids)
+        {
+            int score = ScoreTitleMention(normQuery, v.Baslik);
+            bool isAddedAfterPlan = planCreatedAtUtc.HasValue && v.OlusturmaTarihi > planCreatedAtUtc.Value;
+            bool isUnassigned = alreadyAssignedIds != null && alreadyAssignedIds.Count > 0 && !alreadyAssignedIds.Contains(v.Id);
+
+            if (score > 0 || (asksNewOrUnassigned && (isAddedAfterPlan || isUnassigned)))
+            {
+                var body = BuildSourceExcerpt(
+                    v.Summary?.CevrilmisOzetMetni ?? v.Summary?.OzetMetni,
+                    v.Transcript?.HamMetin,
+                    asksNewOrUnassigned && score == 0 ? 12000 : 24000);
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    int finalScore = score > 0 ? score : (isAddedAfterPlan ? 120 : 70);
+                    var label = isAddedAfterPlan ? "Video - Plan Sonrası Yeni Eklendi" : "Video";
+                    candidates.Add((v.Id, v.Baslik, label, v.KullanimTuru.ToString(), v.OlusturmaTarihi, body, finalScore));
+                }
+            }
+        }
+
+        if (candidates.Count == 0 && asksNewOrUnassigned)
+        {
+            foreach (var latestVid in vids.Take(3))
+            {
+                var body = BuildSourceExcerpt(latestVid.Summary?.CevrilmisOzetMetni ?? latestVid.Summary?.OzetMetni, latestVid.Transcript?.HamMetin, 12000);
+                if (!string.IsNullOrWhiteSpace(body))
+                    candidates.Add((latestVid.Id, latestVid.Baslik, "Video (Son Eklenen)", latestVid.KullanimTuru.ToString(), latestVid.OlusturmaTarihi, body, 50));
+            }
+            foreach (var latestDoc in docs.Take(3))
+            {
+                var body = BuildSourceExcerpt(latestDoc.DokumanMetin?.CevrilmisOzetMetni ?? latestDoc.DokumanMetin?.DamitilmisOzetMetni, latestDoc.DokumanMetin?.HamMetin, 12000);
+                if (!string.IsNullOrWhiteSpace(body))
+                    candidates.Add((latestDoc.Id, latestDoc.DosyaAdi, "Doküman (Son Eklenen)", latestDoc.KullanimTuru.ToString(), latestDoc.OlusturmaTarihi, body, 50));
+            }
+        }
+
+        var topMatches = candidates
+            .OrderByDescending(c => c.Score)
+            .ThenByDescending(c => c.Created)
+            .Take(8)
+            .ToList();
+
+        if (topMatches.Count == 0)
+            return (ids, string.Empty, names);
+
+        var sb = new StringBuilder();
+        foreach (var m in topMatches)
+        {
+            ids.Add(m.Id);
+            names.Add(m.Name.Length > 28 ? m.Name.Substring(0, 28) + "…" : m.Name);
+            sb.AppendLine($"--- [{m.Kind}: {m.Name} | Mod: {m.Mode}] ---");
+            sb.AppendLine(m.Content);
+            sb.AppendLine();
+        }
+
+        return (ids, sb.ToString(), names);
+    }
+
+    private static string BuildSourceExcerpt(string? summary, string? rawText, int maxChars)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            sb.AppendLine("[Damıtılmış Özet]:");
+            sb.AppendLine(TruncateMiddleIfHuge(summary, maxChars / 2));
+        }
+        if (!string.IsNullOrWhiteSpace(rawText))
+        {
+            sb.AppendLine("[Kaynak Tam Metni]:");
+            sb.AppendLine(TruncateMiddleIfHuge(rawText, string.IsNullOrWhiteSpace(summary) ? maxChars : maxChars / 2));
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static int ScoreTitleMention(string normQuery, string? rawTitle)
+    {
+        if (string.IsNullOrWhiteSpace(rawTitle))
+            return 0;
+
+        var strippedExt = Regex.Replace(rawTitle, @"\.(pdf|docx|txt|mp4|mkv|mp3|wav)$", "", RegexOptions.IgnoreCase);
+        var normTitle = NormalizeForMatch(strippedExt);
+        if (normTitle.Length < 4)
+            return 0;
+
+        if (normQuery.Contains(normTitle))
+            return 200;
+
+        var stopWords = new HashSet<string>
+        {
+            "video", "dokuman", "makale", "bolum", "ders", "kitap", "risalesi", "uzerine",
+            "ozgur", "irade", "free", "will", "and", "the", "for", "from", "with", "prof"
+        };
+
+        var tokens = normTitle
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length >= 4 && !int.TryParse(t, out _) && !stopWords.Contains(t))
+            .Distinct()
+            .ToList();
+
+        if (tokens.Count == 0)
+            return 0;
+
+        int matchedCount = 0;
+        int longestMatch = 0;
+        foreach (var tok in tokens)
+        {
+            if (normQuery.Contains(tok))
+            {
+                matchedCount++;
+                if (tok.Length > longestMatch)
+                    longestMatch = tok.Length;
+            }
+        }
+
+        if (matchedCount >= 2)
+            return matchedCount * 35 + longestMatch;
+        if (matchedCount == 1 && longestMatch >= 6)
+            return 25 + longestMatch;
+
+        return 0;
+    }
+
+    private static string NormalizeForMatch(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var s = text.ToLowerInvariant()
+            .Replace('ı', 'i')
+            .Replace('İ', 'i')
+            .Replace('ş', 's')
+            .Replace('ğ', 'g')
+            .Replace('ü', 'u')
+            .Replace('ö', 'o')
+            .Replace('ç', 'c')
+            .Replace('â', 'a')
+            .Replace('î', 'i')
+            .Replace('û', 'u');
+
+        return Regex.Replace(s, @"[^a-z0-9]+", " ").Trim();
     }
 
     private static StudioQaMessageDto MapToDto(StudioQaMessage m)

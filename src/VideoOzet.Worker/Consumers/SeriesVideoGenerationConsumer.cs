@@ -186,6 +186,79 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 }
             }
 
+            // 3.5. Koruyucu Yeni Plan Versiyonu Kontrolü: Eğer PlanNo > 1 ise ve önceki onaylı planda bu bölümün son düzenlenmiş metni varsa baz al!
+            string bazArastirmaOzeti = string.Empty;
+            string bazVideoPlani = string.Empty;
+            if (seriPlani.PlanNo > 1)
+            {
+                bool koruModu = true;
+                if (!string.IsNullOrWhiteSpace(seriPlani.KullaniciKisitlariJson) &&
+                    seriPlani.KullaniciKisitlariJson.Contains("\"MevcutMetinleriKoru\":false", StringComparison.OrdinalIgnoreCase))
+                {
+                    koruModu = false;
+                }
+
+                if (koruModu)
+                {
+                    var prevApprovedPlans = await _dbContext.SeriPlanlari
+                        .AsNoTracking()
+                        .Include(p => p.SeriBolumler)
+                            .ThenInclude(b => b.Revizyonlar)
+                        .Where(p => p.ContentRequestId == request.Id && p.PlanNo < seriPlani.PlanNo)
+                        .OrderByDescending(p => p.PlanNo)
+                        .ToListAsync(context.CancellationToken);
+
+                    foreach (var prevPlan in prevApprovedPlans)
+                    {
+                        var prevEp = prevPlan.SeriBolumler.FirstOrDefault(b => b.BolumNo == bolum.BolumNo);
+                        if (prevEp == null) continue;
+
+                        var prevRev = prevEp.AktifRevizyonId.HasValue
+                            ? prevEp.Revizyonlar.FirstOrDefault(r => r.Id == prevEp.AktifRevizyonId.Value)
+                            : null;
+                        prevRev ??= prevEp.Revizyonlar.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
+
+                        if (prevRev != null && !string.IsNullOrWhiteSpace(prevRev.VideoPlani))
+                        {
+                            bazArastirmaOzeti = prevRev.ArastirmaOzeti ?? string.Empty;
+                            bazVideoPlani = prevRev.VideoPlani;
+
+                            // Yeni eklenen kaynakların kanıtlarını ek olarak çekip bağlamın en başına koy
+                            var oldAssigned = ParseAssignedSourceIds(prevEp.AtananKaynaklarJson).ToHashSet();
+                            var newlyAssigned = assignedSourceIds.Where(id => !oldAssigned.Contains(id)).ToList();
+                            if (newlyAssigned.Count > 0)
+                            {
+                                try
+                                {
+                                    var newOnlyCtx = await _sourceContextBuilder.BuildContextAsync(
+                                        message.EgitimId,
+                                        searchQueries,
+                                        maxChars: 28000,
+                                        preferredSourceIds: newlyAssigned,
+                                        targetChunksOverride: Math.Max(14, newlyAssigned.Count * 3),
+                                        ct: context.CancellationToken);
+
+                                    if (!string.IsNullOrWhiteSpace(newOnlyCtx?.ContextText))
+                                    {
+                                        var trimmedBaseSources = allSourcesData.Length > 34000
+                                            ? allSourcesData.Substring(0, 34000)
+                                            : allSourcesData;
+                                        allSourcesData = $"=== BU YENİ PLAN VERSİYONUNDA EKLENEN YENİ KAYNAKLARDAN ÖNCELİKLİ KANITLAR ===\n{newOnlyCtx.ContextText}\n\n=== TÜM BÖLÜM KAYNAK KANITLARI ===\n{trimmedBaseSources}";
+                                        usedChunkIds = newOnlyCtx.UsedChunkIds.Concat(usedChunkIds).Distinct().ToList();
+                                    }
+                                }
+                                catch { }
+                            }
+
+                            _logger.LogInformation(
+                                "Bölüm {BolumNo} (Plan v{PlanNo}): Plan v{PrevPlanNo} içindeki son düzenlenmiş metin ({Len} kr) koruyucu baz metin olarak alındı.",
+                                bolum.BolumNo, seriPlani.PlanNo, prevPlan.PlanNo, bazVideoPlani.Length);
+                            break;
+                        }
+                    }
+                }
+            }
+
             int hedefSureDk = bolum.HedefSureDk > 0
                 ? bolum.HedefSureDk
                 : (seriPlani.VarsayilanVideoSuresiDk > 0 ? seriPlani.VarsayilanVideoSuresiDk : 15);
@@ -215,6 +288,8 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 OnayTalimati = onayVePlanDirektifi,
                 OncekiBolumDevirDefteriJson = devirNotu,
                 SonrakiBolumOzeti = sonrakiBolumOzeti,
+                BazAlinanMevcutArastirmaOzeti = bazArastirmaOzeti,
+                BazAlinanMevcutVideoPlani = bazVideoPlani,
                 HedefKitle = request.HedefKitle ?? "Genel",
                 KaynakBaglamiText = allSourcesData
             };
@@ -314,14 +389,18 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
                 revizyon.QcDurumu = qcResult.Durum;
 
                 var unsupportedFactualList = ExtractUnsupportedFactualClaims(qcResult.DetayliRaporJson);
-                if (qcResult.DesteklenmeyenSayisi > 0 && !string.IsNullOrWhiteSpace(allSourcesData) && !string.IsNullOrWhiteSpace(unsupportedFactualList))
+                bool isAnchoredPreservationMode = !string.IsNullOrWhiteSpace(bazVideoPlani);
+                if (!isAnchoredPreservationMode &&
+                    qcResult.DesteklenmeyenSayisi > 0 &&
+                    !string.IsNullOrWhiteSpace(allSourcesData) &&
+                    !string.IsNullOrWhiteSpace(unsupportedFactualList))
                 {
                     _dbContext.BolumRevizyonlari.Add(revizyon);
 
                     var refineInstruction =
-                        "VERİSCORE TEZ-KORUMALI ÖZ-DÜZELTME TALİMATI:\n" +
-                        "1. [YAZAR-TEZİ] kapsamındaki kavramsal yorumları, felsefi/analitik çerçeveyi, pedagojik sentezleri ve sahnelerin paragraf derinliğini KESİNLİKLE SİLME veya KISALTMA!\n" +
-                        "2. Yalnızca aşağıda listelenen ve kaynakta karşılığı bulunmayan uydurma sayısal oranları (%), hayali deney/anketleri veya yanlış düşünür atıflarını temizle ya da [K#] kanıtlarına uygun düzelt:\n" +
+                        "VERİSCORE TEZ VE ONAYLI PLAN KORUMALI ÖZ-DÜZELTME TALİMATI:\n" +
+                        "1. [YAZAR-TEZİ] ve Onaylanmış Sahne Planı (`SahneIskeleti`) içinde açıkça adı geçen hiçbir düşünürü, müellifi, eseri (ör. Bediüzzaman Said Nursi, 26. Söz, İmam Mâtürîdî vb.), sahne başlığını, temsili veya paragraf derinliğini KESİNLİKLE SİLME veya KISALTMA!\n" +
+                        "2. Yalnızca aşağıda listelenen ve ne kaynakta ne de onaylı planda karşılığı bulunmayan uydurma sayısal oranları (%) veya hayali deney/anketleri temizle ya da [K#] kanıtlarına uygun düzelt:\n" +
                         unsupportedFactualList;
 
                     var topicWithThesis = $"{bolum.CalismaBasligi}\n[YAZAR-TEZİ]: {authorThesisContext}";
@@ -575,6 +654,10 @@ public class SeriesVideoGenerationConsumer : IConsumer<SeriesVideoGenerationComm
             sb.AppendLine($"Seri Odak ve Yazar Tezi: {request.Konu.Trim()}");
         if (!string.IsNullOrWhiteSpace(bolum.AnaFikir))
             sb.AppendLine($"Bölüm Ana Tezi: {bolum.AnaFikir.Trim()}");
+        if (!string.IsNullOrWhiteSpace(bolum.KonularJson) && bolum.KonularJson != "[]")
+            sb.AppendLine($"Onaylanmış Bölüm Konuları (Buradaki tüm konular ve düşünürler onaylıdır): {bolum.KonularJson}");
+        if (!string.IsNullOrWhiteSpace(bolum.SahneIskeletiJson) && bolum.SahneIskeletiJson != "[]")
+            sb.AppendLine($"Onaylanmış Sahne Planı Sözleşmesi (Burada geçen tüm düşünür, eser, temsil ve argümanlar ZORUNLUDUR ve ASLA desteklenmedi sayılamaz!): {bolum.SahneIskeletiJson}");
         if (!string.IsNullOrWhiteSpace(request.EkTonTalimati))
             sb.AppendLine($"Ek Ton ve Perspektif: {request.EkTonTalimati.Trim()}");
         if (!string.IsNullOrWhiteSpace(onayDirektifi))

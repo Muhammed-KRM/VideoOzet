@@ -12,7 +12,26 @@
       </div>
     </div>
     
-    <div class="flex items-center gap-2.5" *ngIf="data">
+    <div class="flex items-center gap-2.5 flex-wrap" *ngIf="data">
+      <!-- Plan Versiyon Seçici (Eski Planlara ve Dökümanlarına Erişim) -->
+      <div *ngIf="tumPlanlar.length > 0" class="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-700/70">
+        <span class="px-2 text-[11px] font-semibold text-slate-400">Versiyon:</span>
+        <button
+          *ngFor="let pv of tumPlanlar"
+          type="button"
+          (click)="selectPlanVersion(pv.planNo)"
+          class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+          [ngClass]="data?.guncelPlan?.planNo === pv.planNo
+            ? 'bg-indigo-600 text-white shadow'
+            : 'text-slate-300 hover:bg-slate-800'"
+          [title]="pv.onaylandi ? 'Onaylı Plan (' + pv.tamamlananBolumSayisi + '/' + pv.videoSayisi + ' bölüm hazır)' : 'Taslak Plan'"
+        >
+          <span>Plan v{{ pv.planNo }}</span>
+          <span *ngIf="pv.onaylandi" class="text-[10px] text-emerald-300">✓</span>
+          <span *ngIf="!pv.onaylandi" class="text-[10px] text-amber-300">Taslak</span>
+        </button>
+      </div>
+
       <button
         type="button"
         (click)="isQaOpen = !isQaOpen"
@@ -245,15 +264,75 @@
         </button>
       </div>
       
-      <div *ngIf="data.guncelPlan?.onaylandi" class="bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3">
-        <div class="h-10 w-10 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-400">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
+      <div *ngIf="data.guncelPlan?.onaylandi" class="space-y-4">
+        <div class="bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3">
+          <div class="h-10 w-10 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-400 shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-emerald-400">Plan v{{ data.guncelPlan.planNo }} Onaylandı</p>
+            <p class="text-xs text-slate-400">Bu versiyondaki dökümanlarınız kalıcı olarak korunur. İstediğiniz zaman üstteki <b>Plan v{{ data.guncelPlan.planNo }}</b> sekmesinden erişebilirsiniz.</p>
+          </div>
         </div>
-        <div>
-          <p class="text-sm font-semibold text-emerald-400">Plan Onaylandı</p>
-          <p class="text-xs text-slate-400">Üretim süreci başladı. Sağdaki haritadan bölümleri izleyebilirsiniz.</p>
+
+        <!-- Onaylı Plandan Koruyucu Yeni Versiyon (v2, v3...) Oluşturma Kutusu -->
+        <div class="bg-slate-800 rounded-xl p-5 border border-purple-500/40 shadow-xl space-y-3.5">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-bold text-purple-200 flex items-center gap-1.5">
+              <span>🌿</span> Yeni Plan Versiyonu Oluştur (Plan v{{ nextPlanVersionNo }})
+            </h3>
+          </div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Yeni kaynaklar eklediğinizde <b>Plan v{{ data.guncelPlan.planNo }}</b> ve içindeki düzenlediğiniz dökümanlar <b>hiç silinmeden</b> yeni bir versiyon oluşturabilirsiniz.
+          </p>
+
+          <form (ngSubmit)="requestNewDraft(true)" class="space-y-3">
+            <label class="flex items-start gap-2.5 p-3 rounded-lg bg-purple-950/35 border border-purple-500/30 cursor-pointer">
+              <input
+                type="checkbox"
+                [(ngModel)]="draftOptions.mevcutMetinleriKoru"
+                name="mevcutMetinleriKoru"
+                class="mt-0.5 h-4 w-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
+              />
+              <span class="text-xs text-purple-100 leading-snug">
+                <b>Mevcut dökümanlarımın son halini koru:</b> Hem planı hem de yeni versiyonun bölüm dökümanlarını üretirken mevcut son metinlerimi baz al, çok değiştirmeden yalnızca yeni kaynaklardan eklemeler yap.
+              </span>
+            </label>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Bölüm Sayısı (İsteğe Bağlı)</label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                [(ngModel)]="draftOptions.videoSayisi"
+                name="videoSayisiApproved"
+                [placeholder]="'Boş = Mevcut ' + data.guncelPlan.videoSayisi + ' bölümü koru'"
+                class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Yeni Versiyon Notu / Talimatı</label>
+              <textarea
+                [(ngModel)]="draftOptions.talimat"
+                name="talimatApproved"
+                rows="3"
+                placeholder="Örn: Yeni eklediğim videolardaki cüz'i irade ve kader örneklerini mevcut akışı bozmadan ilgili bölümlere entegre et..."
+                class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs"
+              ></textarea>
+            </div>
+
+            <button
+              type="submit"
+              [disabled]="isDrafting"
+              class="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-lg shadow-lg shadow-purple-600/25 transition-all text-xs cursor-pointer"
+            >
+              {{ isDrafting ? 'Plan v' + nextPlanVersionNo + ' Oluşturuluyor...' : '🌿 Plan v' + nextPlanVersionNo + ' Oluştur (Eski Plan Silinmez)' }}
+            </button>
+          </form>
         </div>
       </div>
     </div>
@@ -265,9 +344,9 @@
         <div *ngIf="hasError" class="flex-1 flex flex-col items-center justify-center text-center px-6">
           <div class="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center mb-4 text-rose-400 text-3xl">!</div>
           <p class="text-rose-300 text-lg font-semibold">Plan oluşturulurken hata oluştu</p>
-          <p class="text-slate-400 text-sm mt-2 max-w-md">API anahtarınızı kontrol ettikten sonra aşağıdaki butonla veya soldaki "Yeni Taslak İste" paneliyle planı yeniden oluşturabilirsiniz.</p>
-          <button (click)="requestNewDraft()" [disabled]="isDrafting" class="mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg shadow-lg transition-all">
-            {{ isDrafting ? 'Yeniden Başlatılıyor...' : 'Analizi ve Planı Tekrar Dene' }}
+          <p class="text-slate-400 text-sm mt-2 max-w-md">Yapay zeka yanıtı kesintiye uğradı veya bağlantı hatası oluştu. Önceki plan versiyonlarınız tamamen güvendedir; üstteki versiyon sekmelerinden eski planınıza geçebilir veya yeni taslağı tekrar deneyebilirsiniz.</p>
+          <button (click)="requestNewDraft(tumPlanlar.length > 1)" [disabled]="isDrafting" class="mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg shadow-lg transition-all cursor-pointer">
+            {{ isDrafting ? 'Yeniden Başlatılıyor...' : 'Plan Üretimini Tekrar Dene' }}
           </button>
         </div>
 

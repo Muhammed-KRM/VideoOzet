@@ -83,7 +83,7 @@ public class SeriesController : ControllerBase
     /// İçerik talebinin mevcut plan durumunu, konu analizini ve eğitim kaynak özet listesini döner.
     /// </summary>
     [HttpGet("api/content-plans/{id:guid}")]
-    public async Task<IActionResult> GetContentPlan(Guid id, CancellationToken ct = default)
+    public async Task<IActionResult> GetContentPlan(Guid id, [FromQuery] int? planNo = null, CancellationToken ct = default)
     {
         var request = await _dbContext.ContentRequests
             .Include(x => x.KonuAnalizi)
@@ -95,7 +95,21 @@ public class SeriesController : ControllerBase
         if (request == null)
             return NotFound(new { Mesaj = "İçerik talebi bulunamadı." });
 
-        var currentPlan = request.SeriPlanlari.OrderByDescending(x => x.PlanNo).FirstOrDefault();
+        var orderedPlans = request.SeriPlanlari.OrderBy(x => x.PlanNo).ToList();
+        var currentPlan = planNo.HasValue
+            ? orderedPlans.FirstOrDefault(x => x.PlanNo == planNo.Value) ?? orderedPlans.LastOrDefault()
+            : orderedPlans.LastOrDefault();
+
+        var tumPlanlar = orderedPlans.Select(p => new
+        {
+            p.Id,
+            p.PlanNo,
+            p.VideoSayisi,
+            p.Onaylandi,
+            Durum = p.Durum.ToString(),
+            TamamlananBolumSayisi = p.SeriBolumler.Count(b => b.Durum == BolumDurumu.Tamamlandi)
+        }).ToList();
+
         var egitimKaynaklari = await LoadCourseSourceCardsAsync(request.EgitimId, ct);
 
         return Ok(new
@@ -106,6 +120,7 @@ public class SeriesController : ControllerBase
             request.HedefKitle,
             request.EkTonTalimati,
             Durum = request.Durum.ToString(),
+            TumPlanlar = tumPlanlar,
             EgitimKaynaklari = egitimKaynaklari,
             KonuAnalizi = request.KonuAnalizi == null ? null : new
             {
@@ -205,9 +220,44 @@ public class SeriesController : ControllerBase
         }
         else if (!currentPlan.Onaylandi)
         {
-            // Onaylanmamışsa üzerine yazar.
+            // Yeni versiyon (PlanNo > 1) veya Hata durumundaki bir plan tekrar üretilirken önceki koruma bayrağını ve boşsa kayıtlı talimatı koru
+            if (!string.IsNullOrWhiteSpace(currentPlan.KullaniciKisitlariJson))
+            {
+                try
+                {
+                    var prevDraft = JsonSerializer.Deserialize<SeriesDraftDto>(
+                        currentPlan.KullaniciKisitlariJson,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (prevDraft != null)
+                    {
+                        if (currentPlan.PlanNo > 1 && prevDraft.MevcutMetinleriKoru)
+                            draftDto.MevcutMetinleriKoru = true;
+
+                        if (string.IsNullOrWhiteSpace(draftDto.Talimat) && string.IsNullOrWhiteSpace(draftDto.RevizyonTalimati))
+                            draftDto.Talimat = prevDraft.RevizyonTalimati;
+                    }
+                }
+                catch { }
+            }
+
             currentPlan.KullaniciKisitlariJson = JsonSerializer.Serialize(draftDto);
             currentPlan.Durum = SeriPlanDurumu.Olusturuluyor;
+            await _dbContext.SaveChangesAsync();
+        }
+        else
+        {
+            // Onaylanmış eski planı ve içindeki tüm dökümanları HİÇ SİLMEDEN yeni bir plan versiyonu (PlanNo + 1) aç!
+            var nextPlan = new SeriPlani
+            {
+                Id = Guid.NewGuid(),
+                ContentRequestId = request.Id,
+                PlanNo = currentPlan.PlanNo + 1,
+                KullaniciKisitlariJson = JsonSerializer.Serialize(draftDto),
+                OnayTalimati = currentPlan.OnayTalimati ?? string.Empty,
+                Durum = SeriPlanDurumu.Olusturuluyor,
+                OneridenFarkli = true
+            };
+            _dbContext.SeriPlanlari.Add(nextPlan);
             await _dbContext.SaveChangesAsync();
         }
 
@@ -276,13 +326,20 @@ public class SeriesController : ControllerBase
     /// Hata alan veya yeniden üretilmek istenen bölümü baştan üretir.
     /// </summary>
     [HttpPost("api/series-requests/{id:guid}/videos/{bolumNo:int}/retry")]
-    public async Task<IActionResult> RetryEpisode(Guid id, int bolumNo)
+    public async Task<IActionResult> RetryEpisode(Guid id, int bolumNo, [FromQuery] int? planNo = null)
     {
-        var bolum = await _dbContext.SeriBolumler
+        var query = _dbContext.SeriBolumler
             .Include(b => b.Revizyonlar)
             .Include(b => b.SeriPlani)
                 .ThenInclude(p => p.ContentRequest)
-            .FirstOrDefaultAsync(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+            .Where(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+
+        if (planNo.HasValue)
+            query = query.Where(b => b.SeriPlani.PlanNo == planNo.Value);
+
+        var bolum = await query
+            .OrderByDescending(b => b.SeriPlani.PlanNo)
+            .FirstOrDefaultAsync();
 
         if (bolum == null)
             return NotFound(new { Mesaj = "Video bulunamadı." });
@@ -318,13 +375,20 @@ public class SeriesController : ControllerBase
     /// Kullanıcının açıkça bir videoyu revize etme talebi.
     /// </summary>
     [HttpPost("api/series-requests/{id:guid}/videos/{bolumNo:int}/revisions")]
-    public async Task<IActionResult> ReviseEpisode(Guid id, int bolumNo, [FromBody] EpisodeRevisionDto dto)
+    public async Task<IActionResult> ReviseEpisode(Guid id, int bolumNo, [FromBody] EpisodeRevisionDto dto, [FromQuery] int? planNo = null)
     {
-        var bolum = await _dbContext.SeriBolumler
+        var query = _dbContext.SeriBolumler
             .Include(b => b.Revizyonlar)
             .Include(b => b.SeriPlani)
                 .ThenInclude(p => p.ContentRequest)
-            .FirstOrDefaultAsync(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+            .Where(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+
+        if (planNo.HasValue)
+            query = query.Where(b => b.SeriPlani.PlanNo == planNo.Value);
+
+        var bolum = await query
+            .OrderByDescending(b => b.SeriPlani.PlanNo)
+            .FirstOrDefaultAsync();
 
         if (bolum == null)
             return NotFound(new { Mesaj = "Video bulunamadı." });
@@ -361,7 +425,8 @@ public class SeriesController : ControllerBase
             EgitimId = bolum.SeriPlani.ContentRequest.EgitimId,
             SeriBolumId = bolum.Id,
             Talimat = dto!.Talimat,
-            HedefAlan = string.IsNullOrWhiteSpace(dto.HedefAlan) ? "Hepsi" : dto.HedefAlan
+            HedefAlan = string.IsNullOrWhiteSpace(dto.HedefAlan) ? "Hepsi" : dto.HedefAlan,
+            BazRevizyonNo = dto.BazRevizyonNo
         });
 
         return Accepted(new { Mesaj = "Revizyon işlemi başlatıldı." });
@@ -563,15 +628,21 @@ public class SeriesController : ControllerBase
         int bolumNo,
         int revizyonNo,
         [FromBody] ManualEditEpisodeRevisionDto dto,
+        [FromQuery] int? planNo = null,
         CancellationToken ct = default)
     {
         if (dto == null || (dto.ArastirmaOzeti == null && dto.VideoPlani == null))
             return BadRequest(new { Mesaj = "Güncellenecek metin bulunamadı." });
 
-        var bolum = await _dbContext.SeriBolumler
+        var query = _dbContext.SeriBolumler
             .Include(b => b.Revizyonlar)
             .Include(b => b.SeriPlani)
-            .Where(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo)
+            .Where(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+
+        if (planNo.HasValue)
+            query = query.Where(b => b.SeriPlani.PlanNo == planNo.Value);
+
+        var bolum = await query
             .OrderByDescending(b => b.SeriPlani.PlanNo)
             .FirstOrDefaultAsync(ct);
 
@@ -590,6 +661,8 @@ public class SeriesController : ControllerBase
         if (dto.VideoPlani != null)
             targetRev.VideoPlani = dto.VideoPlani;
 
+        // ÖNEMLİ KURAL: Döküman düzenlemesi ASLA plan tablosunu (SeriBolum) değiştirmez; Plan yalnızca plan ekranından değiştirilir.
+        bolum.AktifRevizyonId = targetRev.Id;
         await _dbContext.SaveChangesAsync(ct);
 
         return Ok(new
@@ -899,23 +972,7 @@ public class SeriesController : ControllerBase
         if (egitimId == Guid.Empty)
             return result;
 
-        if (_sourceTopicMapper != null)
-        {
-            try
-            {
-                var structured = await _sourceTopicMapper.GetStructuredSourceCardsAsync(egitimId, ct);
-                if (structured != null && structured.Count > 0)
-                {
-                    result.AddRange(structured);
-                }
-            }
-            catch
-            {
-                // Fallback DB sorgusu aşağıda çalışacak
-            }
-        }
-
-        // DB'den tüm videoları, dokümanları ve varsa önbellek konu çıkarımlarını oku (canlı KullanimTuru ve eksik kaynak tamamlaması için)
+        // GET görüntüleme uçlarında LLM konu çıkarımıyla bloklanmamak için doğrudan DB ve mevcut önbellekten oku
         var videos = await _dbContext.Videolar
             .AsNoTracking()
             .Include(v => v.Summary)

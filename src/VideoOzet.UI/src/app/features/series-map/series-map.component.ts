@@ -260,14 +260,14 @@ export class SeriesMapComponent {
       calismaBasligi: String(b.calismaBasligi || `Bölüm ${index + 1}`).trim(),
       kanca: String(b.kanca || '').trim(),
       anaFikir: String(b.anaFikir || '').trim(),
-      hedefSureDk: Math.max(2, Number(b.hedefSureDk) || 15),
+      hedefSureDk: Math.max(2, Math.round(Number(b.hedefSureDk) || 10)),
       konular: this.getKonular(b),
       sahneIskeleti: this.getSahneIskeleti(b).map((s, sIdx) => ({
         sahneNo: sIdx + 1,
         baslik: String(s.baslik || `Sahne ${sIdx + 1}`).trim(),
-        tahminiSureDk: Math.max(1, Number(s.tahminiSureDk) || 3),
+        tahminiSureDk: Math.max(1, Math.round(Number(s.tahminiSureDk) || 2)),
         aciklamaVeArgumanlar: String(s.aciklamaVeArgumanlar || '').trim(),
-        atananKaynakKodlari: s.atananKaynakKodlari || []
+        atananKaynakKodlari: (s.atananKaynakKodlari || []).map(x => String(x || '')).filter(Boolean)
       })),
       atananKaynakIdleri: this.getValidGuidList(this.getAtananKaynakIdleri(b))
     };
@@ -394,14 +394,14 @@ export class SeriesMapComponent {
       calismaBasligi: this.editForm.calismaBasligi.trim(),
       kanca: this.editForm.kanca.trim(),
       anaFikir: this.editForm.anaFikir.trim(),
-      hedefSureDk: Math.max(2, Number(this.editForm.hedefSureDk) || 15),
+      hedefSureDk: Math.max(2, Math.round(Number(this.editForm.hedefSureDk) || 10)),
       konular,
       sahneIskeleti: this.editForm.sahneIskeleti.map((s, sIdx) => ({
         sahneNo: sIdx + 1,
         baslik: String(s.baslik || `Sahne ${sIdx + 1}`).trim(),
-        tahminiSureDk: Math.max(1, Number(s.tahminiSureDk) || 3),
+        tahminiSureDk: Math.max(1, Math.round(Number(s.tahminiSureDk) || 2)),
         aciklamaVeArgumanlar: String(s.aciklamaVeArgumanlar || '').trim(),
-        atananKaynakKodlari: s.atananKaynakKodlari || []
+        atananKaynakKodlari: (s.atananKaynakKodlari || []).map(x => String(x || '')).filter(Boolean)
       })),
       atananKaynakIdleri: this.getValidGuidList(this.editForm.atananKaynakIdleri)
     };
@@ -498,7 +498,13 @@ export class SeriesMapComponent {
       error: (err) => {
         console.error('Plan güncelleme hatası:', err);
         this.isSaving = false;
-        this.saveError = err?.error?.mesaj || err?.message || 'Plan kaydedilirken bir hata oluştu.';
+        let validationMsg = '';
+        if (err?.error?.errors && typeof err.error.errors === 'object') {
+          validationMsg = Object.entries(err.error.errors)
+            .map(([k, v]: [string, any]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+            .join(' | ');
+        }
+        this.saveError = err?.error?.mesaj || validationMsg || err?.message || 'Plan kaydedilirken bir hata oluştu.';
         if (!closeModalOnSuccess) {
           alert(this.saveError);
         }

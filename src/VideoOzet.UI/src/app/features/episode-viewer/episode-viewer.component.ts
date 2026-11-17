@@ -176,12 +176,14 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   requestRevision() {
     if (!this.revizyonTalimati && this.episode?.durum !== 'Hata') return;
     if (this.episode.durum === 'Isleniyor') return; // Zaten işleniyor
-    
+
+    const currentRev = this.getAktifRevizyon();
     this.isRevising = true;
     this.apiService.reviseEpisode(this.contentRequestId, this.bolumNo, { 
       talimat: this.revizyonTalimati || '',
-      hedefAlan: this.hedefAlan
-    }).subscribe({
+      hedefAlan: this.hedefAlan,
+      bazRevizyonNo: currentRev?.revizyonNo
+    }, this.planNo).subscribe({
       next: () => {
         this.revizyonTalimati = '';
         this.seciliRevizyonId = null; // En son revizyon gösterilmek üzere sıfırla
@@ -198,7 +200,7 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   retryEpisode() {
     if (this.episode?.durum === 'Isleniyor' || this.isRevising) return;
     this.isRevising = true;
-    this.apiService.retryEpisode(this.contentRequestId, this.bolumNo).subscribe({
+    this.apiService.retryEpisode(this.contentRequestId, this.bolumNo, this.planNo).subscribe({
       next: () => {
         this.revizyonTalimati = '';
         this.seciliRevizyonId = null;
@@ -239,6 +241,8 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
   }
 
   goBackToPlan() {
-    this.router.navigate(['/series-planner', this.contentRequestId]);
+    this.router.navigate(['/series-planner', this.contentRequestId], {
+      queryParams: this.planNo > 0 ? { planNo: this.planNo } : undefined
+    });
   }
 }

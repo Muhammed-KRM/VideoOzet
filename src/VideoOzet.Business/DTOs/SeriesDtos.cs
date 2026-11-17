@@ -18,6 +18,7 @@ public class SeriesDraftDto
     public List<string> HaricKonular { get; set; } = new();
     public List<string> ZorunluKonular { get; set; } = new();
     public Dictionary<string, int> KilitliAtamalar { get; set; } = new();
+    public bool MevcutMetinleriKoru { get; set; } = false;
 
     private string _talimat = string.Empty;
 
@@ -42,6 +43,7 @@ public class EpisodeRevisionDto
 {
     public string Talimat { get; set; } = string.Empty;
     public string HedefAlan { get; set; } = "Hepsi";
+    public int? BazRevizyonNo { get; set; }
 }
 
 public class ApprovePlanDto
@@ -85,10 +87,37 @@ public class CourseSourceCardDto
     }
 }
 
+public class FlexibleRoundedIntJsonConverter : System.Text.Json.Serialization.JsonConverter<int>
+{
+    public override int Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (reader.TokenType == System.Text.Json.JsonTokenType.Number)
+        {
+            if (reader.TryGetInt32(out int i)) return i;
+            if (reader.TryGetDouble(out double d)) return (int)Math.Round(d, MidpointRounding.AwayFromZero);
+        }
+        else if (reader.TokenType == System.Text.Json.JsonTokenType.String)
+        {
+            var s = (reader.GetString() ?? string.Empty).Trim().Replace(',', '.');
+            if (int.TryParse(s, out int si)) return si;
+            if (double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double sd))
+                return (int)Math.Round(sd, MidpointRounding.AwayFromZero);
+        }
+        return 0;
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, int value, System.Text.Json.JsonSerializerOptions options)
+    {
+        writer.WriteNumberValue(value);
+    }
+}
+
 public class SeriesSceneOutlineItemDto
 {
+    [System.Text.Json.Serialization.JsonConverter(typeof(FlexibleRoundedIntJsonConverter))]
     public int SahneNo { get; set; }
     public string Baslik { get; set; } = string.Empty;
+    [System.Text.Json.Serialization.JsonConverter(typeof(FlexibleRoundedIntJsonConverter))]
     public int TahminiSureDk { get; set; } = 3;
     public string AciklamaVeArgumanlar { get; set; } = string.Empty;
     public List<string> AtananKaynakKodlari { get; set; } = new();
@@ -119,10 +148,12 @@ public class UpdatePlanDto
 
 public class UpdateEpisodeItemDto
 {
+    [System.Text.Json.Serialization.JsonConverter(typeof(FlexibleRoundedIntJsonConverter))]
     public int BolumNo { get; set; }
     public string CalismaBasligi { get; set; } = string.Empty;
     public string Kanca { get; set; } = string.Empty;
     public string AnaFikir { get; set; } = string.Empty;
+    [System.Text.Json.Serialization.JsonConverter(typeof(FlexibleRoundedIntJsonConverter))]
     public int HedefSureDk { get; set; } = 10;
     public List<string> Konular { get; set; } = new();
     public List<SeriesSceneOutlineItemDto> SahneIskeleti { get; set; } = new();
@@ -164,6 +195,8 @@ public class SeriesEpisodeGenerationRequest
     public string OnayTalimati { get; set; } = string.Empty;
     public string OncekiBolumDevirDefteriJson { get; set; } = string.Empty;
     public string SonrakiBolumOzeti { get; set; } = string.Empty;
+    public string BazAlinanMevcutArastirmaOzeti { get; set; } = string.Empty;
+    public string BazAlinanMevcutVideoPlani { get; set; } = string.Empty;
     public string HedefKitle { get; set; } = string.Empty;
     public string KaynakBaglamiText { get; set; } = string.Empty;
 

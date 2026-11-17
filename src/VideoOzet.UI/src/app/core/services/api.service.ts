@@ -155,8 +155,9 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/egitimler/${egitimId}/content-plans`, payload);
   }
 
-  getSeriesPlan(id: string): Observable<any> {
-    return this.http.get<any>(`${this.baseUrl}/content-plans/${id}`);
+  getSeriesPlan(id: string, planNo?: number | null): Observable<any> {
+    const suffix = planNo != null && planNo > 0 ? `?planNo=${planNo}` : '';
+    return this.http.get<any>(`${this.baseUrl}/content-plans/${id}${suffix}`);
   }
 
   generatePlanDraft(id: string, draftDto: any): Observable<any> {
@@ -175,12 +176,14 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/series-requests/${id}/plans/${planNo}/videos/${bolumNo}`);
   }
 
-  reviseEpisode(id: string, bolumNo: number, dto: any): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions`, dto);
+  reviseEpisode(id: string, bolumNo: number, dto: any, planNo?: number | null): Observable<any> {
+    const suffix = planNo != null && planNo > 0 ? `?planNo=${planNo}` : '';
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions${suffix}`, dto);
   }
 
-  retryEpisode(id: string, bolumNo: number): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/retry`, {});
+  retryEpisode(id: string, bolumNo: number, planNo?: number | null): Observable<any> {
+    const suffix = planNo != null && planNo > 0 ? `?planNo=${planNo}` : '';
+    return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/retry${suffix}`, {});
   }
 
   cancelSeriesProcess(id: string): Observable<any> {
@@ -191,8 +194,9 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions/${revizyonNo}/re-qc`, {});
   }
 
-  updateEpisodeRevision(id: string, bolumNo: number, revizyonNo: number, payload: { arastirmaOzeti?: string; videoPlani?: string }): Observable<any> {
-    return this.http.put<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions/${revizyonNo}`, payload);
+  updateEpisodeRevision(id: string, bolumNo: number, revizyonNo: number, payload: { arastirmaOzeti?: string; videoPlani?: string }, planNo?: number | null): Observable<any> {
+    const suffix = planNo != null && planNo > 0 ? `?planNo=${planNo}` : '';
+    return this.http.put<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions/${revizyonNo}${suffix}`, payload);
   }
 
   // --- Studio Q&A (Çapraz Bölüm, Plan ve Kaynak Soru-Cevap) ---
@@ -205,6 +209,16 @@ export class ApiService {
     if (params.kaynakId) q.set('kaynakId', params.kaynakId);
     q.set('kapsam', params.kapsam);
     return this.http.get<any[]>(`${this.baseUrl}/qa/history?${q.toString()}`);
+  }
+
+  getStudioQaStatus(params: { egitimId?: string; contentRequestId?: string; bolumNo?: number | null; kaynakId?: string; kapsam: string }): Observable<{ isProcessing: boolean }> {
+    const q = new URLSearchParams();
+    if (params.egitimId) q.set('egitimId', params.egitimId);
+    if (params.contentRequestId) q.set('contentRequestId', params.contentRequestId);
+    if (params.bolumNo != null) q.set('bolumNo', String(params.bolumNo));
+    if (params.kaynakId) q.set('kaynakId', params.kaynakId);
+    q.set('kapsam', params.kapsam);
+    return this.http.get<{ isProcessing: boolean }>(`${this.baseUrl}/qa/status?${q.toString()}`);
   }
 
   askStudioQuestion(payload: { egitimId?: string; contentRequestId?: string; bolumNo?: number | null; kaynakId?: string; kapsam: string; soru: string }): Observable<any> {

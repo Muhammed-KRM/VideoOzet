@@ -71,17 +71,22 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
         {
             var existingPlans = await _dbContext.SeriPlanlari
                 .Include(p => p.SeriBolumler)
+                    .ThenInclude(b => b.Revizyonlar)
                 .Where(p => p.ContentRequestId == request.Id)
                 .OrderByDescending(p => p.PlanNo)
                 .ToListAsync(context.CancellationToken);
 
             var latestPlan = existingPlans.FirstOrDefault();
 
-            // Diff-Aware Güncelleme: Eski bölümler silinmeden ÖNCE mevcut taslağı serileştir!
+            // Diff-Aware Güncelleme: Eğer yeni versiyon (PlanNo + 1) henüz boş açılmışsa bir önceki dolu planı baz al!
+            var previousPopulatedPlan = (latestPlan != null && latestPlan.SeriBolumler.Count > 0 && latestPlan.Durum != SeriPlanDurumu.Hata)
+                ? latestPlan
+                : existingPlans.FirstOrDefault(p => p.SeriBolumler.Count > 0 && p.Durum != SeriPlanDurumu.Hata);
+
             string previousPlanJson = string.Empty;
-            if (latestPlan != null && latestPlan.SeriBolumler.Count > 0 && latestPlan.Durum != SeriPlanDurumu.Hata)
+            if (previousPopulatedPlan != null)
             {
-                previousPlanJson = SerializeExistingPlanSnapshot(latestPlan);
+                previousPlanJson = SerializeExistingPlanSnapshot(previousPopulatedPlan);
             }
 
             SeriPlani seriPlani;
@@ -139,22 +144,48 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
                 structuredSourcesStr = await _topicMapper.BuildTopicDigestAsync(message.EgitimId, context.CancellationToken);
             }
 
+            var rawConstraintsJson = seriPlani.KullaniciKisitlariJson ?? string.Empty;
+            var userDraft = ParseUserDraftConstraints(rawConstraintsJson);
+
             var combinedSources = structuredSourcesStr;
             if (_sourceContextBuilder != null)
             {
                 var queries = new List<string> { request.Konu };
                 if (!string.IsNullOrWhiteSpace(request.EkTonTalimati))
                     queries.Add(request.EkTonTalimati);
+                if (!string.IsNullOrWhiteSpace(userDraft?.RevizyonTalimati))
+                    queries.Add(userDraft.RevizyonTalimati);
+
+                // Önceki planda henüz atanmamış / yeni eklenmiş kaynakları önceliklendir ki yeni kaynakların içeriğini tam görsün
+                IReadOnlyCollection<Guid>? unassignedSourceIds = null;
+                if (previousPopulatedPlan != null && structuredCards != null && structuredCards.Count > 0)
+                {
+                    var prevAssigned = previousPopulatedPlan.SeriBolumler
+                        .SelectMany(b => SafeDeserializeArray(b.AtananKaynaklarJson))
+                        .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty)
+                        .Where(g => g != Guid.Empty)
+                        .ToHashSet();
+
+                    var newOnes = structuredCards
+                        .Select(c => c.KaynakId)
+                        .Where(id => !prevAssigned.Contains(id))
+                        .ToList();
+
+                    if (newOnes.Count > 0)
+                        unassignedSourceIds = newOnes;
+                }
 
                 var sourceContext = await _sourceContextBuilder.BuildContextAsync(
                     message.EgitimId,
                     queries,
                     maxChars: 55000,
+                    preferredSourceIds: unassignedSourceIds,
+                    targetChunksOverride: null,
                     ct: context.CancellationToken);
 
                 if (sourceContext != null && !string.IsNullOrWhiteSpace(sourceContext.ContextText))
                 {
-                    combinedSources = $"--- EĞİTİM KAYNAK KARTLARI VE KONU DÖKÜMÜ ---\n{structuredSourcesStr}\n\n--- ÖRNEK GERÇEK KAYNAK METİNLERİ ---\n{sourceContext.ContextText}";
+                    combinedSources = $"--- EĞİTİM KAYNAK KARTLARI VE KONU DÖKÜMÜ ---\n{structuredSourcesStr}\n\n--- ÖRNEK GERÇEK KAYNAK METİNLERİ (ÖNCELİKLE YENİ EKLENENLER) ---\n{sourceContext.ContextText}";
                 }
             }
 
@@ -170,9 +201,43 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
 
             var kAnaliziStr = JsonSerializer.Serialize(konuAnaliziJson);
 
-            var rawConstraintsJson = seriPlani.KullaniciKisitlariJson ?? string.Empty;
-            var userDraft = ParseUserDraftConstraints(rawConstraintsJson);
+            // Koruyucu Yeni Versiyon Modunda kullanıcı bölüm sayısını boş bıraktıysa önceki planın bölüm sayısını koru!
+            if (userDraft != null &&
+                userDraft.MevcutMetinleriKoru &&
+                (!userDraft.VideoSayisi.HasValue || userDraft.VideoSayisi.Value <= 0) &&
+                previousPopulatedPlan != null &&
+                previousPopulatedPlan.SeriBolumler.Count > 0)
+            {
+                userDraft.VideoSayisi = previousPopulatedPlan.SeriBolumler.Count;
+            }
+
             var formattedConstraintsText = FormatUserConstraintsText(userDraft, rawConstraintsJson, seriPlani.OnayTalimati);
+
+            // Koruyucu modda: kullanıcı özel süre girmediyse önceki kaydedilmiş dökümanların gerçek son sürelerini baz al (+1..3 dk ekleme payı)
+            var previousSavedDurations = new Dictionary<int, int>();
+            if (userDraft?.MevcutMetinleriKoru == true && previousPopulatedPlan != null)
+            {
+                foreach (var prevEp in previousPopulatedPlan.SeriBolumler.OrderBy(x => x.BolumNo))
+                {
+                    var latestRev = prevEp.AktifRevizyonId.HasValue
+                        ? prevEp.Revizyonlar?.FirstOrDefault(r => r.Id == prevEp.AktifRevizyonId.Value)
+                        : null;
+                    latestRev ??= prevEp.Revizyonlar?.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
+
+                    var extracted = SavedVideoPlanMetadataExtractor.Extract(latestRev?.VideoPlani);
+                    int actualSavedMin = extracted?.HedefSureDk ?? prevEp.HedefSureDk;
+                    if (actualSavedMin > 0)
+                        previousSavedDurations[prevEp.BolumNo] = actualSavedMin;
+                }
+
+                if (previousSavedDurations.Count > 0 &&
+                    (!userDraft.VarsayilanSureDk.HasValue || userDraft.VarsayilanSureDk.Value <= 0) &&
+                    (userDraft.VideoSureleri == null || userDraft.VideoSureleri.Count == 0))
+                {
+                    var durSummary = string.Join(", ", previousSavedDurations.OrderBy(kv => kv.Key).Select(kv => $"Bölüm {kv.Key}: ~{kv.Value} dk"));
+                    formattedConstraintsText += $"\n- KAYDEDİLMİŞ SON DÖKÜMAN SÜRELERİ ({durSummary}): Kullanıcı önceki dökümanları düzenleyerek bu sürelere indirmiştir! Yeni kaynaklardan seçici eklemeler yapıldığında her bölümün `HedefSureDk` değeri bu son sürenin yalnızca +1 ile +3 dk üzerinde olmalıdır (ASLA 20-22 dk gibi eski sürelere dönme!).";
+                }
+            }
 
             if (HasAnyUserConstraint(userDraft, rawConstraintsJson))
             {
@@ -182,23 +247,64 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             var topicAndThesis = BuildTopicAndThesisHeader(request.Konu, request.EkTonTalimati, seriPlani.OnayTalimati);
             var targetAudience = request.HedefKitle ?? "Genel";
 
-            // 7-parametreli (+ ct) fark-bazlı çağrı; Moq testlerinde yalnız 5-paramlı overload kuruluysa otomatik fallback!
-            var planJsonStr = await CallGenerateSeriesPlanWithFallbackAsync(
-                topicAndThesis,
-                request.Konu,
-                targetAudience,
-                request.EkTonTalimati ?? string.Empty,
-                kAnaliziStr,
-                combinedSources,
-                formattedConstraintsText,
-                previousPlanJson,
-                context.CancellationToken);
+            // 7-parametreli (+ ct) fark-bazlı çağrı; JSON kesintisi olursa 1 kez otomatik yeniden dener
+            JsonElement planData = default;
+            List<ParsedEpisodeDraft> episodes = new();
+            Exception? lastPlanParseEx = null;
 
-            var planData = LlmJson.Deserialize<JsonElement>(planJsonStr);
-            if (planData.ValueKind != JsonValueKind.Object)
+            for (int planAttempt = 0; planAttempt < 2; planAttempt++)
             {
-                throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
+                try
+                {
+                    var attemptConstraints = planAttempt == 0
+                        ? formattedConstraintsText
+                        : formattedConstraintsText + "\n- KRİTİK FORMAT UYARISI: Önceki denemede JSON metni yarım kaldı veya string içinde kaçışsız satır sonu kullanıldı. Tüm string değerlerini tek satırda tut, tüm dizi ve nesne parantezlerini eksiksiz kapat ve her bölüm için SahneIskeleti ile AtananKaynakIdleri alanlarını tam doldur!";
+
+                    var planJsonStr = await CallGenerateSeriesPlanWithFallbackAsync(
+                        topicAndThesis,
+                        request.Konu,
+                        targetAudience,
+                        request.EkTonTalimati ?? string.Empty,
+                        kAnaliziStr,
+                        combinedSources,
+                        attemptConstraints,
+                        previousPlanJson,
+                        context.CancellationToken);
+
+                    planData = LlmJson.Deserialize<JsonElement>(planJsonStr);
+                    if (planData.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new InvalidOperationException("Yapay zeka geçerli bir JSON objesi döndürmedi.");
+                    }
+
+                    int tempDefaultDur = userDraft?.VarsayilanSureDk is int ud && ud > 0
+                        ? ud
+                        : ReadInt(planData, "VarsayilanVideoSuresiDk", 10);
+
+                    episodes = ParseEpisodesFromPlanElement(planData, tempDefaultDur);
+                    if (episodes.Count == 0)
+                    {
+                        throw new InvalidOperationException("Yapay zeka seri haritasında hiç bölüm döndürmedi.");
+                    }
+
+                    lastPlanParseEx = null;
+                    break;
+                }
+                catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception parseEx)
+                {
+                    lastPlanParseEx = parseEx;
+                    _logger.LogWarning(parseEx, "SeriesPlanConsumer JSON ayrıştırma denemesi {Attempt}/2 başarısız oldu.", planAttempt + 1);
+                    if (planAttempt == 1)
+                        throw;
+                }
             }
+
+            if (lastPlanParseEx != null)
+                throw lastPlanParseEx;
 
             int llmDefaultDuration = ReadInt(planData, "VarsayilanVideoSuresiDk", 10);
             seriPlani.VarsayilanVideoSuresiDk = userDraft?.VarsayilanSureDk is int uDef && uDef > 0
@@ -207,7 +313,40 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             seriPlani.OneridenFarkli = seriPlani.OneridenFarkli || ReadBool(planData, "OneridenFarkli");
             seriPlani.DisaridaBirakilanlarJson = planData.TryGetProperty("DisaridaBirakilanlar", out var disarida) ? disarida.ToString() : "[]";
 
-            var episodes = ParseEpisodesFromPlanElement(planData, seriPlani.VarsayilanVideoSuresiDk);
+            // Koruyucu yeni versiyon modunda: akış kesintisi nedeniyle eksik kalan sahne iskeleti veya önceki kaynakları Plan v(N-1)'den koru
+            if (userDraft?.MevcutMetinleriKoru == true && previousPopulatedPlan != null)
+            {
+                var prevOrdered = previousPopulatedPlan.SeriBolumler.OrderBy(b => b.BolumNo).ToList();
+                for (int idx = 0; idx < episodes.Count && idx < prevOrdered.Count; idx++)
+                {
+                    var ep = episodes[idx];
+                    var prevEp = prevOrdered[idx];
+
+                    if (ep.SahneIskeleti.Count == 0 && !string.IsNullOrWhiteSpace(prevEp.SahneIskeletiJson))
+                    {
+                        try
+                        {
+                            var prevScenes = LlmJson.Deserialize<List<SeriesSceneOutlineItemDto>>(prevEp.SahneIskeletiJson);
+                            if (prevScenes != null && prevScenes.Count > 0)
+                                ep.SahneIskeleti = prevScenes;
+                        }
+                        catch { }
+                    }
+
+                    var prevSourceIds = SafeDeserializeArray(prevEp.AtananKaynaklarJson)
+                        .Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty)
+                        .Where(g => g != Guid.Empty)
+                        .ToList();
+
+                    if (prevSourceIds.Count > 0)
+                    {
+                        ep.AtananKaynakIdleri = prevSourceIds
+                            .Concat(ep.AtananKaynakIdleri)
+                            .Distinct()
+                            .ToList();
+                    }
+                }
+            }
 
             // Deterministik C# Kısıt Zorlayıcı (EnforcePlanConstraintsAsync)
             episodes = await EnforcePlanConstraintsAsync(
@@ -228,6 +367,30 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
             if (episodes.Count == 0)
             {
                 throw new InvalidOperationException("Yapay zeka seri haritasında hiç bölüm döndürmedi.");
+            }
+
+            // Koruyucu modda: kullanıcı özel süre girmediyse LLM'in eski 22 dk değerine dönmesini deterministik olarak engelle
+            if (userDraft?.MevcutMetinleriKoru == true &&
+                previousSavedDurations.Count > 0 &&
+                (!userDraft.VarsayilanSureDk.HasValue || userDraft.VarsayilanSureDk.Value <= 0) &&
+                (userDraft.VideoSureleri == null || userDraft.VideoSureleri.Count == 0))
+            {
+                for (int idx = 0; idx < episodes.Count; idx++)
+                {
+                    int epNo = idx + 1;
+                    if (previousSavedDurations.TryGetValue(epNo, out int savedDur) && savedDur > 0)
+                    {
+                        int minAllowed = savedDur;
+                        int maxAllowed = savedDur + 3;
+                        if (episodes[idx].HedefSureDk < minAllowed || episodes[idx].HedefSureDk > maxAllowed)
+                        {
+                            episodes[idx].HedefSureDk = savedDur + 2;
+                            NormalizeEpisodeSceneOutline(episodes[idx]);
+                        }
+                    }
+                }
+
+                seriPlani.VarsayilanVideoSuresiDk = (int)Math.Round(episodes.Average(e => e.HedefSureDk));
             }
 
             seriPlani.Durum = SeriPlanDurumu.OnayBekliyor;
@@ -698,23 +861,69 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
 
     private static string SerializeExistingPlanSnapshot(SeriPlani plan)
     {
-        var ordered = plan.SeriBolumler.OrderBy(b => b.BolumNo).Select(b => new
+        var extractedDurations = new List<int>();
+        var ordered = plan.SeriBolumler.OrderBy(b => b.BolumNo).Select(b =>
         {
-            b.BolumNo,
-            b.CalismaBasligi,
-            b.Kanca,
-            b.HedefSureDk,
-            b.AnaFikir,
-            Konular = SafeDeserializeArray(b.KonularJson),
-            SahneIskeleti = SafeDeserializeDynamic(b.SahneIskeletiJson),
-            AtananKaynakIdleri = SafeDeserializeArray(b.AtananKaynaklarJson)
+            var latestRev = b.AktifRevizyonId.HasValue
+                ? b.Revizyonlar?.FirstOrDefault(r => r.Id == b.AktifRevizyonId.Value)
+                : null;
+            latestRev ??= b.Revizyonlar?.OrderByDescending(r => r.RevizyonNo).FirstOrDefault();
+
+            var extractedMeta = SavedVideoPlanMetadataExtractor.Extract(latestRev?.VideoPlani);
+
+            var guncelSahneBasliklari = new List<string>();
+            string sonKaydedilenMetinOzeti = string.Empty;
+            if (!string.IsNullOrWhiteSpace(latestRev?.VideoPlani))
+            {
+                foreach (var line in latestRev.VideoPlani.Split('\n'))
+                {
+                    var t = line.Trim();
+                    if (t.StartsWith("## ") || t.StartsWith("### Sahne", StringComparison.OrdinalIgnoreCase))
+                        guncelSahneBasliklari.Add(t);
+                }
+
+                var rawPlan = latestRev.VideoPlani.Trim();
+                sonKaydedilenMetinOzeti = rawPlan.Length <= 3600
+                    ? rawPlan
+                    : rawPlan.Substring(0, 2100) + "\n...[ORTA KISIM]...\n" + rawPlan.Substring(rawPlan.Length - 1400);
+            }
+
+            int effectiveDur = extractedMeta?.HedefSureDk ?? b.HedefSureDk;
+            if (effectiveDur > 0)
+                extractedDurations.Add(effectiveDur);
+
+            object effectiveScenes = extractedMeta != null && extractedMeta.Sahneler.Count > 0
+                ? extractedMeta.Sahneler
+                : SafeDeserializeDynamic(b.SahneIskeletiJson);
+
+            object effectiveTopics = extractedMeta != null && extractedMeta.Konular.Count > 0
+                ? extractedMeta.Konular
+                : SafeDeserializeArray(b.KonularJson);
+
+            return new
+            {
+                b.BolumNo,
+                CalismaBasligi = !string.IsNullOrWhiteSpace(extractedMeta?.CalismaBasligi) ? extractedMeta.CalismaBasligi : b.CalismaBasligi,
+                Kanca = !string.IsNullOrWhiteSpace(extractedMeta?.Kanca) ? extractedMeta.Kanca : b.Kanca,
+                HedefSureDk = effectiveDur,
+                AnaFikir = !string.IsNullOrWhiteSpace(extractedMeta?.AnaFikir) ? extractedMeta.AnaFikir : b.AnaFikir,
+                Konular = effectiveTopics,
+                SahneIskeleti = effectiveScenes,
+                SonDuzenlenenMetinSahneBasliklari = guncelSahneBasliklari,
+                KullanicininKaydettigiSonMetin = sonKaydedilenMetinOzeti,
+                AtananKaynakIdleri = SafeDeserializeArray(b.AtananKaynaklarJson)
+            };
         }).ToList();
+
+        int effectivePlanDefaultDur = extractedDurations.Count > 0
+            ? (int)Math.Round(extractedDurations.Average())
+            : plan.VarsayilanVideoSuresiDk;
 
         return JsonSerializer.Serialize(new
         {
             plan.PlanNo,
             plan.VideoSayisi,
-            plan.VarsayilanVideoSuresiDk,
+            VarsayilanVideoSuresiDk = effectivePlanDefaultDur,
             SeriHaritasi = ordered
         }, new JsonSerializerOptions { WriteIndented = false });
     }
@@ -810,6 +1019,10 @@ public class SeriesPlanConsumer : IConsumer<SeriesPlanRequestedEvent>
         var sb = new StringBuilder();
         if (dto != null)
         {
+            if (dto.MevcutMetinleriKoru)
+            {
+                sb.AppendLine("- KORUYUCU YENİ VERSİYON MODU AKTİF (ÇOK ÖNEMLİ!): Önceki plandaki bölümler bizzat kullanıcı tarafından düzenlenmiş ve olgunlaştırılmıştır. Önceki plandaki bölüm başlıklarını, sırasını, açılış kancalarını, sahne akışını (`SonDuzenlenenMetinSahneBasliklari`) ve mevcut `AtananKaynakIdleri` listesini BÜYÜK ÖLÇÜDE AYNEN KORU! Yalnızca eğitimdeki henüz hiçbir bölüme atanmamış YENİ KAYNAKLARI konu uyumuna göre ilgili bölümlerin `AtananKaynakIdleri` listesine ekle ve o kaynaklardan hangi argümanların hangi sahnelere ekleneceğini `SahneIskeleti` / `Konular` içinde belirt!");
+            }
             if (dto.VideoSayisi.HasValue && dto.VideoSayisi.Value > 0)
                 sb.AppendLine($"- KESİN BÖLÜM SAYISI (VideoSayisi): TAM OLARAK {dto.VideoSayisi.Value} adet bölüm üretilecek! (Ne eksik ne fazla!)");
             if (dto.VarsayilanSureDk.HasValue && dto.VarsayilanSureDk.Value > 0)

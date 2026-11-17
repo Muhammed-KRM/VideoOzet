@@ -53,11 +53,14 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     videoSayisi: number | null;
     varsayilanSureDk: number | null;
     talimat: string;
+    mevcutMetinleriKoru: boolean;
   } = {
     videoSayisi: null,
     varsayilanSureDk: null,
-    talimat: ''
+    talimat: '',
+    mevcutMetinleriKoru: true
   };
+  selectedPlanNo: number | null = null;
   isDrafting = false;
   onayTalimati = '';
   isApproving = false;
@@ -66,6 +69,10 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.contentRequestId = this.route.snapshot.paramMap.get('id') || '';
+    const qpPlanNo = Number(this.route.snapshot.queryParamMap.get('planNo'));
+    if (qpPlanNo > 0) {
+      this.selectedPlanNo = qpPlanNo;
+    }
     if (!this.contentRequestId) {
       this.router.navigate(['/dashboard']);
       return;
@@ -144,8 +151,23 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     this.subs = [];
   }
 
+  get tumPlanlar(): any[] {
+    return Array.isArray(this.data?.tumPlanlar) ? this.data.tumPlanlar : [];
+  }
+
+  get nextPlanVersionNo(): number {
+    if (this.tumPlanlar.length === 0) return (this.data?.guncelPlan?.planNo || 1) + 1;
+    return Math.max(...this.tumPlanlar.map((p: any) => p.planNo || 1)) + 1;
+  }
+
+  selectPlanVersion(planNo: number) {
+    if (!planNo || this.selectedPlanNo === planNo) return;
+    this.selectedPlanNo = planNo;
+    this.loadData();
+  }
+
   loadData() {
-    this.apiService.getSeriesPlan(this.contentRequestId).subscribe({
+    this.apiService.getSeriesPlan(this.contentRequestId, this.selectedPlanNo).subscribe({
       next: (res) => {
         this.data = res;
         this.isLoading = false;
@@ -409,7 +431,9 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
       return true;
     }
 
-    if (d.konuAnalizi.durum === 'Hata' && !d.guncelPlan) return false;
+    if (d.durum === 'Hata' || d.konuAnalizi.durum === 'Hata' || d.guncelPlan?.durum === 'Hata') {
+      return false;
+    }
 
     return !d.guncelPlan || d.guncelPlan.durum === 'Olusturuluyor' || d.guncelPlan.durum === 'Taslak' || (d.guncelPlan.seriBolumler?.length ?? 0) === 0;
   }
@@ -472,10 +496,16 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
     });
   }
 
-  requestNewDraft() {
+  requestNewDraft(isNewVersionFromApproved = false) {
     if (!this.data || this.isDrafting) return;
     this.isDrafting = true;
-    this.currentStatusMessage = 'Seçilen kısıtlar ve konu filtreleriyle yeni plan taslağı oluşturuluyor...';
+    // Yeni versiyon oluşturulunca en son versiyonu otomatik göster
+    if (isNewVersionFromApproved) {
+      this.selectedPlanNo = null;
+    }
+    this.currentStatusMessage = isNewVersionFromApproved
+      ? `Eski plan ve dökümanlar korunarak yeni Plan v${this.nextPlanVersionNo} taslağı oluşturuluyor...`
+      : 'Seçilen kısıtlar ve konu filtreleriyle yeni plan taslağı oluşturuluyor...';
 
     const payload = {
       videoSayisi: this.draftOptions.videoSayisi,
@@ -483,7 +513,8 @@ export class SeriesPlannerComponent implements OnInit, OnDestroy {
       talimat: this.draftOptions.talimat || '',
       revizyonTalimati: this.draftOptions.talimat || '',
       zorunluKonular: this.zorunluKonular,
-      haricKonular: this.haricKonular
+      haricKonular: this.haricKonular,
+      mevcutMetinleriKoru: isNewVersionFromApproved ? this.draftOptions.mevcutMetinleriKoru : false
     };
 
     this.apiService.generatePlanDraft(this.contentRequestId, payload).subscribe({

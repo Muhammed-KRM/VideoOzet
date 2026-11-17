@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { marked } from 'marked';
@@ -35,7 +35,7 @@ import { ApiService } from '../../../core/services/api.service';
       </div>
 
       <!-- Mesaj Geçmişi -->
-      <div class="p-5 space-y-4 max-h-[520px] min-h-[240px] overflow-y-auto">
+      <div class="p-5 space-y-4 max-h-[560px] min-h-[240px] overflow-y-auto">
         <div *ngIf="isLoadingHistory" class="flex items-center justify-center py-10 text-slate-400 text-xs gap-2">
           <div class="animate-spin rounded-full h-5 w-5 border-2 border-slate-700 border-t-indigo-500"></div>
           <span>Sohbet geçmişi yükleniyor...</span>
@@ -49,7 +49,7 @@ import { ApiService } from '../../../core/services/api.service';
           <div class="max-w-lg mx-auto space-y-1">
             <p class="text-sm font-semibold text-slate-200">Merak ettiğiniz her detayı sorabilirsiniz</p>
             <p class="text-xs text-slate-400 leading-relaxed">
-              Sadece bir soru sorarsanız yalnızca net ve kanıtlı açıklama alırsınız. Değişiklik veya düzeltme önerisi isterseniz metne tek tıkla uygulanabilir öneri üretilir.
+              Sadece bir soru sorarsanız yalnızca net ve kanıtlı açıklama alırsınız. Döküman adı belirterek ekleme isteyebilir veya yanıtı <b>.md Kopyala</b> ile formatı bozulmadan Manuel Düzenle alanına aktarabilirsiniz.
             </p>
           </div>
 
@@ -77,9 +77,44 @@ import { ApiService } from '../../../core/services/api.service';
           <!-- Asistan Balonu -->
           <div *ngIf="msg.rol === 'assistant'" class="flex justify-start">
             <div class="max-w-[95%] w-full bg-slate-800/95 border border-slate-700/80 rounded-2xl rounded-tl-sm p-4 space-y-3 shadow-lg">
-              <div *ngIf="msg.kullanilanBaglamOzeti" class="flex items-center gap-1.5 text-[11px] text-indigo-300/90 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-700/60 w-fit">
-                <span>🔍 İncelenen Bağlam:</span>
-                <span class="font-medium text-slate-300">{{ msg.kullanilanBaglamOzeti }}</span>
+              <!-- Üst Bağlam Rozeti + Ham Markdown (.md) Kopyalama Aksiyonları -->
+              <div class="flex items-center justify-between gap-2 flex-wrap border-b border-slate-700/50 pb-2">
+                <div *ngIf="msg.kullanilanBaglamOzeti; else defaultAssistantBadge" class="flex items-center gap-1.5 text-[11px] text-indigo-300/90 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-700/60">
+                  <span>🔍 İncelenen Bağlam:</span>
+                  <span class="font-medium text-slate-300">{{ msg.kullanilanBaglamOzeti }}</span>
+                </div>
+                <ng-template #defaultAssistantBadge>
+                  <span class="text-[11px] text-slate-400 font-medium">🤖 Stüdyo Asistanı Yanıtı</span>
+                </ng-template>
+
+                <div class="flex items-center gap-1.5">
+                  <!-- Ham Markdown (.md) Kopyala Butonu -->
+                  <button
+                    type="button"
+                    (click)="copyRawMarkdown(msg)"
+                    class="px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer flex items-center gap-1"
+                    [ngClass]="copiedMessageId === msg.id
+                      ? 'bg-emerald-600/30 text-emerald-200 border-emerald-500/60'
+                      : 'bg-slate-900 hover:bg-slate-700 text-amber-300 border-amber-500/40'"
+                    title="Başlık (#), kalın (**) ve prompter (>) işaretleri bozulmadan ham Markdown (.md) metnini kopyalar — Manuel Düzenle ekranına doğrudan yapıştırabilirsiniz"
+                  >
+                    <span>{{ copiedMessageId === msg.id ? '✓' : '📋' }}</span>
+                    <span>{{ copiedMessageId === msg.id ? '.md Kopyalandı!' : '.md İçeriğini Kopyala' }}</span>
+                  </button>
+
+                  <!-- Uzun Döküman Yanıtlarını Doğrudan Video Planına Kaydetme Kısayolu -->
+                  <button
+                    *ngIf="kapsam === 'Bolum' && contentRequestId && bolumNo != null && isFullDocumentCandidate(msg.mesaj)"
+                    type="button"
+                    (click)="saveFullResponseAsPlan(msg)"
+                    [disabled]="savingFullPlanMsgId === msg.id"
+                    class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                    title="Üretilen bu Markdown metnini doğrudan bu bölümün Video Planı olarak kaydet"
+                  >
+                    <span>⚡</span>
+                    <span>{{ savingFullPlanMsgId === msg.id ? 'Aktarılıyor...' : 'Video Planına Aktar' }}</span>
+                  </button>
+                </div>
               </div>
 
               <div class="prose prose-invert prose-sm max-w-none text-slate-200 leading-relaxed" [innerHTML]="renderMarkdown(msg.mesaj)"></div>
@@ -91,9 +126,18 @@ import { ApiService } from '../../../core/services/api.service';
                     <span>✨</span>
                     <span>Önerilen Metin Değişikliği (Bölüm {{ msg.oneri.hedefBolumNo || bolumNo }} · {{ msg.oneri.hedefAlan === 'ArastirmaOzeti' ? 'Araştırma Özeti' : 'Video Planı' }})</span>
                   </span>
-                  <span *ngIf="msg.oneri.uygulandi" class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold">
-                    ✓ Metne Uygulandı
-                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      (click)="copySuggestionMarkdown(msg)"
+                      class="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[11px] font-semibold cursor-pointer"
+                    >
+                      {{ copiedSuggestionId === msg.id ? '✓ Yeni İfade (.md) Kopyalandı' : '📋 Yeni İfadeyi (.md) Kopyala' }}
+                    </button>
+                    <span *ngIf="msg.oneri.uygulandi" class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold">
+                      ✓ Metne Uygulandı
+                    </span>
+                  </div>
                 </div>
 
                 <p *ngIf="msg.oneri.aciklama" class="text-xs text-slate-400">{{ msg.oneri.aciklama }}</p>
@@ -160,18 +204,19 @@ import { ApiService } from '../../../core/services/api.service';
           </button>
         </div>
         <p class="text-[10px] text-slate-500 mt-1.5">
-          Enter ile gönder · Shift+Enter ile alt satır. Sadece soru sorabilir ya da "şunu nasıl düzeltelim / öneri ver" diyerek değişiklik isteyebilirsiniz.
+          Enter ile gönder · Shift+Enter ile alt satır. Üretilen metni <b>📋 .md İçeriğini Kopyala</b> butonuyla formatı bozulmadan kopyalayabilirsiniz.
         </p>
       </div>
     </div>
   `
 })
-export class StudioQaPanelComponent implements OnChanges {
+export class StudioQaPanelComponent implements OnChanges, OnDestroy {
   @Input() kapsam: 'Bolum' | 'Plan' | 'Kaynak' = 'Bolum';
   @Input() egitimId = '';
   @Input() contentRequestId = '';
   @Input() bolumNo: number | null = null;
   @Input() kaynakId = '';
+  @Input() activeRevizyonNo = 1;
   @Input() baslik = 'Stüdyo Asistanı (Soru-Cevap)';
   @Input() altAciklama = '';
   @Input() placeholder = 'Bu döküman veya diğer bölümler hakkında bir soru sorun...';
@@ -186,7 +231,11 @@ export class StudioQaPanelComponent implements OnChanges {
   isLoadingHistory = false;
   isAsking = false;
   applyingMessageId: string | null = null;
+  copiedMessageId: string | null = null;
+  copiedSuggestionId: string | null = null;
+  savingFullPlanMsgId: string | null = null;
   errorMessage = '';
+  private statusPollTimer: any = null;
 
   get kapsamEtiketi(): string {
     if (this.kapsam === 'Bolum') return 'Çapraz Bölüm & Kaynak Destekli';
@@ -196,28 +245,161 @@ export class StudioQaPanelComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['contentRequestId'] || changes['bolumNo'] || changes['kaynakId'] || changes['kapsam'] || changes['egitimId']) {
+      this.stopStatusPolling();
       this.loadHistory();
     }
   }
 
-  loadHistory() {
-    if (!this.contentRequestId && !this.kaynakId && !this.egitimId) return;
-    this.isLoadingHistory = true;
-    this.errorMessage = '';
+  ngOnDestroy() {
+    this.stopStatusPolling();
+  }
 
-    this.apiService.getStudioQaHistory({
+  private getQueryParams() {
+    return {
       egitimId: this.egitimId || undefined,
       contentRequestId: this.contentRequestId || undefined,
       bolumNo: this.bolumNo,
       kaynakId: this.kaynakId || undefined,
       kapsam: this.kapsam
-    }).subscribe({
+    };
+  }
+
+  private startStatusPolling() {
+    if (this.statusPollTimer) return;
+    this.statusPollTimer = setInterval(() => {
+      this.apiService.getStudioQaStatus(this.getQueryParams()).subscribe({
+        next: (st) => {
+          if (!st?.isProcessing) {
+            this.stopStatusPolling();
+            this.isAsking = false;
+            this.loadHistory(false);
+          }
+        },
+        error: () => {}
+      });
+    }, 3000);
+  }
+
+  private stopStatusPolling() {
+    if (this.statusPollTimer) {
+      clearInterval(this.statusPollTimer);
+      this.statusPollTimer = null;
+    }
+  }
+
+  loadHistory(checkPendingStatus = true) {
+    if (!this.contentRequestId && !this.kaynakId && !this.egitimId) return;
+    this.isLoadingHistory = this.messages.length === 0;
+    this.errorMessage = '';
+
+    this.apiService.getStudioQaHistory(this.getQueryParams()).subscribe({
       next: (list) => {
         this.messages = Array.isArray(list) ? list : [];
         this.isLoadingHistory = false;
+        if (checkPendingStatus) {
+          this.apiService.getStudioQaStatus(this.getQueryParams()).subscribe({
+            next: (st) => {
+              if (st?.isProcessing) {
+                this.isAsking = true;
+                this.startStatusPolling();
+              }
+            },
+            error: () => {}
+          });
+        }
       },
       error: () => {
         this.isLoadingHistory = false;
+      }
+    });
+  }
+
+  private unwrapJsonEnvelope(rawText: string): string {
+    if (!rawText) return '';
+    const trimmed = rawText.trim();
+    const envMatch = trimmed.match(/^\{\s*"yanitModu"[\s\S]*?"cevapMarkdown"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"oneri"[\s\S]*?)?\}$/);
+    if (envMatch && envMatch[1]) {
+      return envMatch[1]
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\')
+        .trim();
+    }
+    return trimmed;
+  }
+
+  extractCleanMarkdown(rawText: string): string {
+    if (!rawText) return '';
+    let text = this.unwrapJsonEnvelope(rawText);
+
+    // Model bütün dökümanı ```markdown ... ``` veya ```md ... ``` bloğu içine aldıysa içindeki saf .md metnini çıkar
+    const fencedMatch = text.match(/```(?:markdown|md)\s*\r?\n([\s\S]*?)```/i);
+    if (fencedMatch && fencedMatch[1] && fencedMatch[1].trim().length > 150) {
+      return fencedMatch[1].trim();
+    }
+
+    // Eğer kısa bir giriş cümlesinden sonra "# " veya "## Sahne" ile ana döküman başlıyorsa ve metin uzunsa başlık hizasından başlat
+    if (text.length > 600 && !text.startsWith('#')) {
+      const headingIdx = text.search(/\r?\n#{1,3}\s+/);
+      if (headingIdx > 0 && headingIdx < 350) {
+        return text.substring(headingIdx).trim();
+      }
+    }
+
+    return text;
+  }
+
+  copyRawMarkdown(msg: any) {
+    if (!msg?.mesaj) return;
+    const cleanMd = this.extractCleanMarkdown(msg.mesaj);
+    navigator.clipboard.writeText(cleanMd).then(() => {
+      this.copiedMessageId = msg.id;
+      setTimeout(() => {
+        if (this.copiedMessageId === msg.id) {
+          this.copiedMessageId = null;
+        }
+      }, 2200);
+    });
+  }
+
+  copySuggestionMarkdown(msg: any) {
+    if (!msg?.oneri?.yeniMetin) return;
+    navigator.clipboard.writeText(msg.oneri.yeniMetin).then(() => {
+      this.copiedSuggestionId = msg.id;
+      setTimeout(() => {
+        if (this.copiedSuggestionId === msg.id) {
+          this.copiedSuggestionId = null;
+        }
+      }, 2200);
+    });
+  }
+
+  isFullDocumentCandidate(text: string): boolean {
+    if (!text || text.length < 700) return false;
+    return /##\s*Sahne|Prompter Metni|Görsel\s*&\s*Edit/i.test(text);
+  }
+
+  saveFullResponseAsPlan(msg: any) {
+    if (!msg?.mesaj || !this.contentRequestId || this.bolumNo == null || this.savingFullPlanMsgId) return;
+    if (!confirm('Bu yanıttaki Markdown metnini doğrudan bu bölümün Video Planı olarak kaydetmek istiyor musunuz?')) return;
+
+    const cleanMd = this.extractCleanMarkdown(msg.mesaj);
+    this.savingFullPlanMsgId = msg.id;
+    this.errorMessage = '';
+
+    this.apiService.updateEpisodeRevision(this.contentRequestId, this.bolumNo, this.activeRevizyonNo || 1, {
+      videoPlani: cleanMd
+    }).subscribe({
+      next: () => {
+        this.savingFullPlanMsgId = null;
+        this.suggestionApplied.emit();
+        alert('Video Planı başarıyla güncellendi! "Video Planı" sekmesinden inceleyebilirsiniz.');
+      },
+      error: (err) => {
+        this.savingFullPlanMsgId = null;
+        this.errorMessage = err?.error?.mesaj || 'Video Planı güncellenirken hata oluştu.';
       }
     });
   }
@@ -314,6 +496,6 @@ export class StudioQaPanelComponent implements OnChanges {
 
   renderMarkdown(text: string): string {
     if (!text) return '';
-    return marked.parse(text) as string;
+    return marked.parse(this.unwrapJsonEnvelope(text)) as string;
   }
 }

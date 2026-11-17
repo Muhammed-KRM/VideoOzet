@@ -51,6 +51,7 @@ public class SeriesVideoRevisionRequestedEvent
     public Guid SeriBolumId { get; set; }
     public string Talimat { get; set; } = string.Empty;
     public string HedefAlan { get; set; } = "Hepsi";
+    public int? BazRevizyonNo { get; set; }
 }
 
 public class SeriesVideoGeneratedEvent

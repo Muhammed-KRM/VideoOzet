@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using VideoOzet.Business.DTOs;
@@ -101,8 +102,164 @@ public static class LlmJson
         }
         catch (JsonException ex)
         {
+            if (jsonText.StartsWith("{") || jsonText.StartsWith("["))
+            {
+                try
+                {
+                    var repaired = RepairMalformedLlmJson(jsonText);
+                    return JsonSerializer.Deserialize<T>(repaired, options)!;
+                }
+                catch
+                {
+                    // Onarım sonrası da ayrıştırılamazsa orijinal hatayı fırlat
+                }
+            }
+
             throw new Exception($"Geçersiz JSON formatı: {jsonText}", ex);
         }
+    }
+
+    /// <summary>
+    /// LLM akış kesintisi veya dize içi kaçışsız alt satır (0x0A / 0x0D / 0x09) kaynaklı
+    /// bozuk JSON metinlerini deterministik durum makinesiyle onarır.
+    /// </summary>
+    public static string RepairMalformedLlmJson(string jsonText)
+    {
+        if (string.IsNullOrWhiteSpace(jsonText))
+            return jsonText;
+
+        var sb = new StringBuilder(jsonText.Length + 32);
+        var closingStack = new Stack<char>();
+        bool inString = false;
+        bool escaped = false;
+
+        for (int i = 0; i < jsonText.Length; i++)
+        {
+            char c = jsonText[i];
+
+            if (inString)
+            {
+                if (escaped)
+                {
+                    sb.Append(c);
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    sb.Append(c);
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    sb.Append(c);
+                    inString = false;
+                    continue;
+                }
+
+                if (c == '\r')
+                {
+                    continue;
+                }
+
+                if (c == '\n')
+                {
+                    sb.Append("\\n");
+                    continue;
+                }
+
+                if (c == '\t')
+                {
+                    sb.Append("\\t");
+                    continue;
+                }
+
+                if (c < 0x20)
+                {
+                    sb.Append(' ');
+                    continue;
+                }
+
+                sb.Append(c);
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = true;
+                sb.Append(c);
+            }
+            else if (c == '{')
+            {
+                closingStack.Push('}');
+                sb.Append(c);
+            }
+            else if (c == '[')
+            {
+                closingStack.Push(']');
+                sb.Append(c);
+            }
+            else if (c == '}' || c == ']')
+            {
+                if (closingStack.Count > 0 && closingStack.Peek() == c)
+                {
+                    closingStack.Pop();
+                    sb.Append(c);
+                }
+                else if (closingStack.Count >= 2)
+                {
+                    // Örn: [ { ... } yerine [ ... } geldiyse aradaki eksik kapanışı tamamla
+                    var arr = closingStack.ToArray(); // üstten alta
+                    int matchIdx = Array.IndexOf(arr, c);
+                    if (matchIdx > 0)
+                    {
+                        for (int k = 0; k < matchIdx; k++)
+                        {
+                            sb.Append(closingStack.Pop());
+                        }
+                        closingStack.Pop();
+                        sb.Append(c);
+                    }
+                }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        if (inString)
+        {
+            if (escaped) sb.Append('\\');
+            sb.Append('"');
+        }
+
+        // Kapanışlardan önce kalmış olabilecek yarım virgül/iki noktayı temizle
+        while (sb.Length > 0 && char.IsWhiteSpace(sb[sb.Length - 1]))
+        {
+            sb.Length--;
+        }
+        if (sb.Length > 0 && (sb[sb.Length - 1] == ',' || sb[sb.Length - 1] == ':'))
+        {
+            if (sb[sb.Length - 1] == ':')
+            {
+                sb.Append("null");
+            }
+            else
+            {
+                sb.Length--;
+            }
+        }
+
+        while (closingStack.Count > 0)
+        {
+            sb.Append(closingStack.Pop());
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

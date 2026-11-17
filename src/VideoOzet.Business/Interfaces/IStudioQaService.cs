@@ -73,4 +73,11 @@ public interface IStudioQaService
         Guid? kaynakId,
         string kapsam,
         CancellationToken ct = default);
+
+    bool IsThreadProcessing(
+        Guid? egitimId,
+        Guid? contentRequestId,
+        int? bolumNo,
+        Guid? kaynakId,
+        string kapsam);
 }

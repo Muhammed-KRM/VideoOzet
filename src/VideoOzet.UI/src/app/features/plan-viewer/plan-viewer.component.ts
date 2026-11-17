@@ -25,6 +25,7 @@ export class PlanViewerComponent implements OnChanges {
   @Input() revision: any;
   @Input() title = '';
   @Input() bolumNo: number | null = null;
+  @Input() planNo: number | null = null;
   @Input() contentRequestId = '';
   @Output() reQcCompleted = new EventEmitter<void>();
 
@@ -79,7 +80,7 @@ export class PlanViewerComponent implements OnChanges {
       ? { arastirmaOzeti: this.editOzetText }
       : { videoPlani: this.editPlanText };
 
-    this.apiService.updateEpisodeRevision(this.contentRequestId, this.bolumNo, revNo, payload).subscribe({
+    this.apiService.updateEpisodeRevision(this.contentRequestId, this.bolumNo, revNo, payload, this.planNo).subscribe({
       next: (res) => {
         this.isSavingEdit = false;
         this.isEditing = false;

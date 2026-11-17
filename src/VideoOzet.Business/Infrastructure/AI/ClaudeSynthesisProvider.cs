@@ -82,21 +82,92 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             _logger.LogWarning("LLM yanıtı token sınırına çarptı (finish_reason={FinishReason}, len={Len}). Kaldığı yerden devam ettirme (continuation) çağrısı yapılıyor...", finishReason, text.Length);
             try
             {
-                string tailSnippet = text.Length > 500 ? text.Substring(text.Length - 500) : text;
-                string continuationPrompt = $"""
-                    Ürettiğin doküman çıktı token sınırı nedeniyle aşağıdaki metnin sonunda yarım kaldı:
+                var trimmedStart = text.TrimStart();
+                bool isJsonOutput = trimmedStart.StartsWith("{") || trimmedStart.StartsWith("[");
 
-                    --- YARIM KALAN SON KISIM ---
-                    {tailSnippet}
-                    --- SON ---
-
-                    GÖREV: Yukarıdaki son cümlenin kaldığı yerden HİÇBİR BAŞLIĞI VEYA PARAGRAFI TEKRARLAMADAN doğrudan devam et ve dokümanı Sonuç / Kapanış bölümüne kadar aynı Markdown formatıyla eksiksiz tamamla.
-                    """;
-                var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct, taskType);
-                contText = StripReasoningTags(contText);
-                if (!string.IsNullOrWhiteSpace(contText))
+                if (isJsonOutput)
                 {
-                    text = text.TrimEnd() + "\n" + contText.TrimStart();
+                    string headSnippet = trimmedStart.Length > 400 ? trimmedStart.Substring(0, 400) : trimmedStart;
+                    string tailSnippet = text.Length > 1200 ? text.Substring(text.Length - 1200) : text;
+                    string continuationPrompt = $"""
+                        Aşağıdaki JSON çıktısı token sınırı nedeniyle tam son karakterde kesildi.
+
+                        --- JSON BAŞLANGICI (ŞEMA HATIRLATMASI) ---
+                        {headSnippet}
+                        --- YARIM KALAN SON KISIM ---
+                        {tailSnippet}
+                        --- KESİLEN NOKTA ---
+
+                        GÖREV: Yukarıdaki JSON metninin TAM KESİLDİĞİ KARAKTERDEN itibaren hiçbir şeyi tekrarlamadan, Markdown açıklaması yazmadan ve şema dışı uydurma alan eklemeden doğrudan devam et; kalan elemanları ve tüm açık tırnak/dizi/nesne parantezlerini kapatarak geçerli JSON olarak bitir.
+                        """;
+                    var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct, taskType);
+                    contText = StripReasoningTags(contText);
+                    if (!string.IsNullOrWhiteSpace(contText))
+                    {
+                        var cleanCont = Regex.Replace(contText.Trim(), @"^```(?:json)?\s*|\s*```$", string.Empty, RegexOptions.IgnoreCase);
+                        text = text + cleanCont;
+                    }
+                }
+                else if (text.Contains("## Sahne", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("### Sahne", StringComparison.OrdinalIgnoreCase) ||
+                         text.Contains("Prompter Metni", StringComparison.OrdinalIgnoreCase))
+                {
+                    string tailSnippet = text.Length > 1600 ? text.Substring(text.Length - 1600) : text;
+                    string continuationPrompt = $"""
+                        Ürettiğin Video Senaryo/Prompter metni token sınırı nedeniyle aşağıdaki satırın sonunda yarım kaldı:
+
+                        --- YARIM KALAN SON KISIM ---
+                        {tailSnippet}
+                        --- KESİLEN NOKTA ---
+
+                        KESİN KURALLAR:
+                        1. Yukarıdaki yarım kalan cümlenin TAM KALDIĞI KELİMEDEN devam et, hiçbir başlığı veya paragrafı tekrarlama.
+                        2. Bu bir Video Sahne Planıdır (`## Sahne ...`, `### 1. Görsel & Edit Yönergesi`, `### 2. Prompter Metni (Aynen Okunacak)` ve `>` prompter satırları). ASLA `## Sonuç`, `## Değerlendirme` veya numaralı düz makale başlığı (`## 4. ...`) YAZMA!
+                        3. Yalnızca yarım kalan sahnenin `>` prompter paragraflarını ve varsa bu grupta eksik kalan `## Sahne` bloğunu aynı stüdyo formatıyla tamamlayıp dur.
+                        """;
+                    var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct, taskType);
+                    contText = StripReasoningTags(contText);
+                    if (!string.IsNullOrWhiteSpace(contText))
+                    {
+                        var trimmedBase = text.TrimEnd();
+                        int lastNl = trimmedBase.LastIndexOf('\n');
+                        var lastLine = lastNl >= 0 ? trimmedBase.Substring(lastNl + 1).TrimStart() : trimmedBase.TrimStart();
+                        bool midQuoteSentence = lastLine.StartsWith(">") &&
+                                                !lastLine.EndsWith(".") &&
+                                                !lastLine.EndsWith("!") &&
+                                                !lastLine.EndsWith("?") &&
+                                                !lastLine.EndsWith("\"") &&
+                                                !lastLine.EndsWith("”");
+
+                        if (midQuoteSentence)
+                        {
+                            var cleanNext = contText.TrimStart().TrimStart('>').TrimStart();
+                            text = trimmedBase + (cleanNext.StartsWith(",") || cleanNext.StartsWith(";") || cleanNext.StartsWith(".") ? "" : " ") + cleanNext;
+                        }
+                        else
+                        {
+                            text = trimmedBase + "\n" + contText.TrimStart();
+                        }
+                    }
+                }
+                else
+                {
+                    string tailSnippet = text.Length > 500 ? text.Substring(text.Length - 500) : text;
+                    string continuationPrompt = $"""
+                        Ürettiğin doküman çıktı token sınırı nedeniyle aşağıdaki metnin sonunda yarım kaldı:
+
+                        --- YARIM KALAN SON KISIM ---
+                        {tailSnippet}
+                        --- SON ---
+
+                        GÖREV: Yukarıdaki son cümlenin kaldığı yerden HİÇBİR BAŞLIĞI VEYA PARAGRAFI TEKRARLAMADAN doğrudan devam et ve dokümanı Sonuç / Kapanış bölümüne kadar aynı Markdown formatıyla eksiksiz tamamla.
+                        """;
+                    var (contText, _) = await CallLlmRawAsync(continuationPrompt, ct, taskType);
+                    contText = StripReasoningTags(contText);
+                    if (!string.IsNullOrWhiteSpace(contText))
+                    {
+                        text = text.TrimEnd() + "\n" + contText.TrimStart();
+                    }
                 }
             }
             catch (Exception contEx) when (contEx is not OperationCanceledException)
@@ -113,7 +184,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         if (string.IsNullOrWhiteSpace(text))
             return string.Empty;
 
-        var cleaned = StripReasoningTags(text);
+        var cleaned = StripReasoningTags(text)
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n');
 
         // Eğer JSON çıktısıysa dokunma
         if (cleaned.StartsWith("{") || cleaned.StartsWith("["))
@@ -148,11 +221,27 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         // Prompter blockquote paragrafları arasına boş '>' satırı ekle
         cleaned = Regex.Replace(
             cleaned,
-            @"(?m)^(>\s*\S.*)\r?\n(?=>\s*[""“”])",
+            @"(?m)^(>\s*\S.*)\n(?=>\s*[""“”])",
             "$1\n>\n");
 
         if (isVideoPlan)
         {
+            // Yanlışlıkla satır ortasında kırılmış '>' prompter cümlelerini birleştir
+            cleaned = Regex.Replace(
+                cleaned,
+                @"(?m)^(>\s*[^\n]*[^\.\!\?""”\s])\n\s*([,;:a-zçğıöşü][^\n]+)$",
+                "$1 $2");
+
+            // Sahne planının sonuna sızmış olabilecek düz makale başlıklarını ("## 4. ...", "## Sonuç") temizle
+            if (cleaned.Contains("## Sahne", StringComparison.OrdinalIgnoreCase) ||
+                cleaned.Contains("### Sahne", StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = Regex.Replace(
+                    cleaned,
+                    @"(?ms)\n(?:---\s*\n+)?##\s+(?:Sonuç\b|\d+\.\s+(?!Sahne\b)).*$",
+                    string.Empty);
+            }
+
             int idxPlan = cleaned.IndexOf("# Video Planı", StringComparison.OrdinalIgnoreCase);
             if (idxPlan < 0) idxPlan = cleaned.IndexOf("## Sahne 1", StringComparison.OrdinalIgnoreCase);
             if (idxPlan > 0 && cleaned.Substring(0, idxPlan).Contains("Araştırma Özeti", StringComparison.OrdinalIgnoreCase))
@@ -416,7 +505,8 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
                 try
                 {
-                    using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(20) };
+                    using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(6) };
+                    int initialMaxTokens = proxyModel.Contains("gemini", StringComparison.OrdinalIgnoreCase) ? 65536 : 16384;
 
                     var requestPayload = new Dictionary<string, object>
                     {
@@ -425,7 +515,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                         {
                             new { role = "user", content = prompt }
                         },
-                        ["max_tokens"] = 16384
+                        ["max_tokens"] = initialMaxTokens
                     };
 
                     if (!IsReasoningModelName(proxyModel))
@@ -437,7 +527,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                     System.Net.Http.HttpResponseMessage? response = null;
                     string responseString = string.Empty;
 
-                    for (int subTry = 0; subTry < 2; subTry++)
+                    for (int subTry = 0; subTry < 3; subTry++)
                     {
                         var jsonContent = new System.Net.Http.StringContent(
                             JsonSerializer.Serialize(requestPayload),
@@ -458,7 +548,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                             break;
                         }
 
-                        if ((int)response.StatusCode == 400 && subTry == 0)
+                        if ((int)response.StatusCode == 400 && subTry < 2)
                         {
                             bool adjusted = false;
                             if (responseString.Contains("temperature", StringComparison.OrdinalIgnoreCase) && requestPayload.ContainsKey("temperature"))
@@ -469,8 +559,10 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                             }
                             if (responseString.Contains("max_tokens", StringComparison.OrdinalIgnoreCase) || responseString.Contains("tokens", StringComparison.OrdinalIgnoreCase))
                             {
-                                _logger.LogInformation("Proxy modeli {Model} max_tokens sınırına takıldı. 8192 olarak deneniyor...", proxyModel);
-                                requestPayload["max_tokens"] = 8192;
+                                int currentMax = requestPayload["max_tokens"] is int cm ? cm : 16384;
+                                int nextMax = currentMax > 32768 ? 32768 : (currentMax > 16384 ? 16384 : 8192);
+                                _logger.LogInformation("Proxy modeli {Model} max_tokens={Cur} sınırına takıldı. {Next} olarak deneniyor...", proxyModel, currentMax, nextMax);
+                                requestPayload["max_tokens"] = nextMax;
                                 adjusted = true;
                             }
                             if (adjusted) continue;
@@ -927,6 +1019,14 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
+        // Eğer bu bölüm daha önceki bir plan versiyonundaki (Plan v1) düzenlenmiş son dökümanı koruyarak
+        // yeni kaynaklarla zenginleştirilecekse (Koruyucu Evrimsel Genişletme Modu), sıfırdan yazmak yerine
+        // kullanıcının son metnini baz alarak sahne-sahne genişlet!
+        if (!string.IsNullOrWhiteSpace(request.BazAlinanMevcutVideoPlani))
+        {
+            return await ExpandAnchoredEpisodeAsync(request, onProgress, ct);
+        }
+
         int hedefSureDk = Math.Clamp(request.HedefSureDk > 0 ? request.HedefSureDk : 15, 3, 90);
         int sceneCount = Math.Max(5, (int)Math.Ceiling(hedefSureDk / 3.0));
         int targetTotalWords = hedefSureDk * 145;
@@ -1118,6 +1218,241 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         }
 
         return (arastirmaOzeti, fullVideoPlan, devirDefteriJson);
+    }
+
+    private async Task<(string ArastirmaOzeti, string VideoPlani, string DevirDefteriJson)> ExpandAnchoredEpisodeAsync(
+        SeriesEpisodeGenerationRequest request,
+        Func<string, int, Task>? onProgress,
+        CancellationToken ct)
+    {
+        var authorThesisDirective = BuildEpisodeAuthorThesisDirective(request);
+
+        if (onProgress != null)
+        {
+            await onProgress($"Bölüm {request.BolumNo}: Mevcut düzenlenmiş metin korunarak Araştırma Özeti yeni kaynaklarla genişletiliyor...", 20);
+        }
+
+        string expandedOzet;
+        if (!string.IsNullOrWhiteSpace(request.BazAlinanMevcutArastirmaOzeti))
+        {
+            var ozetPrompt = $$"""
+                Sen VideoÖzet AI Stüdyosunun Kıdemli Akademik Editörüsün.
+                Kullanıcı mevcut seriye yeni kaynaklar ekledi ve önceki plan versiyonundaki ({{request.CalismaBasligi}}) Araştırma Özetinin BÜYÜK ÖLÇÜDE KORUNARAK yalnızca yeni kaynaklardaki ilgili bulgularla zenginleştirilmesini istedi.
+
+                MUTLAK KORUMA KURALLARI:
+                1. Aşağıdaki `MEVCUT ARAŞTIRMA ÖZETİ` metnindeki başlıkları, paragrafları ve argümanları SİLME, KISALTMA veya BAŞTAN YAZMA (%90 aynen koru)!
+                2. Yalnızca `YENİ VE GÜNCEL KAYNAK KANITLARI ([K#])` içinde olup mevcut özette henüz yer almayan yeni düşünür/hoca görüşlerini, örnekleri ve kavramları uygun alt başlıkların içine (veya gerekirse yeni bir alt başlıkla) doğal biçimde EKLE ve `[K#]` referanslarını belirt.
+                3. Çıktı olarak YALNIZCA güncellenmiş tam Araştırma Özeti Markdown metnini döndür (açıklama veya JSON zarfı yazma).
+
+                --- YAZAR TEZİ VE BÖLÜM DİREKTİFİ ---
+                {{authorThesisDirective}}
+                Güncel Bölüm Konuları: {{request.BolumKonulariJson}}
+
+                --- KORUNACAK MEVCUT ARAŞTIRMA ÖZETİ ---
+                {{request.BazAlinanMevcutArastirmaOzeti}}
+
+                --- YENİ VE GÜNCEL KAYNAK KANITLARI ([K#]) ---
+                {{request.KaynakBaglamiText}}
+                """;
+
+            var rawOzet = await CallLlmAsync(ozetPrompt, ct, taskType: "videoplan");
+            expandedOzet = NormalizeMarkdownOutput(rawOzet, isVideoPlan: false);
+            if (string.IsNullOrWhiteSpace(expandedOzet) || expandedOzet.Length < request.BazAlinanMevcutArastirmaOzeti.Length / 2)
+                expandedOzet = request.BazAlinanMevcutArastirmaOzeti;
+        }
+        else
+        {
+            expandedOzet = await GenerateResearchSummaryAsync(
+                request.CalismaBasligi,
+                $"{Math.Max(10, request.HedefSureDk)} Dakika",
+                string.IsNullOrWhiteSpace(request.HedefKitle) ? "Genel İzleyici" : request.HedefKitle,
+                $"{authorThesisDirective}\n\n{request.KaynakBaglamiText}",
+                ct);
+        }
+
+        // ─── AŞAMA 2 (KORUYUCU + PLAN UYUMLU): Onaylanmış Yeni Planın (Plan v2) Sahnelerini, Plan v1 Metnini Koruyarak Yaz ───
+        int hedefSureDk = Math.Max(4, request.HedefSureDk);
+        int toplamBolum = Math.Max(request.BolumNo, request.ToplamBolum);
+        int targetTotalWords = Math.Max(600, hedefSureDk * 140);
+        int fallbackSceneCount = Math.Clamp((int)Math.Ceiling(hedefSureDk / 2.2), 4, 10);
+
+        var plannedScenes = NormalizeAndEnforceSceneDurations(
+            request.SahneIskeletiJson,
+            request.SahneIskeletiJson,
+            request.BolumKonulariJson,
+            request.CalismaBasligi,
+            hedefSureDk,
+            fallbackSceneCount);
+
+        var allScenesOverviewJson = JsonSerializer.Serialize(plannedScenes, new JsonSerializerOptions { WriteIndented = true });
+        var basePlan = request.BazAlinanMevcutVideoPlani.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        var baseScriptPool = basePlan.Length > 26000 ? basePlan.Substring(0, 26000) : basePlan;
+
+        var expandedPlanBuilder = new StringBuilder();
+        expandedPlanBuilder.AppendLine($"# Bölüm {request.BolumNo}: {request.CalismaBasligi}");
+        expandedPlanBuilder.AppendLine($"**Video Tipi:** Uzun Formatlı Stüdyo Analizi / Seri Bölüm {request.BolumNo}/{toplamBolum}");
+        expandedPlanBuilder.AppendLine($"**Hedef Süre:** ~{hedefSureDk} Dakika (~{targetTotalWords} kelime prompter konuşma metni)");
+        if (!string.IsNullOrWhiteSpace(request.Kanca))
+            expandedPlanBuilder.AppendLine($"**Açılış Kancası:** {request.Kanca}");
+        if (!string.IsNullOrWhiteSpace(request.AnaFikir))
+            expandedPlanBuilder.AppendLine($"**Bölüm Ana Tezi:** {request.AnaFikir}");
+        expandedPlanBuilder.AppendLine();
+        expandedPlanBuilder.AppendLine("---");
+        expandedPlanBuilder.AppendLine();
+
+        int batchSize = 2;
+        int totalBatches = (int)Math.Ceiling(plannedScenes.Count / (double)batchSize);
+        string previousClosingContext = "Bu ilk sahne grubudur (Sahne 1). İzleyiciyi selamlama klişesine boğmadan doğrudan güçlü Açılış Kancası ile sahneye gir.";
+
+        for (int bIdx = 0; bIdx < totalBatches; bIdx++)
+        {
+            var batch = plannedScenes.Skip(bIdx * batchSize).Take(batchSize).ToList();
+            int firstNo = batch.First().SahneNo;
+            int lastNo = batch.Last().SahneNo;
+            bool isLast = bIdx == totalBatches - 1;
+            string groupLabel = firstNo == lastNo
+                ? $"Sahne {firstNo} / {plannedScenes.Count}"
+                : $"Sahne {firstNo}-{lastNo} / {plannedScenes.Count}";
+
+            if (onProgress != null)
+            {
+                int pct = 35 + (int)Math.Round(((bIdx + 1.0) / totalBatches) * 45.0);
+                await onProgress($"Bölüm {request.BolumNo}: {groupLabel} — Yeni plan sahneleri ve mevcut metin sentezleniyor...", pct);
+            }
+
+            var batchTargetDesc = FormatTargetBatchInstructions(batch, plannedScenes.Count);
+            int batchMinWords = Math.Max(batch.Count * 200, batch.Sum(s => s.TahminiSureDk) * 135);
+
+            var batchPrompt = BuildAnchoredSceneBatchPrompt(
+                request,
+                authorThesisDirective,
+                groupLabel,
+                batchTargetDesc,
+                batchMinWords,
+                allScenesOverviewJson,
+                previousClosingContext,
+                baseScriptPool,
+                isLastBatch: isLast);
+
+            var rawBatch = await CallLlmAsync(batchPrompt, ct, taskType: "videoplan");
+            var cleanedBatch = CleanSceneBatchOutput(rawBatch, request.CalismaBasligi);
+
+            if (!string.IsNullOrWhiteSpace(cleanedBatch))
+            {
+                expandedPlanBuilder.AppendLine(cleanedBatch.Trim());
+                expandedPlanBuilder.AppendLine();
+                if (!isLast)
+                {
+                    expandedPlanBuilder.AppendLine("---");
+                    expandedPlanBuilder.AppendLine();
+                }
+
+                previousClosingContext = ExtractClosingContextForNextBatch(cleanedBatch, lastNo);
+            }
+        }
+
+        var fullVideoPlan = NormalizeMarkdownOutput(expandedPlanBuilder.ToString(), isVideoPlan: true);
+
+        string devirDefteriJson;
+        try
+        {
+            var summaryForLedger = expandedOzet.Length > 8000 ? expandedOzet.Substring(0, 8000) : expandedOzet;
+            var planTailForLedger = fullVideoPlan.Length > 8000 ? fullVideoPlan.Substring(fullVideoPlan.Length - 8000) : fullVideoPlan;
+            var stage3Prompt = string.Format(
+                PromptTemplates.EpisodeStage3ContinuityLedgerPrompt,
+                request.BolumNo,
+                request.CalismaBasligi,
+                request.BolumNo + 1,
+                summaryForLedger,
+                planTailForLedger);
+
+            var rawLedger = await CallLlmAsync(stage3Prompt, ct, taskType: "videoplan");
+            devirDefteriJson = LlmJson.NormalizeContinuityLedgerJson(
+                rawLedger,
+                request.BolumNo,
+                request.CalismaBasligi,
+                expandedOzet,
+                fullVideoPlan);
+        }
+        catch
+        {
+            devirDefteriJson = LlmJson.NormalizeContinuityLedgerJson(
+                null,
+                request.BolumNo,
+                request.CalismaBasligi,
+                expandedOzet,
+                fullVideoPlan);
+        }
+
+        if (onProgress != null)
+            await onProgress($"Bölüm {request.BolumNo}: Koruyucu genişletme tamamlandı.", 90);
+
+        return (expandedOzet, fullVideoPlan, devirDefteriJson);
+    }
+
+    private static string BuildAnchoredSceneBatchPrompt(
+        SeriesEpisodeGenerationRequest request,
+        string authorThesisDirective,
+        string groupLabel,
+        string batchTargetDesc,
+        int batchMinWords,
+        string allScenesOverviewJson,
+        string previousClosingContext,
+        string existingSavedScriptPool,
+        bool isLastBatch)
+    {
+        var closingRule = isLastBatch
+            ? $"Bu grup bölümün SON sahnesini içermektedir. Kapanış geçişinde YALNIZCA şu kurala uy: {request.SonrakiBolumOzeti}"
+            : "Yalnızca aşağıda belirtilen sahne grubunu yaz; sonraki sahnelere geçme ve bölümü erken kapatma.";
+
+        return $$"""
+            Sen VideoÖzet AI Stüdyosunun Baş Senaryo Editörüsün.
+            Şu anda **Bölüm {{request.BolumNo}}: {{request.CalismaBasligi}}** senaryosunun **{{groupLabel}}** grubunu yazıyorsun.
+
+            İKİLİ TEMEL GÖREV (HEM YENİ PLANA %100 UYUM HEM MEVCUT CÜMLE KORUMASI):
+            1. **ONAYLANMIŞ YENİ PLAN İSKELETİNE (%100 ZORUNLU UYUM):**
+               Aşağıdaki `BU GRUPTA YAZILACAK YENİ PLAN SAHNELERİ` listesinde yer alan sahne numaralarını, sahne başlıklarını (`## Sahne X: ...`), kesin zaman aralıklarını, minimum kelime hedefini (bu grup için toplam en az **{{batchMinWords}} kelime** prompter metni) ve sahnede işlenmesi emredilen **tüm yeni argümanları, düşünürleri, kavramları ve temsilleri** EKSİKSİZ İŞLE! Eski metinle tıpatıp aynı kalıp yeni plandaki eklemeleri veya yeni sahne başlıklarını atlamak KESİNLİKLE YASAKTIR!
+            2. **MEVCUT KAYDEDİLMİŞ METNİN CÜMLELERİNİ VE ÜSLUBUNU KORUYARAK ENTEGRE ET:**
+               Aşağıdaki `KORUNACAK MEVCUT SENARYO HAVUZU (Önceki Versiyondan Kaydedilen Son Metin)` içinde bu sahnenin konularını anlatan mevcut paragraflar ve cümleler varsa; yazarın özenle düzenlediği o cümleleri, akıcı stüdyo dilini ve kurguyu SİLME veya sıfırdan bozma! O mevcut cümleleri sahnenin omurgası olarak koru; yeni planın ve `YENİ VE GÜNCEL KAYNAK KANITLARI ([K#])` bloğunun getirdiği yeni argümanları, ince kelâmî/felsefi ayrımları ve somut örnekleri (dış kaynak konuşmacı/kanal ismi anmadan, kendi özgün stüdyo dilimizle) mevcut paragrafların içine ve devamına pürüzsüz geçişlerle ör!
+            3. {{closingRule}}
+
+            KESİN VE DEĞİŞTİRİLEMEZ MARKDOWN FORMAT ŞABLONU (ASLA DÜZ MAKALE VEYA `## Sonuç` YAZMA!):
+            Bu gruptaki her sahneyi YALNIZCA aşağıdaki şablonda üret (köşeli parantez KULLANMA, iki sahne arasına `---` koy):
+
+            ## Sahne X: Sahne Başlığı
+            **Zaman Aralığı:** MM:SS - MM:SS
+
+            ### 1. Görsel & Edit Yönergesi
+            - **Kamera Açısı & Kadraj:** ...
+            - **Görsel, B-Roll ve Kurgu:** ...
+            - **Metin Grafiği (On-Screen Text):** ...
+            - **Müzik & Ses Efekti:** ...
+
+            ### 2. Prompter Metni (Aynen Okunacak)
+            > İlk konuşma paragrafı...
+            >
+            > İkinci konuşma paragrafı...
+            >
+            > Üçüncü konuşma paragrafı...
+
+            --- BÖLÜM VE YAZAR DİREKTİFLERİ ---
+            {{authorThesisDirective}}
+
+            --- ÖNCEKİ SAHNEDEN DEVİR / GEÇİŞ BAĞLAMI ---
+            {{previousClosingContext}}
+
+            --- TÜM BÖLÜM SAHNE HARİTASI (KONU TEKRARINI ÖNLEMEK İÇİN) ---
+            {{allScenesOverviewJson}}
+
+            --- BU GRUPTA YAZILACAK YENİ PLAN SAHNELERİ (KESİN UYGULANACAK!) ---
+            {{batchTargetDesc}}
+
+            --- KORUNACAK MEVCUT SENARYO HAVUZU (CÜMLE VE ÜSLUBU KORUNACAK BAZ METİN) ---
+            {{existingSavedScriptPool}}
+
+            --- YENİ VE GÜNCEL KAYNAK KANITLARI ([K#]) ---
+            {{request.KaynakBaglamiText}}
+            """;
     }
 
     public async Task<string> GenerateSeriesVideoContentAsync(

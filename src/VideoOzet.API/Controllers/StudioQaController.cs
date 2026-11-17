@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using VideoOzet.Business.Interfaces;
 
 namespace VideoOzet.API.Controllers;
@@ -11,10 +12,12 @@ namespace VideoOzet.API.Controllers;
 public class StudioQaController : ControllerBase
 {
     private readonly IStudioQaService _qaService;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public StudioQaController(IStudioQaService qaService)
+    public StudioQaController(IStudioQaService qaService, IServiceScopeFactory scopeFactory)
     {
         _qaService = qaService;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpGet("history")]
@@ -30,16 +33,46 @@ public class StudioQaController : ControllerBase
         return Ok(list);
     }
 
+    [HttpGet("status")]
+    public IActionResult GetStatus(
+        [FromQuery] Guid? egitimId,
+        [FromQuery] Guid? contentRequestId,
+        [FromQuery] int? bolumNo,
+        [FromQuery] Guid? kaynakId,
+        [FromQuery] string kapsam = "Bolum")
+    {
+        bool isProcessing = _qaService.IsThreadProcessing(egitimId, contentRequestId, bolumNo, kaynakId, kapsam);
+        return Ok(new { isProcessing });
+    }
+
     [HttpPost("ask")]
-    public async Task<IActionResult> Ask([FromBody] StudioQaAskRequestDto dto, CancellationToken ct = default)
+    public async Task<IActionResult> Ask([FromBody] StudioQaAskRequestDto dto, CancellationToken requestAborted = default)
     {
         if (dto == null || string.IsNullOrWhiteSpace(dto.Soru))
             return BadRequest(new { mesaj = "Lütfen bir soru yazın." });
 
+        // Kullanıcı sekme veya sayfa değiştirse bile (requestAborted tetiklense bile)
+        // arka planda 10 dakikalık bağımsız scope ile üretimin kesintisiz tamamlanmasını sağla!
+        var backgroundTask = Task.Run(async () =>
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var scopedQa = scope.ServiceProvider.GetRequiredService<IStudioQaService>();
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            return await scopedQa.AskAsync(dto, cts.Token);
+        });
+
         try
         {
-            var answer = await _qaService.AskAsync(dto, ct);
-            return Ok(answer);
+            var finished = await Task.WhenAny(backgroundTask, Task.Delay(Timeout.Infinite, requestAborted));
+            if (finished == backgroundTask)
+            {
+                var answer = await backgroundTask;
+                return Ok(answer);
+            }
+
+            // İstemci sayfadan ayrıldı; backgroundTask arka planda veritabanına yazmaya devam ediyor
+            _ = backgroundTask.ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+            return Accepted(new { mesaj = "Yanıt arka planda hazırlanmaya devam ediyor." });
         }
         catch (Exception ex)
         {
