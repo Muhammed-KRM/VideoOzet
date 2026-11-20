@@ -199,6 +199,11 @@ export class ApiService {
     return this.http.put<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions/${revizyonNo}${suffix}`, payload);
   }
 
+  deleteEpisodeRevision(id: string, bolumNo: number, revizyonNo: number, planNo?: number | null): Observable<any> {
+    const suffix = planNo != null && planNo > 0 ? `?planNo=${planNo}` : '';
+    return this.http.delete<any>(`${this.baseUrl}/series-requests/${id}/videos/${bolumNo}/revisions/${revizyonNo}${suffix}`);
+  }
+
   // --- Studio Q&A (Çapraz Bölüm, Plan ve Kaynak Soru-Cevap) ---
 
   getStudioQaHistory(params: { egitimId?: string; contentRequestId?: string; bolumNo?: number | null; kaynakId?: string; kapsam: string }): Observable<any[]> {

@@ -60,6 +60,8 @@ export class DashboardComponent implements OnInit {
       error: (err) => {
         console.error('Oluşturma hatası', err);
         this.isCreating = false;
+        const msg = err?.error?.mesaj || err?.error?.detail || err?.error?.title || err?.message || 'Bilinmeyen hata';
+        alert('Eğitim oluşturulamadı: ' + msg);
       }
     });
   }

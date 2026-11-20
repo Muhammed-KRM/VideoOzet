@@ -675,6 +675,59 @@ public class SeriesController : ControllerBase
     }
 
     /// <summary>
+    /// Belirli bir bölüm revizyonunu siler (en az 1 revizyon korunur; aktif revizyon silinirse kalanlardan en sonuncusu aktif yapılır).
+    /// </summary>
+    [HttpDelete("api/series-requests/{id:guid}/videos/{bolumNo:int}/revisions/{revizyonNo:int}")]
+    public async Task<IActionResult> DeleteEpisodeRevision(
+        Guid id,
+        int bolumNo,
+        int revizyonNo,
+        [FromQuery] int? planNo = null,
+        CancellationToken ct = default)
+    {
+        var query = _dbContext.SeriBolumler
+            .Include(b => b.Revizyonlar)
+            .Include(b => b.SeriPlani)
+            .Where(b => b.SeriPlani.ContentRequestId == id && b.BolumNo == bolumNo);
+
+        if (planNo.HasValue)
+            query = query.Where(b => b.SeriPlani.PlanNo == planNo.Value);
+
+        var bolum = await query
+            .OrderByDescending(b => b.SeriPlani.PlanNo)
+            .FirstOrDefaultAsync(ct);
+
+        if (bolum == null)
+            return NotFound(new { Mesaj = "Bölüm bulunamadı." });
+
+        if (bolum.Revizyonlar.Count <= 1)
+            return BadRequest(new { Mesaj = "Bölümdeki son kalan sürüm silinemez." });
+
+        var targetRev = bolum.Revizyonlar.FirstOrDefault(r => r.RevizyonNo == revizyonNo);
+        if (targetRev == null)
+            return NotFound(new { Mesaj = $"Bölüm {bolumNo} için Revizyon {revizyonNo} bulunamadı." });
+
+        if (bolum.AktifRevizyonId == targetRev.Id)
+        {
+            var fallbackRev = bolum.Revizyonlar
+                .Where(r => r.Id != targetRev.Id)
+                .OrderByDescending(r => r.RevizyonNo)
+                .FirstOrDefault();
+            bolum.AktifRevizyonId = fallbackRev?.Id;
+        }
+
+        _dbContext.BolumRevizyonlari.Remove(targetRev);
+        await _dbContext.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            mesaj = $"Revizyon {revizyonNo} silindi.",
+            aktifRevizyonId = bolum.AktifRevizyonId,
+            kalanSayi = bolum.Revizyonlar.Count - 1
+        });
+    }
+
+    /// <summary>
     /// Belirli bir bölüm revizyonu için Kalite Kontrolünü (Re-QC) hem Araştırma Özeti hem Video Planı
     /// ve Yazar Tezi bağlamıyla yeniden çalıştırır.
     /// </summary>

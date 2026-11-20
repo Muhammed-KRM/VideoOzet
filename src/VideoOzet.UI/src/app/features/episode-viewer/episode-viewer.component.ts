@@ -150,6 +150,35 @@ export class EpisodeViewerComponent implements OnInit, OnDestroy {
     }
   }
 
+  deletingRevisionNo: number | null = null;
+
+  deleteRevision(event: Event, rev: any) {
+    event.stopPropagation();
+    if (!rev || this.deletingRevisionNo !== null) return;
+    if ((this.episode?.revizyonlar?.length ?? 0) <= 1) {
+      alert('Bölümdeki son kalan sürüm silinemez.');
+      return;
+    }
+    if (!confirm(`Revizyon ${rev.revizyonNo} sürümünü kalıcı olarak silmek istediğinize emin misiniz?`)) {
+      return;
+    }
+
+    this.deletingRevisionNo = rev.revizyonNo;
+    this.apiService.deleteEpisodeRevision(this.contentRequestId, this.bolumNo, rev.revizyonNo, this.planNo).subscribe({
+      next: () => {
+        this.deletingRevisionNo = null;
+        if (this.seciliRevizyonId === rev.id) {
+          this.seciliRevizyonId = null;
+        }
+        this.loadData();
+      },
+      error: (err) => {
+        this.deletingRevisionNo = null;
+        alert('Sürüm silinemedi: ' + (err?.error?.mesaj || err?.message || 'Bilinmeyen hata'));
+      }
+    });
+  }
+
   resetToLatestRevision() {
     this.seciliRevizyonId = this.episode?.aktifRevizyonId || null;
   }
