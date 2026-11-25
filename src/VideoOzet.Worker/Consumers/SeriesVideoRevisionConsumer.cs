@@ -233,8 +233,10 @@ public class SeriesVideoRevisionConsumer : IConsumer<SeriesVideoRevisionRequeste
                 }
             }
 
+            int revTargetMins = bolum.HedefSureDk > 0 ? bolum.HedefSureDk : 15;
+            var revBudget = VideoOzet.Business.Helpers.PrompterPacingCalculator.CalculateBudget(revTargetMins);
             var yazarTeziText = $"[YAZAR-TEZİ]: {request?.Konu} {request?.EkTonTalimati} {seriPlani?.OnayTalimati}".Trim();
-            var enrichedTopic = $"{bolum.CalismaBasligi} (Hedef Süre: ~{(bolum.HedefSureDk > 0 ? bolum.HedefSureDk : 15)} dk | Bölüm Ana Fikri: {bolum.AnaFikir}) — {yazarTeziText}";
+            var enrichedTopic = $"{bolum.CalismaBasligi} (Hedef Süre: ~{revTargetMins} dk | Hedef Prompter Bütçesi: {revBudget.MinWords}–{revBudget.MaxWords} kelime, ideal ~{revBudget.TargetWords} kelime — ~{VideoOzet.Business.Helpers.PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk | Bölüm Ana Fikri: {bolum.AnaFikir}) — {yazarTeziText}";
             if (!string.IsNullOrWhiteSpace(oncekiBolumDevirNotu))
             {
                 enrichedTopic += $" | [ÖNCEKİ BÖLÜM DEVİR DEFTERİ]: {oncekiBolumDevirNotu}";

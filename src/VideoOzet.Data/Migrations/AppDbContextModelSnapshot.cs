@@ -1094,11 +1094,22 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<int>("AlimModu")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("alim_modu");
+
                     b.Property<string>("Baslik")
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)")
                         .HasColumnName("baslik");
+
+                    b.Property<string>("DisKaynakId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("dis_kaynak_id");
 
                     b.Property<long>("DosyaBoyutu")
                         .ValueGeneratedOnAdd()
@@ -1129,6 +1140,22 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("islem_tamamlanma_tarihi");
 
+                    b.Property<string>("KanalAdi")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("kanal_adi");
+
+                    b.Property<int>("KaynakPlatform")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("kaynak_platform");
+
+                    b.Property<string>("KaynakUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("kaynak_url");
+
                     b.Property<int>("KullanimTuru")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -1156,6 +1183,20 @@ namespace VideoOzet.Data.Migrations
                         .HasColumnType("interval")
                         .HasColumnName("sure");
 
+                    b.Property<string>("ThumbnailUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("thumbnail_url");
+
+                    b.Property<int?>("TranskriptKaliteSkoru")
+                        .HasColumnType("integer")
+                        .HasColumnName("transkript_kalite_skoru");
+
+                    b.Property<string>("TranskriptKaynakNotu")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("transkript_kaynak_notu");
+
                     b.HasKey("Id");
 
                     b.HasIndex("EgitimId")
@@ -1163,6 +1204,9 @@ namespace VideoOzet.Data.Migrations
 
                     b.HasIndex("IslemDurumu")
                         .HasDatabaseName("idx_videolar_durum");
+
+                    b.HasIndex("EgitimId", "DisKaynakId")
+                        .HasDatabaseName("idx_videolar_egitim_diskaynak");
 
                     b.HasIndex("EgitimId", "Sira")
                         .HasDatabaseName("idx_videolar_egitim_sira");

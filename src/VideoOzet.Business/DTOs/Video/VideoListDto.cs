@@ -15,6 +15,15 @@ public class VideoListDto
     public KaynakKullanimTuru KullanimTuru { get; set; } = KaynakKullanimTuru.DogrudanReferans;
     public IndekslemeTuru IndekslemeTuru { get; set; } = IndekslemeTuru.HamKaynak;
     public string? OrijinalDil { get; set; } = "tr";
+    public string? SttModel { get; set; }
+    public int? TranskriptKaliteSkoru { get; set; }
+    public string? TranskriptKaynakNotu { get; set; }
+    public KaynakPlatform KaynakPlatform { get; set; } = KaynakPlatform.Yerel;
+    public string? KaynakUrl { get; set; }
+    public string? DisKaynakId { get; set; }
+    public string? KanalAdi { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public UzaktanAlimModu AlimModu { get; set; } = UzaktanAlimModu.AkilliTranskriptOncelikli;
     public DateTime OlusturmaTarihi { get; set; }
 
     public string? SonAsama { get; set; }

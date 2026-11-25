@@ -55,6 +55,7 @@ public class PipelineStateTracker : IPipelineStateTracker
     public async Task RecordQueuedAsync(Guid itemId, Guid? egitimId, string asama, string mesaj)
     {
         await _cacheService.RemoveAsync($"lock:stt:{itemId}");
+        await _cacheService.RemoveAsync($"lock:download:{itemId}");
         await _cacheService.RemoveAsync(HeartbeatKey(itemId));
 
         var state = new StoredPipelineState
@@ -130,6 +131,7 @@ public class PipelineStateTracker : IPipelineStateTracker
         await _cacheService.RemoveAsync(StateKey(itemId));
         await _cacheService.RemoveAsync(HeartbeatKey(itemId));
         await _cacheService.RemoveAsync($"lock:stt:{itemId}");
+        await _cacheService.RemoveAsync($"lock:download:{itemId}");
     }
 
     public async Task<PipelineItemHealth> EvaluateItemHealthAsync(
@@ -204,6 +206,7 @@ public class PipelineStateTracker : IPipelineStateTracker
         int relevantQueueMessages = CountRelevantQueueMessages(queueCounts, itemType, islemDurumu);
 
         bool isActiveProcessingState =
+            islemDurumu == VideoIslemDurumu.Indiriliyor ||
             islemDurumu == VideoIslemDurumu.SesAyristirmaBasladi ||
             islemDurumu == VideoIslemDurumu.SttBasladi ||
             islemDurumu == VideoIslemDurumu.OzetlemeBasladi ||
@@ -261,10 +264,11 @@ public class PipelineStateTracker : IPipelineStateTracker
 
         return status switch
         {
+            VideoIslemDurumu.Indiriliyor => GetCount("DownloadRemoteVideo"),
             VideoIslemDurumu.SesAyristirmaBasladi or VideoIslemDurumu.SttBasladi => GetCount("ExtractTranscript"),
             VideoIslemDurumu.OzetlemeBasladi => GetCount("SummarizeVideo"),
             VideoIslemDurumu.IndekslemeBasladi => GetCount("IndexSummary"),
-            _ => GetCount("ExtractTranscript") + GetCount("SummarizeVideo") + GetCount("IndexSummary")
+            _ => GetCount("DownloadRemoteVideo") + GetCount("ExtractTranscript") + GetCount("SummarizeVideo") + GetCount("IndexSummary")
         };
     }
 

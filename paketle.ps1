@@ -61,6 +61,7 @@ $StandaloneAppSettings = @"
   "GEMINI_API_KEY": "",
   "GEMINI_MODEL": "gemini-3.8-flash-tiered",
   "GROQ_API_KEY": "",
+  "YOUTUBE_API_KEY": "",
   "STT_PROVIDER": "Auto",
   "Logging": {
     "LogLevel": {
@@ -79,6 +80,60 @@ if (Test-Path $FfmpegSource) {
     $FfmpegDest = Join-Path $AppDir "ffmpeg\bin"
     New-Item -ItemType Directory -Path $FfmpegDest -Force | Out-Null
     Copy-Item -Path "$FfmpegSource\*" -Destination $FfmpegDest -Recurse -Force
+}
+
+# yt-dlp ikilisi cozumleyici (yerel tools/ veya kalici onbellekten al, yoksa resmi release'ten indir)
+$ToolCacheDir = Join-Path $env:LOCALAPPDATA "VideoOzet\tools_cache"
+function Resolve-YtDlpBinary {
+    param(
+        [string[]]$CandidatePaths,
+        [string]$CacheFileName,
+        [string]$DownloadUrl
+    )
+    foreach ($candidate in $CandidatePaths) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    if (-not (Test-Path $ToolCacheDir)) {
+        New-Item -ItemType Directory -Path $ToolCacheDir -Force | Out-Null
+    }
+    $cachedPath = Join-Path $ToolCacheDir $CacheFileName
+    if (Test-Path $cachedPath) {
+        return $cachedPath
+    }
+
+    Write-Host "      -> $CacheFileName indiriliyor ($DownloadUrl)..." -ForegroundColor Yellow
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $cachedPath -UseBasicParsing -TimeoutSec 120
+        if (Test-Path $cachedPath) {
+            return $cachedPath
+        }
+    }
+    catch {
+        Write-Warning "$CacheFileName indirilemedi: $($_.Exception.Message)"
+        if (Test-Path $cachedPath) { Remove-Item -Force $cachedPath -ErrorAction SilentlyContinue }
+    }
+    return $null
+}
+
+$WinYtDlpSource = Resolve-YtDlpBinary `
+    -CandidatePaths @(
+        (Join-Path $RootDir "tools\yt-dlp.exe"),
+        (Join-Path $RootDir "tools\win-x64\yt-dlp.exe")
+    ) `
+    -CacheFileName "yt-dlp.exe" `
+    -DownloadUrl "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+
+if ($WinYtDlpSource) {
+    $WinToolsDest = Join-Path $AppDir "tools"
+    New-Item -ItemType Directory -Path $WinToolsDest -Force | Out-Null
+    Copy-Item -Path $WinYtDlpSource -Destination (Join-Path $WinToolsDest "yt-dlp.exe") -Force
+    Write-Host "      -> Windows yt-dlp.exe pakete eklendi: $WinYtDlpSource" -ForegroundColor Green
+} else {
+    Write-Warning "Windows yt-dlp.exe bulunamadi/indirilemedi. Paket tools\yt-dlp.exe olmadan olusturulacak."
 }
 
 # 5. Inno Setup ile VideoOzet_Setup.exe kurulum sihirbazını derle
@@ -143,11 +198,14 @@ DIR="`$( cd "`$( dirname "`${BASH_SOURCE[0]}" )" && pwd )"
 APP_DIR="`$DIR/App"
 cd "`$APP_DIR"
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:`$APP_DIR/ffmpeg/bin:`$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:`$APP_DIR/ffmpeg/bin:`$APP_DIR/tools:`$PATH"
 
 chmod +x "`$APP_DIR/VideoOzet.API" 2>/dev/null || true
 if [ -d "`$APP_DIR/ffmpeg/bin" ]; then
     chmod +x "`$APP_DIR/ffmpeg/bin/"* 2>/dev/null || true
+fi
+if [ -d "`$APP_DIR/tools" ]; then
+    chmod +x "`$APP_DIR/tools/"* 2>/dev/null || true
 fi
 
 if lsof -i :5050 >/dev/null 2>&1; then
@@ -207,10 +265,13 @@ APP_DIR="`$TARGET_BUNDLE/Contents/MacOS/App"
 xattr -cr "`$TARGET_BUNDLE" 2>/dev/null || true
 chmod +x "`$TARGET_BUNDLE/Contents/MacOS/VideoOzetLauncher" 2>/dev/null || true
 chmod +x "`$APP_DIR/VideoOzet.API" 2>/dev/null || true
+if [ -d "`$APP_DIR/tools" ]; then
+    chmod +x "`$APP_DIR/tools/"* 2>/dev/null || true
+fi
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:`$APP_DIR/ffmpeg/bin:`$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:`$APP_DIR/ffmpeg/bin:`$APP_DIR/tools:`$PATH"
 
-echo "[2/4] FFmpeg (Video -> Ses ayristirici) kontrol ediliyor..."
+echo "[2/4] FFmpeg ve yt-dlp araclari kontrol ediliyor..."
 if command -v ffmpeg >/dev/null 2>&1 || [ -f "`$APP_DIR/ffmpeg/bin/ffmpeg" ]; then
     echo "      -> FFmpeg hazir."
 else
@@ -225,6 +286,17 @@ else
         rm -f /tmp/ffmpeg_mac.zip /tmp/ffprobe_mac.zip 2>/dev/null || true
         xattr -cr "`$APP_DIR/ffmpeg/bin" 2>/dev/null || true
     fi
+fi
+
+if [ -f "`$APP_DIR/tools/yt-dlp" ]; then
+    chmod +x "`$APP_DIR/tools/yt-dlp" 2>/dev/null || true
+    xattr -cr "`$APP_DIR/tools" 2>/dev/null || true
+    echo "      -> yt-dlp hazir."
+elif ! command -v yt-dlp >/dev/null 2>&1; then
+    echo "      -> yt-dlp indiriliyor..."
+    mkdir -p "`$APP_DIR/tools"
+    curl -L -s "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "`$APP_DIR/tools/yt-dlp" && chmod +x "`$APP_DIR/tools/yt-dlp" || true
+    xattr -cr "`$APP_DIR/tools" 2>/dev/null || true
 fi
 
 echo "[3/4] Bu Mac bilgisayarin donanim kilidi (HWID) muhurleniyor..."
@@ -269,6 +341,7 @@ with zipfile.ZipFile(dst_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslev
                 or rel.endswith("/VideoOzet.API")
                 or rel.endswith("/VideoOzet.Worker")
                 or "/ffmpeg/bin/" in rel
+                or "/tools/" in rel
             )
             zi = zipfile.ZipInfo(rel)
             zi.create_system = 3  # Unix (macOS Archive Utility izinleri okumasi icin sart!)
@@ -308,6 +381,24 @@ foreach ($mac in $MacTargets) {
     $macDevCfg = Join-Path $macAppDir "appsettings.Development.json"
     if (Test-Path $macDevCfg) { Remove-Item -Force $macDevCfg }
     [System.IO.File]::WriteAllText((Join-Path $macAppDir "appsettings.json"), $StandaloneAppSettings, (New-Object System.Text.UTF8Encoding($false)))
+
+    $MacYtDlpSource = Resolve-YtDlpBinary `
+        -CandidatePaths @(
+            (Join-Path $RootDir "tools\$rid\yt-dlp"),
+            (Join-Path $RootDir "tools\mac\yt-dlp"),
+            (Join-Path $RootDir "tools\yt-dlp_macos")
+        ) `
+        -CacheFileName "yt-dlp_macos" `
+        -DownloadUrl "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+
+    if ($MacYtDlpSource) {
+        $MacToolsDest = Join-Path $macAppDir "tools"
+        New-Item -ItemType Directory -Path $MacToolsDest -Force | Out-Null
+        Copy-Item -Path $MacYtDlpSource -Destination (Join-Path $MacToolsDest "yt-dlp") -Force
+        Write-Host "      -> macOS ($rid) tools/yt-dlp eklendi: $MacYtDlpSource" -ForegroundColor Green
+    } else {
+        Write-Warning "macOS ($rid) yt-dlp bulunamadi/indirilemedi; Kurulum_ve_Baslat.command acilista indirecek."
+    }
 
     [System.IO.File]::WriteAllText((Join-Path $contentsDir "Info.plist"), $InfoPlist, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::WriteAllText((Join-Path $macOsDir "VideoOzetLauncher"), $MacLauncher, (New-Object System.Text.UTF8Encoding($false)))

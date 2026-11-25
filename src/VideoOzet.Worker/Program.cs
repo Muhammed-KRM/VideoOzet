@@ -58,6 +58,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddBusinessLayer(configuration, mt =>
         {
             // Register Consumers
+            mt.AddConsumer<DownloadRemoteVideoConsumer>(typeof(DownloadRemoteVideoConsumerDefinition));
             mt.AddConsumer<ExtractTranscriptConsumer>(typeof(ExtractTranscriptConsumerDefinition));
             mt.AddConsumer<SummarizeVideoConsumer>(typeof(SummarizeVideoConsumerDefinition));
             mt.AddConsumer<IndexSummaryConsumer>(typeof(IndexSummaryConsumerDefinition));

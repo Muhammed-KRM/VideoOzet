@@ -2,16 +2,22 @@ import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService } from '../../core/services/api.service';
 import { firstValueFrom } from 'rxjs';
+import { YoutubeBrowserComponent } from '../remote-import/youtube-browser.component';
+import { UrlImportComponent } from '../remote-import/url-import.component';
 
 @Component({
   selector: 'app-video-upload',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, YoutubeBrowserComponent, UrlImportComponent],
   templateUrl: './video-upload.component.html'
 })
 export class VideoUploadComponent {
   @Input() egitimId!: string;
   @Output() uploadComplete = new EventEmitter<void>();
+
+  activeTab: 'file' | 'youtube' | 'direct-url' = 'file';
+  youtubeSubMode: 'search' | 'link' = 'search';
+
   isDragging = false;
   isUploading = false;
   
@@ -109,5 +115,9 @@ export class VideoUploadComponent {
     if (failCount > 0) {
       alert(`${successCount} dosya yüklendi. ${failCount} dosya yüklenemedi.`);
     }
+  }
+
+  onRemoteImportComplete(): void {
+    this.uploadComplete.emit();
   }
 }

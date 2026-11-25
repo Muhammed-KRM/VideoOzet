@@ -123,7 +123,8 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             AntigravityVideoPlanModel = defaultProxyPlan,
             AntigravityProxyQcModel = defaultProxyQc,
             AntigravityQcModel = defaultProxyQc,
-            AllowFallbackToSecondaryProvider = bool.TryParse(_config["AI_ALLOW_FALLBACK"], out var allowFallback) && allowFallback
+            AllowFallbackToSecondaryProvider = bool.TryParse(_config["AI_ALLOW_FALLBACK"], out var allowFallback) && allowFallback,
+            YouTubeApiKey = (_config["YOUTUBE_API_KEY"] ?? _config["YouTube:ApiKey"] ?? "").Trim()
         };
 
         NormalizeAndSyncDto(defaultSettings);
@@ -197,7 +198,8 @@ public class AiProviderSettingsService : IAiProviderSettingsService
             AntigravityVideoPlanModel = resolvedProxyPlan,
             AntigravityProxyQcModel = resolvedProxyQc,
             AntigravityQcModel = resolvedProxyQc,
-            AllowFallbackToSecondaryProvider = settings.AllowFallbackToSecondaryProvider
+            AllowFallbackToSecondaryProvider = settings.AllowFallbackToSecondaryProvider,
+            YouTubeApiKey = (settings.YouTubeApiKey ?? "").Trim()
         };
 
         NormalizeAndSyncDto(updated);
@@ -259,6 +261,7 @@ public class AiProviderSettingsService : IAiProviderSettingsService
         if (string.IsNullOrWhiteSpace(dto.GroqQcModel))
             dto.GroqQcModel = dto.GroqVideoPlanModel;
 
+        dto.YouTubeApiKey = (dto.YouTubeApiKey ?? "").Trim();
         dto.SyncAntigravityModelAliases(dto.AntigravityProxyModel);
     }
 

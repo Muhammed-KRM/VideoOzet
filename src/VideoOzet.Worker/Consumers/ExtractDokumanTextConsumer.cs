@@ -128,7 +128,7 @@ public class ExtractDokumanTextConsumer : IConsumer<DocumentUploadedEvent>
             string orijinalDil = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.DetectLanguageReliably(extractedText, null, "tr");
             string? usedLlmModel = null;
 
-            if (_geminiProvider != null && extractedText.Length > 100)
+            if (dokuman.IndekslemeTuru == IndekslemeTuru.OzetKaynak && _geminiProvider != null && extractedText.Length > 100)
             {
                 try
                 {

@@ -50,38 +50,11 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
 
         try
         {
+            Video? videoEntity = null;
             if (_context.Videolar != null)
             {
-                var videoStart = await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken);
-                if (videoStart != null && videoStart.IslemDurumu != VideoIslemDurumu.Tamamlandi)
-                {
-                    videoStart.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
-                    await _context.SaveChangesAsync(context.CancellationToken);
-                }
+                videoEntity = await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken);
             }
-
-            var startEvt = new PipelineProgressEvent
-            {
-                VideoId = evt.VideoId,
-                EgitimId = evt.EgitimId,
-                Asama = "Indeksleme",
-                Durum = "Basladi",
-                Mesaj = "Özet vektörlere dönüştürülüp veritabanına kaydediliyor...",
-                Yuzde = 90
-            };
-            if (_stateTracker != null) await _stateTracker.RecordProgressAsync(startEvt);
-            await context.Publish(startEvt, context.CancellationToken);
-
-            var summary = await _context.VideoSummaries.FirstOrDefaultAsync(s => s.Id == evt.SummaryId, context.CancellationToken);
-            if (summary == null)
-            {
-                _logger.LogWarning("Summary not found: {SummaryId}", evt.SummaryId);
-                return;
-            }
-
-            var textToIndex = !string.IsNullOrWhiteSpace(summary.CevrilmisOzetMetni)
-                ? summary.CevrilmisOzetMetni
-                : summary.OzetMetni;
 
             VideoTranscript? transcript = null;
             if (_context.VideoTranscripts != null)
@@ -90,11 +63,46 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
                     .FirstOrDefaultAsync(t => t.VideoId == evt.VideoId, context.CancellationToken);
             }
 
-            Video? videoEntity = null;
-            if (_context.Videolar != null)
+            VideoSummary? summary = null;
+            if (evt.SummaryId != Guid.Empty && _context.VideoSummaries != null)
             {
-                videoEntity = await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken);
+                summary = await _context.VideoSummaries.FirstOrDefaultAsync(s => s.Id == evt.SummaryId, context.CancellationToken);
             }
+
+            bool useFullTranscript = videoEntity?.IndekslemeTuru != IndekslemeTuru.OzetKaynak;
+            bool hasRawTranscript = transcript != null && !string.IsNullOrWhiteSpace(transcript.HamMetin);
+
+            if (summary == null && !(useFullTranscript && hasRawTranscript))
+            {
+                _logger.LogWarning("Summary not found: {SummaryId}", evt.SummaryId);
+                return;
+            }
+
+            if (videoEntity != null && videoEntity.IslemDurumu != VideoIslemDurumu.Tamamlandi)
+            {
+                videoEntity.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
+                await _context.SaveChangesAsync(context.CancellationToken);
+            }
+
+            var startEvt = new PipelineProgressEvent
+            {
+                VideoId = evt.VideoId,
+                EgitimId = evt.EgitimId,
+                Asama = "Indeksleme",
+                Durum = "Basladi",
+                Mesaj = useFullTranscript && hasRawTranscript
+                    ? "Ham transkript vektörlere dönüştürülüp veritabanına kaydediliyor..."
+                    : "Özet vektörlere dönüştürülüp veritabanına kaydediliyor...",
+                Yuzde = 90
+            };
+            if (_stateTracker != null) await _stateTracker.RecordProgressAsync(startEvt);
+            await context.Publish(startEvt, context.CancellationToken);
+
+            var textToIndex = summary != null
+                ? (!string.IsNullOrWhiteSpace(summary.CevrilmisOzetMetni)
+                    ? summary.CevrilmisOzetMetni
+                    : summary.OzetMetni)
+                : null;
 
             var videoTitle = !string.IsNullOrWhiteSpace(videoEntity?.Baslik) ? videoEntity!.Baslik : $"Video-{evt.VideoId}";
             var safeTitle = videoTitle.Length > 300 ? videoTitle[..300] : videoTitle;
@@ -105,8 +113,7 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
 
             var documents = new List<VideoChunkDocument>();
 
-            bool useFullTranscript = videoEntity?.IndekslemeTuru != IndekslemeTuru.OzetKaynak;
-            if (useFullTranscript && _contextualChunker != null && transcript != null && !string.IsNullOrWhiteSpace(transcript.HamMetin))
+            if (useFullTranscript && _contextualChunker != null && hasRawTranscript)
             {
                 var transcriptOptions = new ContextualChunkOptions(
                     KaynakBaslik: videoTitle,
@@ -118,7 +125,7 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
                     VideoDurationSeconds: videoDurationSeconds);
 
                 var contextualChunks = _contextualChunker.ChunkTranscript(
-                    transcript.HamMetin,
+                    transcript!.HamMetin,
                     transcript.ZamanDamgalari,
                     transcriptOptions).ToList();
 
@@ -174,7 +181,13 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
             }
             else
             {
-                var chunks = _chunker.ChunkText(textToIndex);
+                var fallbackSourceText = !string.IsNullOrWhiteSpace(textToIndex) ? textToIndex : transcript?.HamMetin;
+                if (string.IsNullOrWhiteSpace(fallbackSourceText))
+                {
+                    throw new Exception("İndekslenecek metin bulunamadı.");
+                }
+
+                var chunks = _chunker.ChunkText(fallbackSourceText);
 
                 if (chunks.Count == 0)
                 {
@@ -182,6 +195,7 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
                 }
 
                 var embeddings = await _embeddingProvider.GenerateEmbeddingsAsync(chunks);
+                var fallbackChunkTipi = summary == null && useFullTranscript ? ChunkTipi.Transkript : ChunkTipi.OzetKart;
 
                 for (int i = 0; i < chunks.Count; i++)
                 {
@@ -192,7 +206,7 @@ public class IndexSummaryConsumer : IConsumer<SummaryReadyEvent>
                             VideoId = evt.VideoId,
                             EgitimId = evt.EgitimId,
                             ChunkIndex = i,
-                            ChunkTipi = ChunkTipi.OzetKart,
+                            ChunkTipi = fallbackChunkTipi,
                             KaynakBaslik = safeTitle,
                             KaynakDil = safeLang,
                             KullanimTuru = usageMode,

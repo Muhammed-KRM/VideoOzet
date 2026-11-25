@@ -99,7 +99,7 @@ public static class PromptTemplates
         2. [K#] OLGUSAL DOĞRULUK: Prompter metinlerinde öne sürülen tüm olgular, vakalar, düşünürlere ait görüşler ve sayısal ifadeler AŞAĞIDAKİ DOĞRULANMIŞ ARAŞTIRMA ÖZETİ ve [K#] KAYNAKLARI ile %100 uyumlu olmalıdır.
         3. Araştırma özetinde veya kaynaklarda geçmeyen HİÇBİR yüzde ("%"), oran, istatistik, anket veya hayali deney ekleme!
         4. [Mod: DOĞRUDAN REFERANS] olarak işaretli kaynaklardaki kavramları, örnekleri ve alıntıları prompter metnine doğrudan ve doğal üslupla işleyebilirsin; [Mod: DIŞ KAYNAK] parçalarından sadece kavramsal argüman ve neden-sonuç mantığını alıp tamamen özgün cümlelerle yeniden kurgula.
-        5. Düşünürlerin veya kuramların yalnızca adını anıp 1-2 cümleyle geçiştirme; her sahnede en az 3-5 dolu paragraf prompter metni yazarak argümanları neden-sonuç zinciri ve örneklerle sindire sindire anlat.
+        5. Düşünürlerin veya kuramların yalnızca adını anıp 1-2 cümleyle geçiştirme; ancak Türkçe stüdyo prompter okuma temposunun **dakikada ~105 kelime** olduğunu unutma ve yukarıdaki `Hedef Süre / Uzunluk` satırında verilen kelime aralığına ve özellikle **ÜST SINIRA %100 uy**. Her sahnenin paragraf sayısını o sahnenin dakikasına göre ayarla (1 dk: 1–2 paragraf, 2–3 dk: 2–3 paragraf, 4+ dk: 3–4 paragraf).
 
         DOĞRULANMIŞ ARAŞTIRMA ÖZETİ:
         {3}
@@ -110,7 +110,7 @@ public static class PromptTemplates
         ÖNEMLİ FORMAT VE BÜTÜNLÜK KURALLARI:
         1. Kesinlikle düşünme süreci ("<think>", "Thinking Process:" vb.) veya başlangıç sohbeti YAZMA.
         2. Dokümanın EN BAŞINA doğrudan "# {0} - Video Çekim ve Kurgu Planı" ana başlığı ile başla.
-        3. Her sahnede mutlaka `## Sahne X: Başlık`, `**Zaman Aralığı:**`, `### 1. [Görsel & Edit Yönergesi]` (Kamera, B-Roll, Metin Grafiği, Müzik/Ses) ve `### 2. [Prompter Metni (Aynen Okunacak)]` (`> "..."` blokları halinde en az 3-5 dolu paragraf) yer alsın; açılıştan Kapanış / Özet sahnesine kadar kesintisiz tamamla.
+        3. Her sahnede mutlaka `## Sahne X: Başlık`, `**Zaman Aralığı:**`, `### 1. [Görsel & Edit Yönergesi]` (Kamera, B-Roll, Metin Grafiği, Müzik/Ses) ve `### 2. [Prompter Metni (Aynen Okunacak)]` (`> "..."` blokları halinde sahne süresine ve hedef kelime bütçesine uygun 1–4 dengeli paragraf) yer alsın; açılıştan Kapanış / Özet sahnesine kadar kesintisiz tamamla.
         """;
 
     public const string SynthesisVideoPlanPrompt = """
@@ -128,8 +128,8 @@ public static class PromptTemplates
              * Kaynaktan yalnızca kavramsal mantığı, argümanları, neden-sonuç zincirini ve ana fikri soyutlayarak al.
              * Konuşmacının/yazarın cümlelerini, kelime dizilimlerini, kendine has benzetme/metaforlarını ve sahne/anlatım sırasını KESİNLİKLE kopyalama.
              * Bu argüman ve mantıkları tamamen kendi pedagojik akışımız içinde, prompter metninde sıfırdan kendi özgün cümlelerinle ve yeni somut örneklerle yeniden inşa et.
-        3. Her sahne için [Prompter Metni (Aynen Okunacak)] kısmı KESİNLİKLE 2-3 cümlelik kısa bir özet OLMAYACAK; sunucunun kameraya karşı kelimesi kelimesine okuyacağı EN AZ 3-5 DOLU PARAGRAF (dakika başı ~140 kelime konuşma temposuna uygun) akıcı stüdyo konuşma metni olacaktır. Her paragrafın arasına mutlaka boş bir `>` satırı koy ki paragraflar birbirine yapışmasın.
-        4. Video planını KESİNLİKLE yarıda bırakma! Konunun tüm alt başlıklarını kapsayacak şekilde EN AZ 6 SAHNE (Sahne 1: Giriş, Sahne 2-5+: Gelişme Sahneleri ve son sahne olarak Kapanış / Sonuç Sahnesi) oluştur.
+        3. Her sahne için [Prompter Metni (Aynen Okunacak)] kısmı KESİNLİKLE 2-3 cümlelik kısa bir özet OLMAYACAK; ancak **~105 kelime/dk Türkçe stüdyo okuma temposuna uygun**, `Hedef Süre / Uzunluk` satırında verilen kelime aralığının **ÜST SINIRINI AŞMAYAN**, sahne süresine orantılı (1 dk: 1–2 paragraf, 2–3 dk: 2–3 paragraf, 4+ dk: 3–4 paragraf) akıcı ve özlü stüdyo konuşma metni olacaktır. Her paragrafın arasına mutlaka boş bir `>` satırı koy ki paragraflar birbirine yapışmasın.
+        4. Video planını KESİNLİKLE yarıda bırakma! Konunun tüm alt başlıklarını kapsayacak şekilde hedef süreye uygun sahne sayısı (ör. 5–8 dk: 3–4 sahne, 10–15 dk: 4–5 sahne, 16+ dk: 6+ sahne; ilk sahne Giriş, ara sahneler Gelişme, son sahne Kapanış/Sonuç) oluştur.
         5. Yanıtını KESİNLİKLE aşağıdaki Markdown şablonuna birebir uyarak (JSON sarmalaması olmadan) döndür:
 
         # {0}
@@ -473,7 +473,7 @@ public static class PromptTemplates
         - Bölüm Ana Tezi: {4}
         - Kesin Hedef Süre: **{5} Dakika**
         - Hedef Sahne Sayısı: **{6} Sahne** (`sum(TahminiSureDk) == {5}` dakika olmak ZORUNDADIR!)
-        - Toplam Prompter Kelime Bütçesi: **~{7} kelime** (dakika başı ~140-150 kelime stüdyo konuşma temposu)
+        - Toplam Prompter Kelime Bütçesi: **{7}** (dakika başı ~105 kelime Türkçe stüdyo konuşma temposu — üst sınırı aşmayacak dengeli sahne dağılımı planla)
         - Hedef Kitle: {8}
 
         BÖLÜM ALT KONULARI VE PLANLANAN SAHNE İSKELETİ:
@@ -540,8 +540,8 @@ public static class PromptTemplates
         [K#] KAYNAK KANITLARI:
         {11}
 
-        İHLAL EDİLEMEZ YAZIM VE DERİNLİK KURALLARI:
-        1. GERÇEK STÜDYO HACİM ZORUNLULUĞU: Bu çağrıda yazacağın sahnelerin `[Prompter Metni (Aynen Okunacak)]` bölümleri toplamda **EN AZ {12} KELİME** (dakika başı ~140-150 kelime konuşma temposu) ve **HER SAHNEDE EN AZ 3–5 DOLU, UZUN PARAGRAF** olmalıdır!
+        İHLAL EDİLEMEZ YAZIM VE SÜRE BÜTÇESİ KURALLARI:
+        1. KESİN SÜRE VE KELİME BÜTÇESİ ZORUNLULUĞU (ALT VE ÜST SINIR — İHLAL EDİLEMEZ!): Bu çağrıda yazacağın sahnelerin `[Prompter Metni (Aynen Okunacak)]` bölümleri toplamda **{12}** aralığında (dakika başı ~105 kelime Türkçe stüdyo konuşma temposu) OLMALIDIR! Üst sınırı KESİNLİKLE AŞMA — metni tekrarlayan cümlelerle, dolgu girişlerle veya gereksiz uzun paragraflarla şişirmek YASAKTIR! Her sahnenin paragraf sayısını o sahnenin dakikasına ve bütçesine göre ayarla (1 dk: 1–2 paragraf, 2 dk: 2 paragraf, 3 dk: 2–3 paragraf, 4+ dk: 3–4 paragraf).
         2. İSMEN GEÇİŞTİRME YASAĞI: Düşünürlerin, kuramcıların veya kavramların yalnızca adını anıp 2 cümleyle geçmek KESİNLİKLE YASAKTIR! Her düşünürün/yaklaşımın:
            - Hangi temel soruya veya krize yanıt aradığını,
            - Argümanının **neden-sonuç mantığını** adım adım nasıl kurduğunu,
@@ -565,13 +565,11 @@ public static class PromptTemplates
         - **Müzik & Ses Efekti:** (Sahnenin duygusal/entelektüel temposuna uygun müzik ve geçiş ses tasarımı)
 
         ### 2. [Prompter Metni (Aynen Okunacak)]
-        > "(1. Dolu Paragraf: Sahneye organik geçiş, temel sorunun/iddianın kurulması — en az 4-6 cümle...)"
+        > "(1. Paragraf: Sahneye organik geçiş ve temel sorunun/argümanın net anlatımı — sahne kelime bütçesine uygun uzunlukta...)"
         >
-        > "(2. Dolu Paragraf: Düşünürlerin/kaynakların argümanlarının neden-sonuç zinciriyle derinlemesine açılımı — en az 5-7 cümle...)"
+        > "(2. Paragraf: Düşünürlerin/kaynakların neden-sonuç zinciri ve somut örnek/vaka ile açıklanması — tekrarsız ve akıcı...)"
         >
-        > "(3. Dolu Paragraf: Somut vaka, tarihsel/güncel örnek veya karşılaştırmalı analiz — en az 5-7 cümle...)"
-        >
-        > "(4. Dolu Paragraf: [YAZAR-TEZİ] perspektifiyle kavramsal sentez, derin yorum ve bir sonraki sahneye merak uyandıran geçiş — en az 4-6 cümle...)"
+        > "(Varsa 3. Paragraf — yalnızca 3+ dk sahnelerde: [YAZAR-TEZİ] perspektifiyle sentez ve sonraki sahneye geçiş...)"
         """;
 
     public const string EpisodeStage3ContinuityLedgerPrompt = """
@@ -677,5 +675,27 @@ public static class PromptTemplates
         {1}
 
         Lütfen SADECE çevrilmiş Türkçe metni döndür. Başka hiçbir giriş, önsöz veya açıklama ekleme.
+        """;
+
+    public const string EpisodeSceneBatchTightenPrompt = """
+        Sen VideoÖzet AI Stüdyosunun Baş Senaryo Editörüsün.
+        Aşağıdaki **{0}** metninin `[Prompter Metni (Aynen Okunacak)]` bölümleri şu anda yaklaşık **{1} kelime** çıkmıştır ve belirlenen süre bütçesini ciddi şekilde aşmaktadır.
+
+        HEDEF SÜRE VE KELİME BÜTÇESİ (KESİN ARALIK):
+        - Minimum: **{2} kelime**
+        - İdeal Hedef: **~{3} kelime** (~105 kelime/dk Türkçe stüdyo konuşma temposu)
+        - Maksimum Üst Sınır: **{4} kelime** (KESİNLİKLE AŞILMAYACAK!)
+
+        SAHNE DAĞILIMI VE BÜTÇELERİ:
+        {5}
+
+        MUTLAK SIKIŞTIRMA KURALLARI:
+        1. Tüm `## Sahne X:` başlıklarını, `**Zaman Aralığı:**` satırlarını ve `### 1. [Görsel & Edit Yönergesi]` bloklarını AYNEN koru.
+        2. Geçen tüm düşünürleri, olgusal kanıtları ve `[YAZAR-TEZİ]` ana fikrini silmeden koru; YALNIZCA `### 2. [Prompter Metni (Aynen Okunacak)]` (`>`) bloklarındaki tekrar eden cümleleri, laf kalabalığını ve dolgu ifadeleri sıkılaştırarak daha vurucu ve özlü bir stüdyo konuşma metnine dönüştür.
+        3. Her paragraf `>` ile başlamalı, paragraflar arasında boş `>` satırı korunmalı ve toplam prompter kelime sayısı kesinlikle **{2}–{4} kelime** (ideal ~**{3} kelime**) aralığında olmalıdır.
+        4. Başka hiçbir açıklama, ön söz veya JSON ekleme; doğrudan sıkılaştırılmış tam Markdown metnini döndür.
+
+        MEVCUT METİN:
+        {6}
         """;
 }

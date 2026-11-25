@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
 using MassTransit;
@@ -10,6 +13,7 @@ using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
 using VideoOzet.Business.Events;
 using VideoOzet.Business.Exceptions;
+using VideoOzet.Business.Infrastructure.Media;
 using VideoOzet.Business.Interfaces;
 using VideoOzet.Data.Context;
 using VideoOzet.Data.Entities;
@@ -30,6 +34,7 @@ public class VideoManager : IVideoService
     private readonly ILogger<VideoManager> _logger;
     private readonly ICacheService? _cacheService;
     private readonly IPipelineStateTracker? _stateTracker;
+    private readonly IRemoteMediaService? _remoteMediaService;
 
     public VideoManager(
         IRepository<Video> videoRepository,
@@ -40,8 +45,9 @@ public class VideoManager : IVideoService
         IMapper mapper,
         ILogger<VideoManager> logger,
         ICacheService? cacheService = null,
-        IPipelineStateTracker? stateTracker = null)
-        : this(null!, videoRepository, egitimRepository, transcriptRepository, fileStorageService, publishEndpoint, mapper, logger, cacheService, stateTracker)
+        IPipelineStateTracker? stateTracker = null,
+        IRemoteMediaService? remoteMediaService = null)
+        : this(null!, videoRepository, egitimRepository, transcriptRepository, fileStorageService, publishEndpoint, mapper, logger, cacheService, stateTracker, remoteMediaService)
     {
     }
 
@@ -55,7 +61,8 @@ public class VideoManager : IVideoService
         IMapper mapper,
         ILogger<VideoManager> logger,
         ICacheService? cacheService = null,
-        IPipelineStateTracker? stateTracker = null)
+        IPipelineStateTracker? stateTracker = null,
+        IRemoteMediaService? remoteMediaService = null)
     {
         _dbContext = dbContext;
         _videoRepository = videoRepository;
@@ -67,6 +74,7 @@ public class VideoManager : IVideoService
         _logger = logger;
         _cacheService = cacheService;
         _stateTracker = stateTracker;
+        _remoteMediaService = remoteMediaService;
     }
 
     public async Task<VideoListDto> UploadVideoAsync(VideoUploadDto dto)
@@ -239,6 +247,7 @@ public class VideoManager : IVideoService
         if (_cacheService != null)
         {
             await _cacheService.RemoveAsync($"lock:stt:{id}");
+            await _cacheService.RemoveAsync($"lock:download:{id}");
         }
 
         VideoSummary? summary = null;
@@ -274,6 +283,28 @@ public class VideoManager : IVideoService
 
         if (transcript != null && !string.IsNullOrWhiteSpace(transcript.HamMetin))
         {
+            if (video.IndekslemeTuru == IndekslemeTuru.HamKaynak)
+            {
+                video.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
+                _videoRepository.Update(video);
+                await _videoRepository.SaveChangesAsync();
+
+                if (_stateTracker != null)
+                {
+                    await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Indeksleme", "Ham transkript hazır, doğrudan vektör indeksleme kuyruğuna alındı...");
+                }
+
+                await _publishEndpoint.Publish(new SummaryReadyEvent
+                {
+                    VideoId = video.Id,
+                    EgitimId = video.EgitimId,
+                    SummaryId = Guid.Empty
+                });
+
+                _logger.LogInformation("Retry triggered directly to Index stage (HamKaynak) for Video {VideoId}", video.Id);
+                return;
+            }
+
             video.IslemDurumu = VideoIslemDurumu.SttTamamlandi;
             _videoRepository.Update(video);
             await _videoRepository.SaveChangesAsync();
@@ -291,6 +322,29 @@ public class VideoManager : IVideoService
             });
 
             _logger.LogInformation("Retry triggered from Summarize stage (Transcript exists) for Video {VideoId}", video.Id);
+        }
+        else if (string.IsNullOrWhiteSpace(video.DosyaYolu) && !string.IsNullOrWhiteSpace(video.KaynakUrl))
+        {
+            video.IslemDurumu = VideoIslemDurumu.Indiriliyor;
+            _videoRepository.Update(video);
+            await _videoRepository.SaveChangesAsync();
+
+            if (_stateTracker != null)
+            {
+                await _stateTracker.RecordQueuedAsync(video.Id, video.EgitimId, "Uzaktan İndirme", "Yeniden başlatıldı, uzaktan medya kuyruğuna alındı...");
+            }
+
+            await _publishEndpoint.Publish(new RemoteVideoRequestedEvent
+            {
+                VideoId = video.Id,
+                EgitimId = video.EgitimId,
+                KaynakUrl = video.KaynakUrl,
+                KaynakPlatform = video.KaynakPlatform,
+                AlimModu = video.AlimModu,
+                TercihEdilenDil = "tr"
+            });
+
+            _logger.LogInformation("Retry triggered from remote download for Video {VideoId}", video.Id);
         }
         else
         {
@@ -357,14 +411,14 @@ public class VideoManager : IVideoService
             if (video.Transcript == null || string.IsNullOrWhiteSpace(video.Transcript.HamMetin))
                 continue;
 
-            if (video.Summary != null)
+            if (video.Summary != null || video.IndekslemeTuru == IndekslemeTuru.HamKaynak)
             {
                 video.IslemDurumu = VideoIslemDurumu.IndekslemeBasladi;
                 summaryEvents.Add(new SummaryReadyEvent
                 {
                     VideoId = video.Id,
                     EgitimId = egitimId,
-                    SummaryId = video.Summary.Id
+                    SummaryId = video.Summary?.Id ?? Guid.Empty
                 });
                 queuedCount++;
             }
@@ -492,5 +546,245 @@ public class VideoManager : IVideoService
         }
 
         return dto;
+    }
+
+    public async Task<InspectRemoteUrlResponseDto> InspectRemoteUrlAsync(Guid egitimId, InspectRemoteUrlRequestDto request, CancellationToken ct = default)
+    {
+        var egitim = await _egitimRepository.GetByIdAsync(egitimId);
+        if (egitim == null)
+            throw new NotFoundException("Egitim", egitimId);
+
+        if (_remoteMediaService == null)
+            throw new BusinessException("Uzaktan medya servisi yapılandırılmamış.");
+
+        var response = new InspectRemoteUrlResponseDto();
+        var existingExternalIds = await GetExistingExternalIdsAsync(egitimId, ct);
+
+        var lines = (request.Url ?? string.Empty)
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var url in lines)
+        {
+            try
+            {
+                var items = await _remoteMediaService.ExpandPlaylistOrManifestAsync(url, request.BearerToken, ct);
+                foreach (var item in items)
+                {
+                    var normalizedId = NormalizeDisKaynakId(item.DisKaynakId, item.KaynakUrl, item.KaynakPlatform);
+                    item.DisKaynakId = normalizedId;
+                    item.ZatenEgitimdeVarMi = !string.IsNullOrWhiteSpace(normalizedId) && existingExternalIds.Contains(normalizedId);
+                    response.Items.Add(item);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "URL inceleme hatası: {Url}", url);
+                response.Errors.Add($"{url}: {ex.Message}");
+            }
+        }
+
+        return response;
+    }
+
+    public async Task<ImportRemoteVideosResponseDto> ImportRemoteVideosAsync(Guid egitimId, ImportRemoteVideosRequestDto request, CancellationToken ct = default)
+    {
+        var egitim = await _egitimRepository.GetByIdAsync(egitimId);
+        if (egitim == null)
+            throw new NotFoundException("Egitim", egitimId);
+
+        var response = new ImportRemoteVideosResponseDto();
+        if (request.Items == null || request.Items.Count == 0)
+        {
+            response.Mesaj = "İçe aktarılacak video seçilmedi.";
+            return response;
+        }
+
+        var existingExternalIds = await GetExistingExternalIdsAsync(egitimId, ct);
+        int nextSira = await GetNextVideoSiraAsync(egitimId, ct);
+
+        var queuedEvents = new List<(Video Video, RemoteVideoRequestedEvent Event)>();
+        var preferredLang = string.IsNullOrWhiteSpace(request.TercihEdilenDil) ? "tr" : request.TercihEdilenDil.Trim().ToLowerInvariant();
+
+        foreach (var item in request.Items)
+        {
+            if (string.IsNullOrWhiteSpace(item.KaynakUrl))
+            {
+                response.Hatalar.Add("Boş kaynak URL'si atlandı.");
+                continue;
+            }
+
+            var cleanUrl = item.KaynakUrl.Trim();
+            if (cleanUrl.Length > 2000)
+            {
+                response.Hatalar.Add("Kaynak URL maksimum 2000 karakter sınırını aşıyor.");
+                continue;
+            }
+
+            try
+            {
+                cleanUrl = YtDlpMediaService.ValidateHttpUrl(cleanUrl);
+            }
+            catch (BusinessException ex)
+            {
+                response.Hatalar.Add(ex.Message);
+                continue;
+            }
+
+            var platform = item.KaynakPlatform;
+            if (platform == KaynakPlatform.Yerel)
+            {
+                platform = YtDlpMediaService.IsYouTubeUrl(cleanUrl) ? KaynakPlatform.YouTube : KaynakPlatform.DirectUrl;
+            }
+
+            var disKaynakId = NormalizeDisKaynakId(item.DisKaynakId, cleanUrl, platform);
+
+            if (!string.IsNullOrWhiteSpace(disKaynakId) && !existingExternalIds.Add(disKaynakId))
+            {
+                response.AtlananDuplicateIdler.Add(disKaynakId);
+                continue;
+            }
+
+            var baslik = !string.IsNullOrWhiteSpace(item.Baslik)
+                ? item.Baslik.Trim()
+                : (!string.IsNullOrWhiteSpace(disKaynakId) ? disKaynakId : "Uzaktan Video");
+
+            if (baslik.Length > 300)
+                baslik = baslik[..300];
+
+            var kanalAdi = TruncateNullable(item.KanalAdi, 300);
+            var thumbnailUrl = TruncateNullable(item.ThumbnailUrl, 1000);
+
+            var video = new Video
+            {
+                EgitimId = egitimId,
+                Baslik = baslik,
+                DosyaYolu = string.Empty,
+                Sure = item.SureSaniye.HasValue && item.SureSaniye.Value > 0 ? TimeSpan.FromSeconds(item.SureSaniye.Value) : null,
+                Sira = ++nextSira,
+                DosyaBoyutu = 0,
+                IslemDurumu = VideoIslemDurumu.Indiriliyor,
+                KullanimTuru = request.KullanimTuru,
+                IndekslemeTuru = request.IndekslemeTuru,
+                KaynakPlatform = platform,
+                KaynakUrl = cleanUrl,
+                DisKaynakId = disKaynakId,
+                KanalAdi = kanalAdi,
+                ThumbnailUrl = thumbnailUrl,
+                AlimModu = request.AlimModu
+            };
+
+            await _videoRepository.AddAsync(video);
+            egitim.ToplamVideoSayisi += 1;
+
+            queuedEvents.Add((video, new RemoteVideoRequestedEvent
+            {
+                VideoId = video.Id,
+                EgitimId = egitimId,
+                KaynakUrl = cleanUrl,
+                KaynakPlatform = platform,
+                AlimModu = request.AlimModu,
+                TercihEdilenDil = preferredLang,
+                AuthHeader = request.BearerToken,
+                TranscriptUrl = item.TranscriptUrl
+            }));
+        }
+
+        if (queuedEvents.Count > 0)
+        {
+            _egitimRepository.Update(egitim);
+            await _videoRepository.SaveChangesAsync();
+
+            foreach (var (video, evt) in queuedEvents)
+            {
+                if (_stateTracker != null)
+                {
+                    await _stateTracker.RecordQueuedAsync(video.Id, egitimId, "Uzaktan İndirme", "Kuyruğa alındı, uzaktan medya işleniyor...");
+                }
+
+                await _publishEndpoint.Publish(evt, ct);
+                response.EklenenVideolar.Add(_mapper.Map<VideoListDto>(video));
+            }
+        }
+
+        response.Mesaj = $"{response.EklenenVideolar.Count} video eklendi" +
+                         (response.AtlananDuplicateIdler.Count > 0 ? $", {response.AtlananDuplicateIdler.Count} mükerrer video atlandı." : ".");
+
+        return response;
+    }
+
+    private async Task<HashSet<string>> GetExistingExternalIdsAsync(Guid egitimId, CancellationToken ct)
+    {
+        IEnumerable<Video> existingVideos;
+        if (_dbContext != null && _dbContext.Videolar != null)
+        {
+            existingVideos = await _dbContext.Videolar
+                .AsNoTracking()
+                .Where(v => v.EgitimId == egitimId && v.DisKaynakId != null)
+                .ToListAsync(ct);
+        }
+        else
+        {
+            existingVideos = await _videoRepository.FindAsync(v => v.EgitimId == egitimId && v.DisKaynakId != null);
+        }
+
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in existingVideos)
+        {
+            if (!string.IsNullOrWhiteSpace(v.DisKaynakId))
+                set.Add(v.DisKaynakId);
+        }
+        return set;
+    }
+
+    private async Task<int> GetNextVideoSiraAsync(Guid egitimId, CancellationToken ct)
+    {
+        if (_dbContext != null && _dbContext.Videolar != null)
+        {
+            var maxSira = await _dbContext.Videolar
+                .Where(v => v.EgitimId == egitimId)
+                .Select(v => (int?)v.Sira)
+                .MaxAsync(ct);
+            return maxSira ?? 0;
+        }
+
+        var existing = await _videoRepository.FindAsync(v => v.EgitimId == egitimId);
+        return existing.Any() ? existing.Max(v => v.Sira) : 0;
+    }
+
+    private static string NormalizeDisKaynakId(string? disKaynakId, string url, KaynakPlatform platform)
+    {
+        string normalized;
+        if (!string.IsNullOrWhiteSpace(disKaynakId))
+        {
+            normalized = disKaynakId.Trim();
+        }
+        else if (platform == KaynakPlatform.YouTube || YtDlpMediaService.IsYouTubeUrl(url))
+        {
+            var ytId = YtDlpMediaService.ExtractYouTubeVideoId(url);
+            normalized = !string.IsNullOrWhiteSpace(ytId) ? ytId : url.Trim();
+        }
+        else
+        {
+            normalized = url.Trim();
+        }
+
+        if (normalized.Length > 200)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        return normalized;
+    }
+
+    private static string? TruncateNullable(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
     }
 }

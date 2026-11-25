@@ -48,6 +48,54 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
         {
             try
             {
+                var transcript = await _context.VideoTranscripts.FirstOrDefaultAsync(t => t.Id == evt.TranscriptId, context.CancellationToken);
+                if (transcript == null)
+                {
+                    _logger.LogWarning("Transcript not found: {TranscriptId}", evt.TranscriptId);
+                    return;
+                }
+
+                var videoEntity = _context.Videolar != null
+                    ? await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken)
+                    : null;
+
+                if (videoEntity != null && videoEntity.IndekslemeTuru == IndekslemeTuru.HamKaynak)
+                {
+                    transcript.Dil = VideoOzet.Business.Infrastructure.AI.GeminiSummarizer.DetectLanguageReliably(
+                        transcript.HamMetin,
+                        null,
+                        transcript.Dil ?? "tr");
+
+                    if (videoEntity.IslemDurumu != VideoIslemDurumu.Tamamlandi)
+                    {
+                        videoEntity.IslemDurumu = VideoIslemDurumu.OzetlemeTamamlandi;
+                    }
+
+                    await _context.SaveChangesAsync(context.CancellationToken);
+
+                    await context.Publish(new SummaryReadyEvent
+                    {
+                        VideoId = evt.VideoId,
+                        EgitimId = evt.EgitimId,
+                        SummaryId = Guid.Empty
+                    }, context.CancellationToken);
+
+                    var bypassEvt = new PipelineProgressEvent
+                    {
+                        VideoId = evt.VideoId,
+                        EgitimId = evt.EgitimId,
+                        Asama = "Indeksleme",
+                        Durum = "Bekliyor",
+                        Mesaj = "Ham kaynak seçili — özetleme atlandı, doğrudan vektör indekslemeye geçiliyor...",
+                        Yuzde = 85
+                    };
+                    if (_stateTracker != null) await _stateTracker.RecordProgressAsync(bypassEvt);
+                    await _publishEndpoint.Publish(bypassEvt, context.CancellationToken);
+
+                    _logger.LogInformation("Skipping LLM summarization for HamKaynak Video: {VideoId}. Routing directly to vector indexing.", evt.VideoId);
+                    return;
+                }
+
                 var queuedEvt = new PipelineProgressEvent
                 {
                     VideoId = evt.VideoId,
@@ -61,16 +109,6 @@ public class SummarizeVideoConsumer : IConsumer<TranscriptReadyEvent>
                 if (_stateTracker != null) await _stateTracker.RecordProgressAsync(queuedEvt);
                 await _publishEndpoint.Publish(queuedEvt, context.CancellationToken);
 
-                var transcript = await _context.VideoTranscripts.FirstOrDefaultAsync(t => t.Id == evt.TranscriptId, context.CancellationToken);
-                if (transcript == null)
-                {
-                    _logger.LogWarning("Transcript not found: {TranscriptId}", evt.TranscriptId);
-                    return;
-                }
-
-                var videoEntity = _context.Videolar != null
-                    ? await _context.Videolar.FindAsync(new object[] { evt.VideoId }, context.CancellationToken)
-                    : null;
                 if (videoEntity != null && videoEntity.IslemDurumu != VideoIslemDurumu.Tamamlandi)
                 {
                     videoEntity.IslemDurumu = VideoIslemDurumu.OzetlemeBasladi;

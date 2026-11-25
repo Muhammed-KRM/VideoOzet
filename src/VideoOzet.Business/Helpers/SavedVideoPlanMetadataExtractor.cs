@@ -208,15 +208,12 @@ public static class SavedVideoPlanMetadataExtractor
             return Math.Max(2, (int)Math.Round(maxSceneEndMinutes, MidpointRounding.AwayFromZero));
         }
 
-        // Fallback: Prompter (>) satırlarının kelime sayısından (~130 kelime/dk) hesapla
-        var prompterWords = normalized.Split('\n')
-            .Select(l => l.TrimStart())
-            .Where(l => l.StartsWith(">"))
-            .Sum(l => l.TrimStart('>').Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length);
+        // Fallback: Prompter (>) satırlarının kelime sayısından (~105 kelime/dk Türkçe stüdyo temposu) hesapla
+        var prompterWords = PrompterPacingCalculator.CountPrompterWords(normalized);
 
-        if (prompterWords >= 200)
+        if (prompterWords >= 160)
         {
-            return Math.Max(2, (int)Math.Round(prompterWords / 130.0, MidpointRounding.AwayFromZero));
+            return Math.Max(2, (int)Math.Round(prompterWords / (double)PrompterPacingCalculator.TargetWordsPerMinute, MidpointRounding.AwayFromZero));
         }
 
         return null;

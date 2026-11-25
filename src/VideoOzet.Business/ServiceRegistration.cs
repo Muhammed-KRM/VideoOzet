@@ -41,6 +41,9 @@ public static class ServiceRegistration
         services.AddScoped<IVideoService, VideoManager>();
         services.AddScoped<IDokumanService, DokumanService>();
         services.AddScoped<IAudioExtractor, VideoOzet.Business.Infrastructure.Media.FfmpegAudioExtractor>();
+        services.AddScoped<IRemoteMediaService, VideoOzet.Business.Infrastructure.Media.YtDlpMediaService>();
+        services.AddSingleton<ITranscriptQualityEvaluator, TranscriptQualityEvaluator>();
+        services.AddScoped<IYouTubeSearchService, YouTubeSearchService>();
         services.AddScoped<IGeminiProvider, VideoOzet.Business.Infrastructure.AI.GeminiSummarizer>();
         services.AddScoped<ITextChunker, VideoOzet.Business.Infrastructure.AI.TextChunker>();
         services.AddScoped<IContextualTextChunker, VideoOzet.Business.Infrastructure.AI.ContextualTextChunker>();

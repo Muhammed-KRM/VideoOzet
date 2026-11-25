@@ -11,6 +11,8 @@ public class VideoProfile : Profile
         CreateMap<Video, VideoListDto>()
             .ForMember(dest => dest.OrijinalDil, opt => opt.MapFrom(src => 
                 src.Summary != null && !string.IsNullOrWhiteSpace(src.Summary.OrijinalDil) ? src.Summary.OrijinalDil :
-                (src.Transcript != null && !string.IsNullOrWhiteSpace(src.Transcript.Dil) ? src.Transcript.Dil : "tr")));
+                (src.Transcript != null && !string.IsNullOrWhiteSpace(src.Transcript.Dil) ? src.Transcript.Dil : "tr")))
+            .ForMember(dest => dest.SttModel, opt => opt.MapFrom(src =>
+                src.Transcript != null ? src.Transcript.SttModel : null));
     }
 }

@@ -110,6 +110,9 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
               if (video) {
                 video.sonAsama = this.videoProgressMap[data.videoId].sonAsama;
                 video.durum = this.videoProgressMap[data.videoId].durum;
+                if (this.videoProgressMap[data.videoId].durum) {
+                  video.islemDurumu = this.videoProgressMap[data.videoId].durum;
+                }
                 video.mesaj = this.videoProgressMap[data.videoId].mesaj;
                 video.hataMesaji = isError ? data.mesaj : null;
                 if (!isError) {
@@ -248,6 +251,38 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     return !this.isItemCompleted(v) && !this.isItemError(v) && !!v?.takiliMi;
   }
 
+  isItemDownloading(v: any): boolean {
+    if (this.isItemCompleted(v) || this.isItemError(v) || this.isItemStalled(v)) {
+      return false;
+    }
+
+    const activeStatus = v?.durum ?? v?.islemDurumu;
+    if (activeStatus !== undefined && activeStatus !== null && activeStatus !== '') {
+      return activeStatus === 'Indiriliyor' || activeStatus === 10;
+    }
+
+    return v?.sonAsama === 'Indiriliyor' || v?.sonAsama === 'Uzaktan İndirme';
+  }
+
+  isFastTranscript(v: any): boolean {
+    return typeof v?.sttModel === 'string' && v.sttModel.startsWith('youtube-captions');
+  }
+
+  isSafeThumbnailUrl(url: any): boolean {
+    return typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'));
+  }
+
+  isYouTubeSource(v: any): boolean {
+    return v?.kaynakPlatform === 'YouTube' || v?.kaynakPlatform === 1;
+  }
+
+  isDirectRemoteSource(v: any): boolean {
+    return v?.kaynakPlatform === 'DirectUrl' ||
+      v?.kaynakPlatform === 2 ||
+      v?.kaynakPlatform === 'CustomApiManifest' ||
+      v?.kaynakPlatform === 3;
+  }
+
   get completedVideosCount(): number {
     if (!this.egitim || !this.egitim.videos) return 0;
     return this.egitim.videos.filter((v: any) => this.isItemCompleted(v)).length;
@@ -293,6 +328,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     if (this.isItemError(v)) return 'Hata';
     if (this.isItemStalled(v)) return '⚠️ Takılı Kaldı';
     if (v.sonAsama) return v.sonAsama;
+    if (this.isItemDownloading(v)) return 'Uzaktan İndiriliyor';
     if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return 'Ses Çözümleniyor (STT)';
     if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4) return 'STT Bitti';
     if (v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return 'Özet Çıkarılıyor';
@@ -312,6 +348,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     const cached = this.videoProgressMap[v.id];
     if (v.mesaj) return v.mesaj;
     if (cached?.mesaj) return cached.mesaj;
+    if (this.isItemDownloading(v)) return '⬇️ Uzaktan video/altyazı kontrol ediliyor ve indiriliyor...';
     if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return '🎙️ Ses metne dökülüyor (STT)...';
     if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return '📝 Özet ve kavramlar çıkarılıyor...';
     if (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7) return '🧠 Vektör veritabanına indeksleniyor...';
@@ -326,6 +363,7 @@ export class CourseDetailComponent implements OnInit, OnDestroy {
     if (yuzde !== undefined && yuzde !== null && yuzde > 0) return yuzde;
     
     // Aşamaya göre standart ilerleme yüzdeleri
+    if (this.isItemDownloading(v)) return 15;
     if (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3) return 30;
     if (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4) return 60;
     if (v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5) return 75;

@@ -117,7 +117,12 @@
                  'bg-slate-900 border-slate-700 hover:border-slate-600': !isItemStalled(v) && !isItemError(v)
                }">
             <div class="flex items-center gap-3 min-w-0 flex-1 pr-3">
-              <div *ngIf="v.tip === 'video'" class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+              <img *ngIf="v.tip === 'video' && isSafeThumbnailUrl(v.thumbnailUrl)"
+                   [src]="v.thumbnailUrl"
+                   [alt]="v.baslik"
+                   loading="lazy"
+                   class="w-14 h-10 object-cover rounded-lg border border-slate-700 shrink-0 bg-slate-950" />
+              <div *ngIf="v.tip === 'video' && !isSafeThumbnailUrl(v.thumbnailUrl)" class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" />
                 </svg>
@@ -157,20 +162,41 @@
                     🌐 {{ v.orijinalDil | uppercase }} ➔ TR
                   </span>
 
+                  <!-- Uzaktan Kaynak Platform Rozeti -->
+                  <span *ngIf="isYouTubeSource(v)"
+                        class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-700/60 shrink-0">
+                    ▶️ YouTube
+                  </span>
+                  <span *ngIf="isDirectRemoteSource(v)"
+                        class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-950/80 text-sky-300 border border-sky-700/60 shrink-0">
+                    🌐 Direct URL
+                  </span>
+
+                  <!-- Hızlı Transkript Rozeti -->
+                  <span *ngIf="isFastTranscript(v)"
+                        [title]="v.transkriptKaynakNotu || 'YouTube altyazısından kalite kontrolü ile alındı'"
+                        class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 shrink-0">
+                    ⚡ Hızlı Transkript<span *ngIf="v.transkriptKaliteSkoru != null"> (Skor: {{ v.transkriptKaliteSkoru }})</span>
+                  </span>
+
                   <span *ngIf="!isItemCompleted(v) && !isItemError(v)" 
                         class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded border"
-                        [ngClass]="isItemStalled(v) ? 'bg-amber-950/80 text-amber-300 border-amber-600/50' : 'bg-cyan-950/80 text-cyan-300 border-cyan-700/50'">
+                        [ngClass]="isItemStalled(v) ? 'bg-amber-950/80 text-amber-300 border-amber-600/50' : (isItemDownloading(v) ? 'bg-blue-950/80 text-blue-300 border-blue-600/50' : 'bg-cyan-950/80 text-cyan-300 border-cyan-700/50')">
                     {{ getVideoProgressText(v) }}
                   </span>
                 </div>
+                <p *ngIf="v.kanalAdi" class="text-[11px] text-slate-400 mt-0.5 truncate">
+                  📺 {{ v.kanalAdi }}
+                </p>
                 <p class="text-xs font-medium mt-0.5 break-words" [ngClass]="{
                   'text-emerald-400': isItemCompleted(v),
                   'text-rose-400': isItemError(v),
                   'text-amber-300': isItemStalled(v),
-                  'text-cyan-400': !isItemStalled(v) && (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3),
-                  'text-amber-400': !isItemStalled(v) && (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5),
-                  'text-purple-400': !isItemStalled(v) && (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7),
-                  'text-slate-400': !isItemStalled(v) && (!v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0)
+                  'text-blue-400': isItemDownloading(v),
+                  'text-cyan-400': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3),
+                  'text-amber-400': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5),
+                  'text-purple-400': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7),
+                  'text-slate-400': !isItemStalled(v) && !isItemDownloading(v) && (!v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0)
                 }">{{ getVideoDetailSubtitle(v) }}</p>
 
                 <!-- Her Dosyaya Özel Canlı İlerleme Çubuğu -->
@@ -190,10 +216,11 @@
                   'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': isItemCompleted(v),
                   'bg-rose-500/20 text-rose-400 border-rose-500/30': isItemError(v),
                   'bg-amber-500/20 text-amber-300 border-amber-500/40': isItemStalled(v),
-                  'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse': !isItemStalled(v) && (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3),
-                  'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse': !isItemStalled(v) && (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5),
-                  'bg-purple-500/20 text-purple-300 border-purple-500/30 animate-pulse': !isItemStalled(v) && (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7),
-                  'bg-slate-800 text-slate-400 border-slate-700': !isItemStalled(v) && (!v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0)
+                  'bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-300 border-blue-500/40 animate-pulse': isItemDownloading(v),
+                  'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'SttBasladi' || v.islemDurumu === 3),
+                  'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'SttTamamlandi' || v.islemDurumu === 4 || v.islemDurumu === 'OzetlemeBasladi' || v.islemDurumu === 5),
+                  'bg-purple-500/20 text-purple-300 border-purple-500/30 animate-pulse': !isItemStalled(v) && !isItemDownloading(v) && (v.islemDurumu === 'IndekslemeBasladi' || v.islemDurumu === 7),
+                  'bg-slate-800 text-slate-400 border-slate-700': !isItemStalled(v) && !isItemDownloading(v) && (!v.islemDurumu || v.islemDurumu === 'Bekliyor' || v.islemDurumu === 0)
                 }" class="px-3 py-1 text-xs font-medium rounded-full border whitespace-nowrap">
                   {{ getVideoStatusText(v) }}
                 </span>

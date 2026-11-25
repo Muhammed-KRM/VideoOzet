@@ -1,0 +1,413 @@
+<div class="space-y-4">
+  <!-- Arama Çubuğu ve Süre Filtresi -->
+  <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-700/70 space-y-3">
+    <div class="flex flex-col sm:flex-row gap-2.5">
+      <div class="relative flex-1">
+        <input
+          type="text"
+          [(ngModel)]="searchQuery"
+          (keydown.enter)="search()"
+          placeholder="YouTube'da ders, konu veya kanal arayın (örn: Yapay Zeka RAG Mimarisi)..."
+          class="w-full pl-10 pr-4 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+        />
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      </div>
+      <button
+        type="button"
+        (click)="search()"
+        [disabled]="isSearching || !searchQuery.trim()"
+        class="px-5 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+      >
+        <span *ngIf="isSearching" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+        <span>{{ isSearching ? 'Aranıyor...' : 'Ara' }}</span>
+      </button>
+    </div>
+
+    <!-- Süre Filtresi & Kaynak Rozeti -->
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-[11px] text-slate-400 mr-1">Süre:</span>
+        <button
+          type="button"
+          (click)="setDurationFilter('any')"
+          [class]="durationFilter === 'any' ? 'bg-slate-700 text-white border-slate-500' : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'"
+          class="px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer"
+        >
+          Tümü
+        </button>
+        <button
+          type="button"
+          (click)="setDurationFilter('medium')"
+          [class]="durationFilter === 'medium' ? 'bg-slate-700 text-white border-slate-500' : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'"
+          class="px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer"
+        >
+          4-20 dk
+        </button>
+        <button
+          type="button"
+          (click)="setDurationFilter('long')"
+          [class]="durationFilter === 'long' ? 'bg-slate-700 text-white border-slate-500' : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'"
+          class="px-2.5 py-1 rounded-md text-xs font-medium border transition-colors cursor-pointer"
+        >
+          20+ dk
+        </button>
+      </div>
+
+      <div *ngIf="kullanilanKaynak" class="flex items-center gap-2">
+        <span
+          class="text-[11px] px-2.5 py-0.5 rounded-full border font-medium"
+          [ngClass]="kullanilanKaynak === 'youtube-api-v3'
+            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60'
+            : 'bg-cyan-950/60 text-cyan-300 border-cyan-700/60'"
+        >
+          {{ kullanilanKaynak === 'youtube-api-v3' ? '⚡ YouTube Data API v3' : '🛠️ yt-dlp Arama Motoru' }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Kota / Bilgi Uyarısı -->
+  <div
+    *ngIf="uyariMesaji || kotaAsildiMi"
+    class="px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 border"
+    [ngClass]="kotaAsildiMi
+      ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+      : 'bg-blue-950/40 border-blue-500/40 text-blue-200'"
+  >
+    <span>{{ kotaAsildiMi ? '⚠️' : 'ℹ️' }}</span>
+    <span>{{ uyariMesaji || 'YouTube Data API günlük kotası dolduğu için otomatik yt-dlp yedek motoru kullanıldı.' }}</span>
+  </div>
+
+  <!-- Arama veya İçe Aktarım Geri Bildirimleri -->
+  <div *ngIf="searchError" class="px-4 py-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs text-rose-300">
+    ❌ {{ searchError }}
+  </div>
+  <div *ngIf="importFeedback" class="px-4 py-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-300 font-medium">
+    ✅ {{ importFeedback }}
+  </div>
+  <div *ngIf="importWarning" class="px-4 py-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-300">
+    ⚠️ {{ importWarning }}
+  </div>
+  <div *ngIf="importError" class="px-4 py-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs text-rose-300">
+    ❌ {{ importError }}
+  </div>
+
+  <!-- Yükleniyor İskeleti -->
+  <div *ngIf="isSearching" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div *ngFor="let i of [1, 2, 3, 4, 5, 6]" class="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden animate-pulse">
+      <div class="aspect-video bg-slate-800"></div>
+      <div class="p-3 space-y-2">
+        <div class="h-3.5 bg-slate-800 rounded w-5/6"></div>
+        <div class="h-3 bg-slate-800 rounded w-1/2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Boş Durum -->
+  <div *ngIf="!isSearching && hasSearched && results.length === 0 && !searchError" class="text-center py-10 rounded-xl bg-slate-900/50 border border-slate-800 text-slate-400 text-sm">
+    Aramanızla eşleşen YouTube videosu bulunamadı. Farklı anahtar kelimeler deneyin.
+  </div>
+
+  <!-- İlk Açılış İpucu -->
+  <div *ngIf="!hasSearched && !isSearching" class="text-center py-8 px-4 rounded-xl bg-slate-900/40 border border-dashed border-slate-700/80 text-slate-400 text-xs space-y-1.5">
+    <p class="text-sm text-slate-200 font-medium">Uygulama İçi YouTube Keşif</p>
+    <p>Yukarıdaki arama kutusuna konu yazın; kartlara tıklayıp videoyu izleyebilir, altyazı dillerini kontrol edebilir ve çoklu seçimle eğitime ekleyebilirsiniz.</p>
+  </div>
+
+  <!-- Video Kartları Grid'i -->
+  <div *ngIf="!isSearching && results.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-2">
+    <div
+      *ngFor="let item of results"
+      (click)="openPreview(item)"
+      class="group rounded-xl border overflow-hidden cursor-pointer transition-all flex flex-col"
+      [ngClass]="isSelected(item.videoId)
+        ? 'bg-blue-950/25 border-blue-500 ring-1 ring-blue-500/40'
+        : 'bg-slate-900 border-slate-700/80 hover:border-slate-500 hover:bg-slate-900/90'"
+    >
+      <!-- Thumbnail & Checkbox & Süre Rozeti -->
+      <div class="relative aspect-video bg-slate-950 overflow-hidden">
+        <img
+          *ngIf="isSafeImageUrl(item.thumbnailUrl)"
+          [src]="item.thumbnailUrl"
+          [alt]="item.baslik"
+          loading="lazy"
+          class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+        />
+        <div *ngIf="!isSafeImageUrl(item.thumbnailUrl)" class="w-full h-full flex items-center justify-center text-slate-600 text-xs">
+          Video Önizleme
+        </div>
+
+        <!-- Çoklu Seçim Checkbox -->
+        <button
+          type="button"
+          (click)="toggleSelect(item, $event)"
+          [title]="isSelected(item.videoId) ? 'Seçimi Kaldır' : 'Toplu Ekleme İçin Seç'"
+          class="absolute top-2 left-2 w-7 h-7 rounded-lg border flex items-center justify-center transition-all shadow-md cursor-pointer"
+          [ngClass]="isSelected(item.videoId)
+            ? 'bg-blue-600 border-blue-400 text-white'
+            : 'bg-slate-950/80 border-slate-500/80 text-transparent hover:border-white'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+          </svg>
+        </button>
+
+        <!-- Süre Rozeti -->
+        <span *ngIf="item.sureMetni" class="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-white text-[11px] font-mono font-semibold">
+          {{ item.sureMetni }}
+        </span>
+      </div>
+
+      <!-- Kart İçeriği -->
+      <div class="p-3 flex-1 flex flex-col justify-between gap-2">
+        <h4 class="text-sm font-semibold text-white line-clamp-2 leading-snug" [title]="item.baslik">
+          {{ item.baslik }}
+        </h4>
+        <div class="space-y-0.5 text-[11px] text-slate-400">
+          <div class="truncate font-medium text-slate-300">{{ item.kanalAdi }}</div>
+          <div class="flex items-center gap-2 flex-wrap text-slate-500">
+            <span *ngIf="item.goruntulenmeSayisi != null">{{ formatViewCount(item.goruntulenmeSayisi) }}</span>
+            <span *ngIf="item.yayinTarihi">{{ item.yayinTarihi }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sabit Alt Toplu Ekleme Çubuğu -->
+  <div
+    *ngIf="selectedCount > 0"
+    class="sticky bottom-3 z-30 rounded-2xl bg-slate-950/95 backdrop-blur-md border border-blue-500/50 shadow-2xl p-3.5 space-y-3"
+  >
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <span class="px-2.5 py-1 rounded-full bg-blue-600 text-white text-xs font-bold">
+          {{ selectedCount }} video seçildi
+        </span>
+        <button
+          type="button"
+          (click)="clearSelection()"
+          class="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+        >
+          Seçimi Temizle
+        </button>
+      </div>
+
+      <!-- Alım Modu Seçici -->
+      <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-700">
+        <button
+          type="button"
+          (click)="selectedAlimModu = 0"
+          [class]="selectedAlimModu === 0 ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+          class="px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer"
+        >
+          ⚡ Akıllı Transkript Öncelikli
+        </button>
+        <button
+          type="button"
+          (click)="selectedAlimModu = 1"
+          [class]="selectedAlimModu === 1 ? 'bg-cyan-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+          class="px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer"
+        >
+          🎙️ Doğrudan Sesten Çıkar
+        </button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+      <!-- Kullanım & İndeksleme Seçenekleri -->
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <select
+          [ngModel]="kullanimTuru"
+          (ngModelChange)="setKullanimTuru(+$event)"
+          class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs"
+        >
+          <option [ngValue]="0">📌 Doğrudan Referans</option>
+          <option [ngValue]="1">🛡️ Dış Kaynak (Argüman)</option>
+        </select>
+
+        <select
+          [ngModel]="indekslemeTuru"
+          (ngModelChange)="setIndekslemeTuru(+$event)"
+          class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs"
+        >
+          <option [ngValue]="0">📄 Ham Kaynak</option>
+          <option [ngValue]="1">⚡ Özet Kaynak</option>
+        </select>
+      </div>
+
+      <button
+        type="button"
+        (click)="importSelected()"
+        [disabled]="isImporting"
+        class="px-5 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg transition-all cursor-pointer"
+      >
+        {{ isImporting ? 'Ekleniyor...' : 'Seçilenleri Eğitime Ekle (' + selectedCount + ')' }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Video Önizleme Modalı -->
+<div
+  *ngIf="previewItem"
+  (click)="closePreview()"
+  class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm"
+>
+  <div
+    (click)="$event.stopPropagation()"
+    class="w-full max-w-4xl max-h-[90vh] rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl overflow-hidden flex flex-col"
+  >
+    <!-- Modal Başlık -->
+    <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/70">
+      <div class="min-w-0 pr-4">
+        <h3 class="text-sm sm:text-base font-bold text-white truncate">{{ previewDetail?.baslik || previewItem.baslik }}</h3>
+        <p class="text-xs text-slate-400 truncate">{{ previewDetail?.kanalAdi || previewItem.kanalAdi }}</p>
+      </div>
+      <button
+        type="button"
+        (click)="closePreview()"
+        class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+      >
+        ✕
+      </button>
+    </div>
+
+    <!-- Modal Gövde -->
+    <div class="p-5 overflow-y-auto space-y-4">
+      <!-- YouTube NoCookie Embed -->
+      <div class="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
+        <iframe
+          *ngIf="previewEmbedUrl"
+          [src]="previewEmbedUrl"
+          class="w-full h-full"
+          title="YouTube video önizleme"
+          frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen
+        ></iframe>
+        <div *ngIf="!previewEmbedUrl" class="w-full h-full flex items-center justify-center text-rose-400 text-sm">
+          Geçersiz video kimliği nedeniyle oynatıcı yüklenemedi.
+        </div>
+      </div>
+
+      <!-- Detay Yükleniyor / Hata -->
+      <div *ngIf="isLoadingDetail" class="flex items-center gap-2 text-xs text-cyan-300">
+        <span class="w-3.5 h-3.5 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin"></span>
+        <span>Altyazı dilleri ve ilgili videolar yükleniyor...</span>
+      </div>
+      <div *ngIf="detailError" class="text-xs text-amber-300 bg-amber-950/40 border border-amber-500/30 rounded-lg px-3 py-2">
+        ⚠️ {{ detailError }}
+      </div>
+
+      <!-- Altyazı Dilleri Rozetleri -->
+      <div *ngIf="previewDetail" class="flex flex-wrap items-center gap-2">
+        <span
+          *ngIf="previewDetail.manuelAltyaziDilleri.length > 0"
+          class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-600/50"
+        >
+          ✓ Manuel Altyazı: {{ previewDetail.manuelAltyaziDilleri.join(', ').toUpperCase() }}
+        </span>
+        <span
+          *ngIf="previewDetail.otomatikAltyaziDilleri.length > 0"
+          class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-cyan-950/70 text-cyan-300 border border-cyan-600/50"
+        >
+          ⚡ Otomatik Altyazı: {{ previewDetail.otomatikAltyaziDilleri.slice(0, 5).join(', ').toUpperCase() }}
+        </span>
+        <span
+          *ngIf="previewDetail.manuelAltyaziDilleri.length === 0 && previewDetail.otomatikAltyaziDilleri.length === 0"
+          class="px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-950/60 text-amber-300 border border-amber-700/50"
+        >
+          🎙️ Altyazı bulunamadı (otomatik ses STT kullanılacak)
+        </span>
+        <span *ngIf="previewDetail.sureMetni" class="px-2.5 py-1 rounded-full text-[11px] bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+          ⏱️ {{ previewDetail.sureMetni }}
+        </span>
+      </div>
+
+      <!-- Açıklama -->
+      <div *ngIf="previewDetail?.aciklama || previewItem.aciklama" class="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-300 max-h-32 overflow-y-auto whitespace-pre-line leading-relaxed">
+        {{ previewDetail?.aciklama || previewItem.aciklama }}
+      </div>
+
+      <!-- İlgili / Kanal Videoları -->
+      <div *ngIf="previewDetail && previewDetail.ilgiliVideolar.length > 0" class="space-y-2">
+        <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">İlgili / Kanal Videoları</h4>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+          <div
+            *ngFor="let rel of previewDetail.ilgiliVideolar"
+            (click)="openPreview(rel)"
+            class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-slate-600 cursor-pointer transition-colors"
+          >
+            <img
+              *ngIf="isSafeImageUrl(rel.thumbnailUrl)"
+              [src]="rel.thumbnailUrl"
+              [alt]="rel.baslik"
+              loading="lazy"
+              class="w-20 h-12 object-cover rounded shrink-0 bg-slate-900"
+            />
+            <div class="min-w-0 flex-1">
+              <p class="text-xs font-medium text-white line-clamp-2">{{ rel.baslik }}</p>
+              <p class="text-[11px] text-slate-400 truncate">{{ rel.kanalAdi }} · {{ rel.sureMetni }}</p>
+            </div>
+            <button
+              type="button"
+              (click)="selectRelatedVideo(rel, $event)"
+              class="px-2 py-1 rounded text-[11px] font-medium shrink-0 border transition-colors cursor-pointer"
+              [ngClass]="isSelected(rel.videoId)
+                ? 'bg-blue-600 text-white border-blue-500'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'"
+            >
+              {{ isSelected(rel.videoId) ? '✓ Seçili' : '+ Seç' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Alt Çubuk -->
+    <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-t border-slate-800 bg-slate-950/70">
+      <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-slate-700">
+        <button
+          type="button"
+          (click)="selectedAlimModu = 0"
+          [class]="selectedAlimModu === 0 ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+          class="px-2.5 py-1 rounded text-xs transition-colors cursor-pointer"
+        >
+          ⚡ Akıllı Transkript
+        </button>
+        <button
+          type="button"
+          (click)="selectedAlimModu = 1"
+          [class]="selectedAlimModu === 1 ? 'bg-cyan-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+          class="px-2.5 py-1 rounded text-xs transition-colors cursor-pointer"
+        >
+          🎙️ Doğrudan STT
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          (click)="toggleSelect(previewItem, $event)"
+          class="px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer"
+          [ngClass]="isSelected(previewItem.videoId)
+            ? 'bg-blue-600/20 text-blue-300 border-blue-500/50'
+            : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'"
+        >
+          {{ isSelected(previewItem.videoId) ? '✓ Listede Seçili' : '+ Toplu Listeye Seç' }}
+        </button>
+        <button
+          type="button"
+          (click)="importSingleFromModal()"
+          [disabled]="isImporting"
+          class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg transition-colors cursor-pointer"
+        >
+          {{ isImporting ? 'Ekleniyor...' : 'Bu Videoyu Eğitime Ekle' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

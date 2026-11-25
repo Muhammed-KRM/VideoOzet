@@ -96,6 +96,7 @@ builder.Services.AddBusinessLayer(builder.Configuration, x =>
 
     if (isStandalone)
     {
+        x.AddConsumer<VideoOzet.Worker.Consumers.DownloadRemoteVideoConsumer>(typeof(VideoOzet.Worker.Consumers.DownloadRemoteVideoConsumerDefinition));
         x.AddConsumer<VideoOzet.Worker.Consumers.ExtractTranscriptConsumer>(typeof(VideoOzet.Worker.Consumers.ExtractTranscriptConsumerDefinition));
         x.AddConsumer<VideoOzet.Worker.Consumers.SummarizeVideoConsumer>(typeof(VideoOzet.Worker.Consumers.SummarizeVideoConsumerDefinition));
         x.AddConsumer<VideoOzet.Worker.Consumers.IndexSummaryConsumer>(typeof(VideoOzet.Worker.Consumers.IndexSummaryConsumerDefinition));
@@ -135,6 +136,7 @@ using (var scope = app.Services.CreateScope())
         if (db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
             db.Database.EnsureCreated();
+            EnsureSqliteVideolarSchemaUpgraded(db);
         }
         else
         {
@@ -267,4 +269,71 @@ static void OpenBrowserCrossPlatform(string url)
     catch { }
 }
 
-public partial class Program { }
+public partial class Program
+{
+    public static void EnsureSqliteVideolarSchemaUpgraded(VideoOzet.Data.Context.AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        var shouldClose = conn.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+        {
+            conn.Open();
+        }
+
+        try
+        {
+            var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var pragmaCmd = conn.CreateCommand())
+            {
+                pragmaCmd.CommandText = "PRAGMA table_info(videolar);";
+                using var reader = pragmaCmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    var nameIdx = reader.GetOrdinal("name");
+                    if (!reader.IsDBNull(nameIdx))
+                    {
+                        existingColumns.Add(reader.GetString(nameIdx));
+                    }
+                }
+            }
+
+            if (existingColumns.Count == 0)
+            {
+                return;
+            }
+
+            var columnsToAdd = new (string Name, string AlterSql)[]
+            {
+                ("kaynak_platform", "ALTER TABLE videolar ADD COLUMN kaynak_platform INTEGER NOT NULL DEFAULT 0;"),
+                ("kaynak_url", "ALTER TABLE videolar ADD COLUMN kaynak_url TEXT NULL;"),
+                ("dis_kaynak_id", "ALTER TABLE videolar ADD COLUMN dis_kaynak_id TEXT NULL;"),
+                ("kanal_adi", "ALTER TABLE videolar ADD COLUMN kanal_adi TEXT NULL;"),
+                ("thumbnail_url", "ALTER TABLE videolar ADD COLUMN thumbnail_url TEXT NULL;"),
+                ("alim_modu", "ALTER TABLE videolar ADD COLUMN alim_modu INTEGER NOT NULL DEFAULT 0;"),
+                ("transkript_kalite_skoru", "ALTER TABLE videolar ADD COLUMN transkript_kalite_skoru INTEGER NULL;"),
+                ("transkript_kaynak_notu", "ALTER TABLE videolar ADD COLUMN transkript_kaynak_notu TEXT NULL;")
+            };
+
+            foreach (var (name, alterSql) in columnsToAdd)
+            {
+                if (!existingColumns.Contains(name))
+                {
+                    using var alterCmd = conn.CreateCommand();
+                    alterCmd.CommandText = alterSql;
+                    alterCmd.ExecuteNonQuery();
+                }
+            }
+
+            using var idxCmd = conn.CreateCommand();
+            idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_videolar_egitim_diskaynak ON videolar (egitim_id, dis_kaynak_id);";
+            idxCmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            if (shouldClose && conn.State == System.Data.ConnectionState.Open)
+            {
+                conn.Close();
+            }
+        }
+    }
+}

@@ -279,22 +279,28 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     private static string NormalizeTargetLength(string targetLength)
     {
         if (string.IsNullOrWhiteSpace(targetLength))
-            return "10-15 Dakika (Detaylı — en az 5-6 sahne, ~1.500-2.000 kelime prompter metni)";
-
-        var normalized = targetLength.Trim().ToLowerInvariant();
-        if (normalized is "kisa" or "kısa" || normalized.Contains("kısa") || normalized.Contains("kisa"))
-            return "~5-8 Dakika (Kısa — en az 4-5 sahne, ~800-1.100 kelime prompter konuşma metni)";
-        if (normalized is "orta" || normalized.Contains("orta"))
-            return "~10-12 Dakika (Orta — en az 5-6 sahne, ~1.400-1.750 kelime prompter konuşma metni)";
-        if (normalized is "uzun" || normalized.Contains("uzun"))
-            return "~15-20 Dakika (Uzun ve Detaylı — en az 7-8 sahne, ~2.200-2.900 kelime prompter konuşma metni)";
-
-        var minMatch = Regex.Match(targetLength, @"(\d+)\s*(?:dk|dakika)", RegexOptions.IgnoreCase);
-        if (minMatch.Success && int.TryParse(minMatch.Groups[1].Value, out int mins) && mins > 0)
         {
-            int scenes = Math.Max(4, (int)Math.Ceiling(mins / 3.0));
-            int words = mins * 140;
-            return $"{mins} Dakika (En az {scenes} sahne, ~{words} kelime prompter konuşma metni)";
+            var defaultBudget = PrompterPacingCalculator.CalculateBudget(10);
+            int defaultScenes = PrompterPacingCalculator.CalculateTargetSceneCount(10);
+            return $"~10 Dakika ({defaultScenes} sahne, KESİN ARALIK: {defaultBudget.MinWords}–{defaultBudget.MaxWords} kelime, ideal ~{defaultBudget.TargetWords} kelime prompter konuşma metni — dakika başı ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime Türkçe stüdyo temposu; {defaultBudget.MaxWords} kelimeyi AŞMA!)";
+        }
+
+        int? parsedMinutes = PrompterPacingCalculator.TryParseTargetMinutes(targetLength);
+        if (parsedMinutes.HasValue)
+        {
+            int mins = parsedMinutes.Value;
+            var budget = PrompterPacingCalculator.CalculateBudget(mins);
+            int scenes = PrompterPacingCalculator.CalculateTargetSceneCount(mins);
+
+            var normalized = targetLength.Trim().ToLowerInvariant();
+            if (normalized is "kisa" or "kısa" || (normalized.Contains("kısa") && !normalized.Contains("dk") && !normalized.Contains("dakika")))
+                return $"~5-7 Dakika (Kısa — {scenes} sahne, KESİN ARALIK: {budget.MinWords}–{budget.MaxWords} kelime, ideal ~{budget.TargetWords} kelime prompter konuşma metni — ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk; {budget.MaxWords} kelimeyi AŞMA!)";
+            if (normalized is "orta" || (normalized.Contains("orta") && !normalized.Contains("dk") && !normalized.Contains("dakika")))
+                return $"~10 Dakika (Orta — {scenes} sahne, KESİN ARALIK: {budget.MinWords}–{budget.MaxWords} kelime, ideal ~{budget.TargetWords} kelime prompter konuşma metni — ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk; {budget.MaxWords} kelimeyi AŞMA!)";
+            if (normalized is "uzun" || (normalized.Contains("uzun") && !normalized.Contains("dk") && !normalized.Contains("dakika")))
+                return $"~15-18 Dakika (Uzun — {scenes} sahne, KESİN ARALIK: {budget.MinWords}–{budget.MaxWords} kelime, ideal ~{budget.TargetWords} kelime prompter konuşma metni — ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk; {budget.MaxWords} kelimeyi AŞMA!)";
+
+            return $"{mins} Dakika ({scenes} sahne, KESİN ARALIK: {budget.MinWords}–{budget.MaxWords} kelime, ideal ~{budget.TargetWords} kelime prompter konuşma metni — dakika başı ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime Türkçe stüdyo temposu; {budget.MaxWords} kelimeyi AŞMA!)";
         }
 
         return targetLength;
@@ -913,7 +919,22 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
     {
         var prompt = string.Format(PromptTemplates.SynthesisVideoPlanPrompt, topic, NormalizeTargetLength(targetLength), contextData);
         var raw = await CallLlmAsync(prompt, ct);
-        return NormalizeMarkdownOutput(raw, isVideoPlan: true);
+        var normalized = NormalizeMarkdownOutput(raw, isVideoPlan: true);
+
+        int? parsedMinutes = PrompterPacingCalculator.TryParseTargetMinutes(targetLength);
+        if (parsedMinutes.HasValue)
+        {
+            var budget = PrompterPacingCalculator.CalculateBudget(parsedMinutes.Value);
+            normalized = await TightenBatchIfOverBudgetAsync(
+                normalized,
+                topic,
+                $"Hedef Süre: {parsedMinutes.Value} dk — Tüm sahneler toplamda {budget.MinWords}–{budget.MaxWords} kelime aralığında olmalı.",
+                budget,
+                0,
+                ct);
+        }
+
+        return normalized;
     }
 
     public async Task<string> GenerateGroundedVideoPlanAsync(string topic, string targetLength, string contextData, string researchSummary, CancellationToken ct = default)
@@ -930,7 +951,22 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             contextData,
             researchSummary);
         var raw = await CallLlmAsync(prompt, ct);
-        return NormalizeMarkdownOutput(raw, isVideoPlan: true);
+        var normalized = NormalizeMarkdownOutput(raw, isVideoPlan: true);
+
+        int? parsedMinutes = PrompterPacingCalculator.TryParseTargetMinutes(targetLength);
+        if (parsedMinutes.HasValue)
+        {
+            var budget = PrompterPacingCalculator.CalculateBudget(parsedMinutes.Value);
+            normalized = await TightenBatchIfOverBudgetAsync(
+                normalized,
+                topic,
+                $"Hedef Süre: {parsedMinutes.Value} dk — Tüm sahneler toplamda {budget.MinWords}–{budget.MaxWords} kelime aralığında olmalı.",
+                budget,
+                0,
+                ct);
+        }
+
+        return normalized;
     }
 
     public async Task<string> ExtractClaimsAsync(string text, CancellationToken ct = default)
@@ -1028,8 +1064,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         }
 
         int hedefSureDk = Math.Clamp(request.HedefSureDk > 0 ? request.HedefSureDk : 15, 3, 90);
-        int sceneCount = Math.Max(5, (int)Math.Ceiling(hedefSureDk / 3.0));
-        int targetTotalWords = hedefSureDk * 145;
+        int sceneCount = PrompterPacingCalculator.CalculateTargetSceneCount(hedefSureDk);
+        var episodeBudget = PrompterPacingCalculator.CalculateBudget(hedefSureDk);
+        string episodeBudgetSummary = $"{episodeBudget.MinWords}–{episodeBudget.MaxWords} kelime (ideal ~{episodeBudget.TargetWords})";
         int toplamBolum = Math.Max(request.ToplamBolum, request.BolumNo);
 
         var authorThesisDirective = BuildEpisodeAuthorThesisDirective(request);
@@ -1056,7 +1093,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             request.AnaFikir,
             hedefSureDk,
             sceneCount,
-            targetTotalWords,
+            episodeBudgetSummary,
             effectiveAudience,
             string.IsNullOrWhiteSpace(request.BolumKonulariJson) ? "[]" : request.BolumKonulariJson,
             string.IsNullOrWhiteSpace(request.SahneIskeletiJson) ? "[]" : request.SahneIskeletiJson,
@@ -1097,7 +1134,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var videoPlanSb = new StringBuilder();
         videoPlanSb.AppendLine($"# {request.CalismaBasligi}");
         videoPlanSb.AppendLine($"**Video Tipi:** Uzun Formatlı Stüdyo Analizi / Seri Bölüm {request.BolumNo}/{toplamBolum}");
-        videoPlanSb.AppendLine($"**Hedef Süre:** {hedefSureDk} Dakika (~{targetTotalWords} kelime prompter konuşma metni)");
+        videoPlanSb.AppendLine($"**Hedef Süre:** {hedefSureDk} Dakika ({episodeBudget.MinWords}–{episodeBudget.MaxWords} kelime, ideal ~{episodeBudget.TargetWords} kelime prompter konuşma metni — ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk)");
         if (!string.IsNullOrWhiteSpace(request.Kanca))
             videoPlanSb.AppendLine($"**Açılış Kancası:** {request.Kanca}");
         if (!string.IsNullOrWhiteSpace(request.AnaFikir))
@@ -1123,7 +1160,8 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 : $"Sahne {firstNo}-{lastNo} / {plannedScenes.Count}";
 
             int batchMinutes = Math.Max(1, batch.Sum(s => s.TahminiSureDk));
-            int batchMinWords = Math.Max(batch.Count * 240, batchMinutes * 140);
+            var batchBudget = PrompterPacingCalculator.CalculateBudget(batchMinutes);
+            string batchBudgetRangeText = $"{batchBudget.MinWords}–{batchBudget.MaxWords} kelime (ideal ~{batchBudget.TargetWords} kelime; {batchBudget.MaxWords} kelimeyi KESİNLİKLE AŞMA!)";
 
             var batchTargetDesc = FormatTargetBatchInstructions(batch, plannedScenes.Count);
 
@@ -1141,10 +1179,17 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
                 previousClosingContext,
                 batchTargetDesc,
                 request.KaynakBaglamiText,
-                batchMinWords);
+                batchBudgetRangeText);
 
             var batchMarkdownRaw = await CallLlmAsync(batchPrompt, ct, taskType: "videoplan");
             var cleanedBatch = CleanSceneBatchOutput(batchMarkdownRaw, request.CalismaBasligi);
+            cleanedBatch = await TightenBatchIfOverBudgetAsync(
+                cleanedBatch,
+                groupLabel,
+                batchTargetDesc,
+                batchBudget,
+                request.BolumNo,
+                ct);
 
             if (!string.IsNullOrWhiteSpace(cleanedBatch))
             {
@@ -1273,8 +1318,8 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         // ─── AŞAMA 2 (KORUYUCU + PLAN UYUMLU): Onaylanmış Yeni Planın (Plan v2) Sahnelerini, Plan v1 Metnini Koruyarak Yaz ───
         int hedefSureDk = Math.Max(4, request.HedefSureDk);
         int toplamBolum = Math.Max(request.BolumNo, request.ToplamBolum);
-        int targetTotalWords = Math.Max(600, hedefSureDk * 140);
-        int fallbackSceneCount = Math.Clamp((int)Math.Ceiling(hedefSureDk / 2.2), 4, 10);
+        var episodeBudget = PrompterPacingCalculator.CalculateBudget(hedefSureDk);
+        int fallbackSceneCount = PrompterPacingCalculator.CalculateTargetSceneCount(hedefSureDk);
 
         var plannedScenes = NormalizeAndEnforceSceneDurations(
             request.SahneIskeletiJson,
@@ -1291,7 +1336,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         var expandedPlanBuilder = new StringBuilder();
         expandedPlanBuilder.AppendLine($"# Bölüm {request.BolumNo}: {request.CalismaBasligi}");
         expandedPlanBuilder.AppendLine($"**Video Tipi:** Uzun Formatlı Stüdyo Analizi / Seri Bölüm {request.BolumNo}/{toplamBolum}");
-        expandedPlanBuilder.AppendLine($"**Hedef Süre:** ~{hedefSureDk} Dakika (~{targetTotalWords} kelime prompter konuşma metni)");
+        expandedPlanBuilder.AppendLine($"**Hedef Süre:** ~{hedefSureDk} Dakika ({episodeBudget.MinWords}–{episodeBudget.MaxWords} kelime, ideal ~{episodeBudget.TargetWords} kelime prompter konuşma metni — ~{PrompterPacingCalculator.TargetWordsPerMinute} kelime/dk)");
         if (!string.IsNullOrWhiteSpace(request.Kanca))
             expandedPlanBuilder.AppendLine($"**Açılış Kancası:** {request.Kanca}");
         if (!string.IsNullOrWhiteSpace(request.AnaFikir))
@@ -1321,14 +1366,15 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             }
 
             var batchTargetDesc = FormatTargetBatchInstructions(batch, plannedScenes.Count);
-            int batchMinWords = Math.Max(batch.Count * 200, batch.Sum(s => s.TahminiSureDk) * 135);
+            int batchMinutes = Math.Max(1, batch.Sum(s => s.TahminiSureDk));
+            var batchBudget = PrompterPacingCalculator.CalculateBudget(batchMinutes);
 
             var batchPrompt = BuildAnchoredSceneBatchPrompt(
                 request,
                 authorThesisDirective,
                 groupLabel,
                 batchTargetDesc,
-                batchMinWords,
+                batchBudget,
                 allScenesOverviewJson,
                 previousClosingContext,
                 baseScriptPool,
@@ -1336,6 +1382,13 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
             var rawBatch = await CallLlmAsync(batchPrompt, ct, taskType: "videoplan");
             var cleanedBatch = CleanSceneBatchOutput(rawBatch, request.CalismaBasligi);
+            cleanedBatch = await TightenBatchIfOverBudgetAsync(
+                cleanedBatch,
+                groupLabel,
+                batchTargetDesc,
+                batchBudget,
+                request.BolumNo,
+                ct);
 
             if (!string.IsNullOrWhiteSpace(cleanedBatch))
             {
@@ -1395,7 +1448,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         string authorThesisDirective,
         string groupLabel,
         string batchTargetDesc,
-        int batchMinWords,
+        PrompterWordBudget batchBudget,
         string allScenesOverviewJson,
         string previousClosingContext,
         string existingSavedScriptPool,
@@ -1411,7 +1464,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
             İKİLİ TEMEL GÖREV (HEM YENİ PLANA %100 UYUM HEM MEVCUT CÜMLE KORUMASI):
             1. **ONAYLANMIŞ YENİ PLAN İSKELETİNE (%100 ZORUNLU UYUM):**
-               Aşağıdaki `BU GRUPTA YAZILACAK YENİ PLAN SAHNELERİ` listesinde yer alan sahne numaralarını, sahne başlıklarını (`## Sahne X: ...`), kesin zaman aralıklarını, minimum kelime hedefini (bu grup için toplam en az **{{batchMinWords}} kelime** prompter metni) ve sahnede işlenmesi emredilen **tüm yeni argümanları, düşünürleri, kavramları ve temsilleri** EKSİKSİZ İŞLE! Eski metinle tıpatıp aynı kalıp yeni plandaki eklemeleri veya yeni sahne başlıklarını atlamak KESİNLİKLE YASAKTIR!
+               Aşağıdaki `BU GRUPTA YAZILACAK YENİ PLAN SAHNELERİ` listesinde yer alan sahne numaralarını, sahne başlıklarını (`## Sahne X: ...`), kesin zaman aralıklarını, kesin kelime bütçesini (bu grup için toplam prompter metni KESİNLİKLE **{{batchBudget.MinWords}}–{{batchBudget.MaxWords}} kelime** aralığında, ideal ~**{{batchBudget.TargetWords}} kelime** olmalıdır — ~105 kelime/dk Türkçe stüdyo temposu; **{{batchBudget.MaxWords}} kelime üst sınırını KESİNLİKLE AŞMA!**) ve sahnede işlenmesi emredilen **tüm yeni argümanları, düşünürleri, kavramları ve temsilleri** EKSİKSİZ İŞLE! Eski metinle tıpatıp aynı kalıp yeni plandaki eklemeleri atlamak kadar metni dolgu cümlelerle şişirmek de YASAKTIR!
             2. **MEVCUT KAYDEDİLMİŞ METNİN CÜMLELERİNİ VE ÜSLUBUNU KORUYARAK ENTEGRE ET:**
                Aşağıdaki `KORUNACAK MEVCUT SENARYO HAVUZU (Önceki Versiyondan Kaydedilen Son Metin)` içinde bu sahnenin konularını anlatan mevcut paragraflar ve cümleler varsa; yazarın özenle düzenlediği o cümleleri, akıcı stüdyo dilini ve kurguyu SİLME veya sıfırdan bozma! O mevcut cümleleri sahnenin omurgası olarak koru; yeni planın ve `YENİ VE GÜNCEL KAYNAK KANITLARI ([K#])` bloğunun getirdiği yeni argümanları, ince kelâmî/felsefi ayrımları ve somut örnekleri (dış kaynak konuşmacı/kanal ismi anmadan, kendi özgün stüdyo dilimizle) mevcut paragrafların içine ve devamına pürüzsüz geçişlerle ör!
             3. {{closingRule}}
@@ -1521,7 +1574,10 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
         public string Baslik { get; set; } = string.Empty;
         public int TahminiSureDk { get; set; }
         public string ZamanAraligi { get; set; } = string.Empty;
+        public int MinKelime { get; set; }
         public int HedefKelime { get; set; }
+        public int MaxKelime { get; set; }
+        public string ParagrafOnerisi { get; set; } = string.Empty;
         public string IslenecekArgumanVeDusunurler { get; set; } = string.Empty;
         public string YazarTeziBaglantisi { get; set; } = string.Empty;
         public List<string> AtananKanitKodlari { get; set; } = new();
@@ -1570,8 +1626,9 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             }
         }
 
-        // S = max(5, ceil(HedefSureDk / 3.0)) alt sınırını garanti et
-        while (scenes.Count < targetSceneCount)
+        // Hedef süreye uygun sahne sayısını (dakikayı aşmayacak şekilde) garanti et
+        int effectiveMinSceneCount = Math.Min(targetSceneCount, Math.Max(1, hedefSureDk));
+        while (scenes.Count < effectiveMinSceneCount)
         {
             var longest = scenes.OrderByDescending(s => s.TahminiSureDk).First();
             int idxLongest = scenes.IndexOf(longest);
@@ -1634,7 +1691,12 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             int endMin = elapsedMin + scenes[i].TahminiSureDk;
             elapsedMin = endMin;
             scenes[i].ZamanAraligi = $"{startMin:D2}:00 - {endMin:D2}:00";
-            scenes[i].HedefKelime = Math.Max(220, scenes[i].TahminiSureDk * 145);
+
+            var sceneBudget = PrompterPacingCalculator.CalculateBudget(scenes[i].TahminiSureDk);
+            scenes[i].MinKelime = sceneBudget.MinWords;
+            scenes[i].HedefKelime = sceneBudget.TargetWords;
+            scenes[i].MaxKelime = sceneBudget.MaxWords;
+            scenes[i].ParagrafOnerisi = sceneBudget.ParagraphGuidance;
         }
 
         return scenes;
@@ -1738,7 +1800,7 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
 
             sb.AppendLine($"- **## Sahne {s.SahneNo}: {s.Baslik}** {roleNote}");
             sb.AppendLine($"  * Kesin Zaman Aralığı: `{s.ZamanAraligi}` ({s.TahminiSureDk} dakika)");
-            sb.AppendLine($"  * Minimum Prompter Kelime Hedefi: **En az {s.HedefKelime} kelime** (3–5 dolu paragraf)");
+            sb.AppendLine($"  * Prompter Kelime Bütçesi (KESİN ARALIK): **{s.MinKelime}–{s.MaxKelime} kelime** (ideal ~**{s.HedefKelime} kelime**, {s.ParagrafOnerisi}; **{s.MaxKelime} kelime üst sınırını KESİNLİKLE AŞMA!**)");
             if (!string.IsNullOrWhiteSpace(s.IslenecekArgumanVeDusunurler))
                 sb.AppendLine($"  * İşlenecek Düşünürler, Argümanlar ve Örnekler: {s.IslenecekArgumanVeDusunurler}");
             if (!string.IsNullOrWhiteSpace(s.YazarTeziBaglantisi))
@@ -1776,6 +1838,73 @@ public class ClaudeSynthesisProvider : ISynthesisProvider
             "$1\n>\n");
 
         return text.Trim();
+    }
+
+    private async Task<string> TightenBatchIfOverBudgetAsync(
+        string markdown,
+        string groupLabel,
+        string batchTargetDesc,
+        PrompterWordBudget budget,
+        int bolumNo,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            return markdown;
+
+        int actualWords = PrompterPacingCalculator.CountPrompterWords(markdown);
+        if (!PrompterPacingCalculator.IsOverBudget(actualWords, budget))
+            return markdown;
+
+        _logger.LogWarning(
+            "Bölüm {BolumNo} ({GroupLabel}): Prompter kelime sayısı ({Actual}) üst sınırı aştı (Max: {Max}, Hedef: {Target}). Otomatik sıkılaştırma uygulanıyor...",
+            bolumNo, groupLabel, actualWords, budget.MaxWords, budget.TargetWords);
+
+        try
+        {
+            var tightenPrompt = string.Format(
+                PromptTemplates.EpisodeSceneBatchTightenPrompt,
+                groupLabel,
+                actualWords,
+                budget.MinWords,
+                budget.TargetWords,
+                budget.MaxWords,
+                batchTargetDesc,
+                markdown);
+
+            var rawTightened = await CallLlmAsync(tightenPrompt, ct, taskType: "videoplan");
+            var cleanedTightened = CleanSceneBatchOutput(rawTightened, groupLabel);
+
+            if (string.IsNullOrWhiteSpace(cleanedTightened))
+                return markdown;
+
+            bool hadScenes = markdown.Contains("## Sahne", StringComparison.OrdinalIgnoreCase);
+            if (hadScenes && !cleanedTightened.Contains("## Sahne", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Bölüm {BolumNo} ({GroupLabel}): Sıkılaştırılmış çıktıda '## Sahne' başlıkları kaybolduğu için orijinal metin korunuyor.", bolumNo, groupLabel);
+                return markdown;
+            }
+
+            int tightenedWords = PrompterPacingCalculator.CountPrompterWords(cleanedTightened);
+            int minAcceptable = (int)Math.Round(budget.MinWords * 0.65);
+
+            if (tightenedWords < actualWords && tightenedWords >= minAcceptable)
+            {
+                _logger.LogInformation(
+                    "Bölüm {BolumNo} ({GroupLabel}): Prompter kelime sayısı {Actual} -> {Tightened} kelimeye sıkılaştırıldı (Hedef: {Min}-{Max}).",
+                    bolumNo, groupLabel, actualWords, tightenedWords, budget.MinWords, budget.MaxWords);
+                return cleanedTightened;
+            }
+
+            _logger.LogWarning(
+                "Bölüm {BolumNo} ({GroupLabel}): Sıkılaştırma sonucu ({Tightened} kelime) kabul aralığı dışında kaldı, orijinal metin korunuyor.",
+                bolumNo, groupLabel, tightenedWords);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Bölüm {BolumNo} ({GroupLabel}): Otomatik sıkılaştırma çağrısı başarısız oldu, orijinal metin korunuyor.", bolumNo, groupLabel);
+        }
+
+        return markdown;
     }
 
     private static string ExtractClosingContextForNextBatch(string batchMarkdown, int lastSceneNo)

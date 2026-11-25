@@ -293,4 +293,30 @@ public class AiProviderSettingsTests : IDisposable
             .ThrowAsync<Exception>()
             .WithMessage("*Yerel Proxy (Antigravity)*gemini-2.5-pro*AllowFallbackToSecondaryProvider=false*");
     }
+
+    [Fact]
+    public async Task UpdateAndGetSettings_ShouldTrimAndPersistYouTubeApiKey()
+    {
+        var (service, store) = CreateSettingsService();
+
+        var updated = await service.UpdateSettingsAsync(new AiProviderSettingsDto
+        {
+            ActiveProvider = "openrouter",
+            YouTubeApiKey = "  AIzaSyTestYouTubeKey123  "
+        });
+
+        updated.YouTubeApiKey.Should().Be("AIzaSyTestYouTubeKey123");
+        store.Should().ContainKey("videoozet:settings:ai_provider");
+        store["videoozet:settings:ai_provider"].Should().Contain("AIzaSyTestYouTubeKey123");
+
+        var reloaded = await service.GetSettingsAsync();
+        reloaded.YouTubeApiKey.Should().Be("AIzaSyTestYouTubeKey123");
+
+        var cleared = await service.UpdateSettingsAsync(new AiProviderSettingsDto
+        {
+            ActiveProvider = "openrouter",
+            YouTubeApiKey = "   "
+        });
+        cleared.YouTubeApiKey.Should().BeEmpty();
+    }
 }

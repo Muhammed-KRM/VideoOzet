@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using VideoOzet.Business.DTOs;
 using VideoOzet.Business.DTOs.Video;
@@ -17,4 +18,6 @@ public interface IVideoService
     Task<int> ReindexAllByEgitimIdAsync(Guid egitimId);
     Task UpdateKullanimTuruAsync(Guid id, KaynakKullanimTuru kullanimTuru);
     Task<KaynakIcerikDetayDto?> GetVideoIcerikDetayAsync(Guid id);
+    Task<InspectRemoteUrlResponseDto> InspectRemoteUrlAsync(Guid egitimId, InspectRemoteUrlRequestDto request, CancellationToken ct = default);
+    Task<ImportRemoteVideosResponseDto> ImportRemoteVideosAsync(Guid egitimId, ImportRemoteVideosRequestDto request, CancellationToken ct = default);
 }

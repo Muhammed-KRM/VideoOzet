@@ -1,7 +1,16 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import {
+  ImportRemoteVideosRequestDto,
+  ImportRemoteVideosResponseDto,
+  InspectRemoteUrlRequestDto,
+  InspectRemoteUrlResponseDto,
+  YouTubeDurationFilter,
+  YouTubeSearchResponseDto,
+  YouTubeVideoDetailDto
+} from '../models/remote-import.models';
 
 export interface CourseSourceCardDto {
   kaynakId: string;
@@ -107,6 +116,44 @@ export class ApiService {
 
   getVideoIcerik(egitimId: string, videoId: string): Observable<any> {
     return this.http.get<any>(`${this.baseUrl}/egitimler/${egitimId}/videolar/${videoId}/icerik`);
+  }
+
+  // --- Uzaktan Video / YouTube Arama & Aktarım ---
+
+  searchYouTube(
+    q: string,
+    maxResults: number = 15,
+    duration: YouTubeDurationFilter = 'any'
+  ): Observable<YouTubeSearchResponseDto> {
+    const params = new HttpParams()
+      .set('q', q)
+      .set('maxResults', String(maxResults))
+      .set('duration', duration);
+    return this.http.get<YouTubeSearchResponseDto>(`${this.baseUrl}/youtube/search`, { params });
+  }
+
+  getYouTubeVideoDetail(videoId: string): Observable<YouTubeVideoDetailDto> {
+    return this.http.get<YouTubeVideoDetailDto>(`${this.baseUrl}/youtube/video/${encodeURIComponent(videoId)}`);
+  }
+
+  inspectRemoteUrl(
+    egitimId: string,
+    payload: InspectRemoteUrlRequestDto
+  ): Observable<InspectRemoteUrlResponseDto> {
+    return this.http.post<InspectRemoteUrlResponseDto>(
+      `${this.baseUrl}/egitimler/${egitimId}/videolar/inspect-url`,
+      payload
+    );
+  }
+
+  importRemoteVideos(
+    egitimId: string,
+    payload: ImportRemoteVideosRequestDto
+  ): Observable<ImportRemoteVideosResponseDto> {
+    return this.http.post<ImportRemoteVideosResponseDto>(
+      `${this.baseUrl}/egitimler/${egitimId}/videolar/import-remote`,
+      payload
+    );
   }
 
   getDokumanIcerik(egitimId: string, dokumanId: string): Observable<any> {

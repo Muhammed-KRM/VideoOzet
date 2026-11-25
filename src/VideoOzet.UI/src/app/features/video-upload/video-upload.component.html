@@ -1,3 +1,31 @@
+<!-- 3 Sekmeli Kaynak Ekleme Alanı -->
+<div class="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1.5 rounded-xl bg-slate-900/95 border border-slate-700/80 shadow-inner">
+  <button
+    type="button"
+    (click)="activeTab = 'file'"
+    [class]="activeTab === 'file' ? 'bg-slate-700 text-white shadow font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="py-2 px-3 rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+  >
+    <span>📁 Dosya Yükle</span>
+  </button>
+  <button
+    type="button"
+    (click)="activeTab = 'youtube'"
+    [class]="activeTab === 'youtube' ? 'bg-rose-600 text-white shadow shadow-rose-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="py-2 px-3 rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+  >
+    <span>▶️ YouTube'da Ara &amp; Link Ekle</span>
+  </button>
+  <button
+    type="button"
+    (click)="activeTab = 'direct-url'"
+    [class]="activeTab === 'direct-url' ? 'bg-indigo-600 text-white shadow shadow-indigo-600/30 font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'"
+    class="py-2 px-3 rounded-lg text-xs sm:text-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+  >
+    <span>🌐 Kendi Sitem / Direct URL</span>
+  </button>
+</div>
+
 <!-- Kaynak Kullanım Türü Seçici -->
 <div class="mb-4 bg-slate-900/90 p-1.5 rounded-xl border border-slate-700/80 flex flex-col sm:flex-row gap-1.5 shadow-inner">
   <button 
@@ -54,8 +82,9 @@
   </button>
 </div>
 
-<!-- Sürükle Bırak Yükleme Alanı -->
+<!-- Sürükle Bırak Yükleme Alanı (Sekme 1: Dosya Yükle) -->
 <div 
+  *ngIf="activeTab === 'file'"
   class="relative border-2 border-dashed rounded-xl p-8 text-center transition-all"
   [ngClass]="{
     'border-blue-500 bg-blue-500/10': isDragging && selectedKullanimTuru === 0,
@@ -111,4 +140,56 @@
     </div>
     <p class="text-xs text-slate-400 mt-2">%{{ progressPercent }} tamamlandı. Lütfen tarayıcıyı kapatmayın.</p>
   </div>
+</div>
+
+<!-- Sekme 2: YouTube'da Ara & Link Ekle -->
+<div *ngIf="activeTab === 'youtube'" class="space-y-4">
+  <div class="flex items-center gap-2 p-1 rounded-xl bg-slate-900/90 border border-slate-700/70 w-fit">
+    <button
+      type="button"
+      (click)="youtubeSubMode = 'search'"
+      [class]="youtubeSubMode === 'search' ? 'bg-rose-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+      class="px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+    >
+      🔍 YouTube'da Ara (Keşfet)
+    </button>
+    <button
+      type="button"
+      (click)="youtubeSubMode = 'link'"
+      [class]="youtubeSubMode === 'link' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-400 hover:text-white'"
+      class="px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+    >
+      🔗 Link / Playlist Yapıştır
+    </button>
+  </div>
+
+  <app-youtube-browser
+    *ngIf="youtubeSubMode === 'search'"
+    [egitimId]="egitimId"
+    [kullanimTuru]="selectedKullanimTuru"
+    [indekslemeTuru]="selectedIndekslemeTuru"
+    (kullanimTuruChange)="selectedKullanimTuru = $event"
+    (indekslemeTuruChange)="selectedIndekslemeTuru = $event"
+    (importComplete)="onRemoteImportComplete()"
+  ></app-youtube-browser>
+
+  <app-url-import
+    *ngIf="youtubeSubMode === 'link'"
+    [egitimId]="egitimId"
+    [kullanimTuru]="selectedKullanimTuru"
+    [indekslemeTuru]="selectedIndekslemeTuru"
+    mode="youtube-link"
+    (importComplete)="onRemoteImportComplete()"
+  ></app-url-import>
+</div>
+
+<!-- Sekme 3: Kendi Sitem / Direct URL -->
+<div *ngIf="activeTab === 'direct-url'">
+  <app-url-import
+    [egitimId]="egitimId"
+    [kullanimTuru]="selectedKullanimTuru"
+    [indekslemeTuru]="selectedIndekslemeTuru"
+    mode="direct-url"
+    (importComplete)="onRemoteImportComplete()"
+  ></app-url-import>
 </div>

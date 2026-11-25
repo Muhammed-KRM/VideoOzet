@@ -49,16 +49,16 @@ describe('ApiService', () => {
     req.flush(mockData);
   });
 
-  it('should post video upload to correct endpoint', () => {
+  it('should post file upload to correct endpoint', () => {
     const formData = new FormData();
     formData.append('file', new Blob(['test'], { type: 'video/mp4' }), 'test.mp4');
     const mockResponse = { success: true };
 
-    service.uploadVideo('123', formData).subscribe(res => {
+    service.uploadFile('123', formData).subscribe(res => {
       expect(res).toEqual(mockResponse);
     });
 
-    const req = httpMock.expectOne(`${environment.apiUrl}/egitimler/123/videolar/upload`);
+    const req = httpMock.expectOne(`${environment.apiUrl}/egitimler/123/dosyalar/upload`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toBe(formData);
     req.flush(mockResponse);

@@ -64,6 +64,29 @@ public class VideolarController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("inspect-url")]
+    public async Task<IActionResult> InspectUrl(Guid egitimId, [FromBody] InspectRemoteUrlRequestDto request, CancellationToken ct)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Url))
+            return BadRequest("Geçerli bir URL girilmelidir.");
+
+        var result = await _videoService.InspectRemoteUrlAsync(egitimId, request, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("import-remote")]
+    public async Task<IActionResult> ImportRemote(Guid egitimId, [FromBody] ImportRemoteVideosRequestDto request, CancellationToken ct)
+    {
+        if (request == null || request.Items == null || request.Items.Count == 0)
+            return BadRequest("İçe aktarılacak en az bir video öğesi seçilmelidir.");
+
+        var result = await _videoService.ImportRemoteVideosAsync(egitimId, request, ct);
+        if (result.EklenenVideolar.Count == 0 && result.AtlananDuplicateIdler.Count > 0)
+            return Conflict(result);
+
+        return Ok(result);
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteVideo(Guid egitimId, Guid id)
     {
@@ -94,6 +117,7 @@ public class VideolarController : ControllerBase
         
         var baseQueues = new[]
         {
+            "DownloadRemoteVideo",
             "SummarizeVideo",
             "ExtractTranscript",
             "IndexSummary",

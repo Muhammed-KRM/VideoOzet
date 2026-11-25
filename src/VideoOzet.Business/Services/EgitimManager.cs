@@ -193,7 +193,7 @@ public class EgitimManager : IEgitimService
                 Id = newVideoId,
                 EgitimId = newEgitimId,
                 Baslik = v.Baslik,
-                DosyaYolu = v.DosyaYolu,
+                DosyaYolu = v.DosyaYolu ?? string.Empty,
                 SesYolu = v.SesYolu,
                 Sure = v.Sure,
                 Sira = v.Sira,
@@ -201,6 +201,14 @@ public class EgitimManager : IEgitimService
                 IslemDurumu = v.IslemDurumu,
                 KullanimTuru = v.KullanimTuru,
                 IndekslemeTuru = v.IndekslemeTuru,
+                KaynakPlatform = v.KaynakPlatform,
+                KaynakUrl = v.KaynakUrl,
+                DisKaynakId = v.DisKaynakId,
+                KanalAdi = v.KanalAdi,
+                ThumbnailUrl = v.ThumbnailUrl,
+                AlimModu = v.AlimModu,
+                TranskriptKaliteSkoru = v.TranskriptKaliteSkoru,
+                TranskriptKaynakNotu = v.TranskriptKaynakNotu,
                 OlusturmaTarihi = DateTime.UtcNow,
                 IslemTamamlanmaTarihi = v.IslemTamamlanmaTarihi
             };

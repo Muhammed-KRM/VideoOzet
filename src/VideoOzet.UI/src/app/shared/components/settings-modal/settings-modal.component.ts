@@ -595,6 +595,37 @@ import { SettingsService, AiProviderSettings, ModelOption } from '../../../core/
               </div>
             </div>
 
+            <!-- Opsiyonel YouTube Data API v3 Anahtarı -->
+            <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <label class="text-xs font-semibold text-rose-300 flex items-center gap-1.5">
+                  ▶️ YouTube Data API v3 Anahtarı (İsteğe Bağlı)
+                </label>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  Opsiyonel
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-400 leading-relaxed">
+                Boş bırakılırsa veya günlük arama kotası dolarsa uygulama içi YouTube araması otomatik olarak yerel <code class="text-cyan-300">yt-dlp</code> motoru üzerinden API anahtarı gerektirmeden çalışır.
+              </p>
+              <div class="relative">
+                <input
+                  [type]="showYouTubeKey() ? 'text' : 'password'"
+                  [ngModel]="form().youTubeApiKey || ''"
+                  (ngModelChange)="updateField('youTubeApiKey', $event)"
+                  placeholder="AIzaSy... (İsteğe bağlı YouTube Data API v3 Key)"
+                  class="w-full px-3.5 py-2 pr-20 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-rose-400"
+                />
+                <button
+                  type="button"
+                  (click)="showYouTubeKey.set(!showYouTubeKey())"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] rounded bg-slate-800 text-slate-300 hover:text-white"
+                >
+                  {{ showYouTubeKey() ? 'Gizle' : 'Göster' }}
+                </button>
+              </div>
+            </div>
+
             <!-- Bağlantı Test Sonucu -->
             @if (settingsService.testResult(); as result) {
               <div
@@ -659,6 +690,7 @@ export class SettingsModalComponent {
   readonly showApiKey = signal(false);
   readonly showGroqKey = signal(false);
   readonly showProxyKey = signal(false);
+  readonly showYouTubeKey = signal(false);
   readonly saveMessage = signal('');
   readonly modelSearchQuery = signal('');
   readonly selectedCategoryChip = signal('ALL');
@@ -695,7 +727,8 @@ export class SettingsModalComponent {
     antigravitySummaryModel: 'gemini-3.8-flash-tiered',
     antigravityVideoPlanModel: 'claude-3-7-sonnet-tiered',
     antigravityQcModel: 'gemini-3.8-flash-tiered',
-    allowFallbackToSecondaryProvider: false
+    allowFallbackToSecondaryProvider: false,
+    youTubeApiKey: ''
   });
 
   readonly activeSummaryModel = computed(() => {

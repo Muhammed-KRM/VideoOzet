@@ -27,6 +27,7 @@ export interface AiProviderSettings {
   antigravityVideoPlanModel?: string;
   antigravityQcModel?: string;
   allowFallbackToSecondaryProvider?: boolean;
+  youTubeApiKey?: string;
 }
 
 export interface TestConnectionResult {
@@ -71,7 +72,8 @@ export class SettingsService {
     antigravitySummaryModel: 'gemini-3.8-flash-tiered',
     antigravityVideoPlanModel: 'claude-3-7-sonnet-tiered',
     antigravityQcModel: 'gemini-3.8-flash-tiered',
-    allowFallbackToSecondaryProvider: false
+    allowFallbackToSecondaryProvider: false,
+    youTubeApiKey: ''
   });
 
   readonly openRouterModels = signal<ModelOption[]>([]);
@@ -121,7 +123,8 @@ export class SettingsService {
       antigravitySummaryModel: proxySummary,
       antigravityVideoPlanModel: proxyVideoPlan,
       antigravityQcModel: proxyQc,
-      allowFallbackToSecondaryProvider: d.allowFallbackToSecondaryProvider ?? false
+      allowFallbackToSecondaryProvider: d.allowFallbackToSecondaryProvider ?? false,
+      youTubeApiKey: d.youTubeApiKey ?? current.youTubeApiKey ?? ''
     };
   }
 

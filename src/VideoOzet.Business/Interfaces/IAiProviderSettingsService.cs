@@ -103,6 +103,9 @@ public record AiProviderSettingsDto
     /// <summary>Ana model hata verirse yedek sağlayıcıya (örn. Groq) düşülmesine izin ver</summary>
     public bool AllowFallbackToSecondaryProvider { get; set; } = false;
 
+    /// <summary>İsteğe bağlı YouTube Data API v3 Anahtarı (boş bırakılırsa otomatik yt-dlp araması kullanılır)</summary>
+    public string YouTubeApiKey { get; set; } = "";
+
     public string? GetRawAntigravityProxySummaryModel() => _antigravityProxySummaryModel;
     public string? GetRawAntigravitySummaryModel() => _antigravitySummaryModel;
     public string? GetRawAntigravityProxyVideoPlanModel() => _antigravityProxyVideoPlanModel;

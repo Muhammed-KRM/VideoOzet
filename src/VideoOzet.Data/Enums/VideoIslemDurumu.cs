@@ -10,5 +10,6 @@ public enum VideoIslemDurumu
     OzetlemeTamamlandi = 6,
     IndekslemeBasladi = 7,
     Tamamlandi = 8,
-    Hata = 9
+    Hata = 9,
+    Indiriliyor = 10
 }
